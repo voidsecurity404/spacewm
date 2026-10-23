@@ -64,3 +64,34 @@ pub fn spawn_terminal(state: &mut SpaceState) {
         tracing::warn!("{err}");
     }
 }
+
+/// Export our session variables to the D-Bus activation environment and systemd --user,
+/// so services started on demand (xdg-desktop-portal, mako, pipewire...) connect to
+/// spacewm. Only meaningful on a real session (DRM): nested, they already have a desktop.
+pub fn update_activation_environment() {
+    if !in_path("dbus-update-activation-environment") {
+        tracing::warn!("dbus-update-activation-environment not found; portals may not work");
+        return;
+    }
+    let mut command = Command::new("dbus-update-activation-environment");
+    command
+        .args(["--systemd", "WAYLAND_DISPLAY", "XDG_CURRENT_DESKTOP", "XDG_SESSION_TYPE"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    // Set for the child only: changing our own environment is unsafe once threads exist.
+    if std::env::var_os("XDG_CURRENT_DESKTOP").is_none() {
+        command.env("XDG_CURRENT_DESKTOP", "spacewm");
+    }
+    if std::env::var_os("XDG_SESSION_TYPE").is_none() {
+        command.env("XDG_SESSION_TYPE", "wayland");
+    }
+    match command.spawn() {
+        Ok(mut child) => {
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+        }
+        Err(err) => tracing::warn!("failed to update activation environment: {err}"),
+    }
+}

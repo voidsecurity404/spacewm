@@ -62,6 +62,29 @@ pub struct Cli {
     #[arg(long, default_value_t = crate::world::terrain::DEFAULT_SEED)]
     pub world_seed: u64,
 
+    /// DRM backend: GPU to use (default: the boot GPU of the seat), e.g. /dev/dri/card1.
+    #[arg(long)]
+    pub gpu: Option<PathBuf>,
+
+    /// Start on the DRM backend, show the world for 10 seconds without clients, exit.
+    /// Run this first from a TTY to check that your GPU and monitor work.
+    #[arg(long)]
+    pub drm_test: bool,
+
+    /// List GPUs, connectors and modes, then exit. Safe to run anywhere: it does not
+    /// take over the display.
+    #[arg(long)]
+    pub drm_probe: bool,
+
+    /// DRM backend: don't export WAYLAND_DISPLAY to D-Bus/systemd --user. For test runs
+    /// next to another desktop of the same user, whose services must keep using it.
+    #[arg(long, hide = true)]
+    pub no_session_env: bool,
+
+    /// DRM backend without input devices (testing on a virtual display).
+    #[arg(long, hide = true)]
+    pub drm_no_input: bool,
+
     /// Headless backend: output size as WIDTHxHEIGHT.
     #[arg(long, default_value = "1280x720", value_parser = parse_size)]
     pub headless_size: (i32, i32),

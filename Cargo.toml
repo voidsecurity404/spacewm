@@ -23,6 +23,8 @@ smithay = { git = "https://github.com/Smithay/smithay", default-features = false
     "desktop",
     "xwayland",
 ] }
+# Connector scanning and EDID (monitor make/model) for the DRM backend.
+smithay-drm-extras = { git = "https://github.com/Smithay/smithay" }
 # We never `use calloop::` directly — code goes through `smithay::reexports::calloop`
 # so the versions can't drift apart. This line exists only to switch on the
 # `signals` feature (SIGINT/SIGTERM as an event source). Cargo merges features of

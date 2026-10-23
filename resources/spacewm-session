@@ -1,0 +1,29 @@
+#!/bin/sh
+# spacewm session launcher: what the login manager (or you, from a TTY) runs.
+#
+# It only sets the environment and replaces itself with spacewm (exec), so spacewm is
+# the session leader and the session ends when spacewm exits. Exporting WAYLAND_DISPLAY
+# to D-Bus / systemd --user happens inside spacewm, once its socket actually exists.
+
+# Which desktop this is: xdg-desktop-portal picks its backends by this name
+# (spacewm-portals.conf), and apps use it for per-desktop tweaks.
+export XDG_CURRENT_DESKTOP=spacewm
+export XDG_SESSION_DESKTOP=spacewm
+export XDG_SESSION_TYPE=wayland
+
+# Ask toolkits to use Wayland instead of falling back to X11.
+export MOZ_ENABLE_WAYLAND=1
+export QT_QPA_PLATFORM="wayland;xcb"
+export SDL_VIDEODRIVER=wayland
+export _JAVA_AWT_WM_NONREPARENTING=1
+
+# Keyboard layouts until the config file exists (Stage 7.2). Example for two layouts
+# switched with Alt+Shift:
+#   export XKB_DEFAULT_LAYOUT=us,ru
+#   export XKB_DEFAULT_OPTIONS=grp:alt_shift_toggle
+: "${XKB_DEFAULT_LAYOUT:=us}"
+export XKB_DEFAULT_LAYOUT
+
+# SPACEWM_BIN: run a development build instead of the installed one, e.g.
+#   SPACEWM_BIN=~/spacewm/target/release/spacewm spacewm-session
+exec "${SPACEWM_BIN:-spacewm}" --backend drm "$@"

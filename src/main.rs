@@ -25,6 +25,7 @@ use smithay::{
     reexports::{
         calloop::{
             signals::{Signal, Signals},
+            timer::{TimeoutAction, Timer},
             EventLoop,
         },
         wayland_server::Display,
@@ -34,7 +35,23 @@ use smithay::{
 use crate::{backend::Backend, cli::Cli, state::SpaceState};
 
 fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
+    if cli.drm_probe {
+        // Read-only listing; needs no session, logging setup or event loop.
+        return backend::drm::probe();
+    }
+    if rustix::process::geteuid().is_root() {
+        // Root is never needed: libseat hands the GPU and input devices to a normal user.
+        // A root compositor would make every bug (and every client) far more dangerous.
+        return Err(anyhow!(
+            "do not run spacewm as root (no sudo): start it as your user from a TTY login"
+        ));
+    }
+    if cli.drm_test {
+        // A smoke test of GPU + monitor: the bare world, no clients, quit after 10 s.
+        cli.backend = cli::BackendKind::Drm;
+        cli.spawn.clear();
+    }
     let log_path = logging::init(&cli.log_level).context("failed to init logging")?;
 
     tracing::info!(
@@ -44,7 +61,11 @@ fn main() -> anyhow::Result<()> {
         log = %log_path.display(),
         "starting spacewm"
     );
+    // Errors also go to the log file: on a TTY nobody may be watching stderr.
+    run(cli).inspect_err(|err| tracing::error!("fatal: {err:#}"))
+}
 
+fn run(cli: Cli) -> anyhow::Result<()> {
     let mut event_loop: EventLoop<SpaceState> =
         EventLoop::try_new().context("failed to create event loop")?;
     let loop_handle = event_loop.handle();
@@ -98,6 +119,24 @@ fn main() -> anyhow::Result<()> {
             state.quit();
         })
         .map_err(|e| anyhow!("failed to register signal source: {}", e.error))?;
+
+    if state.cli.drm_test {
+        let after = std::time::Duration::from_secs(10);
+        loop_handle
+            .insert_source(Timer::from_duration(after), |_, _, state: &mut SpaceState| {
+                tracing::info!("--drm-test: 10 s passed, exiting");
+                state.quit();
+                TimeoutAction::Drop
+            })
+            .map_err(|e| anyhow!("failed to register test timer: {}", e.error))?;
+    }
+
+    if state.cli.backend == cli::BackendKind::Drm && !state.cli.no_session_env {
+        // On a real session we are the first program: tell D-Bus activated services
+        // (portals, notification daemons) and systemd user units where our Wayland socket
+        // is, or they would start without WAYLAND_DISPLAY and fail.
+        spawn::update_activation_environment();
+    }
 
     for command in state.cli.spawn.clone() {
         if let Err(err) = spawn::spawn(&command, &state.socket_name) {

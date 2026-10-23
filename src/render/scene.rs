@@ -449,13 +449,22 @@ impl SceneRenderer {
 
     /// The element showing the last rendered scene, covering the output.
     pub fn element(&self) -> Option<TextureRenderElement<GlesTexture>> {
+        self.element_sized(None)
+    }
+
+    /// The scene element, optionally stretched to `size` (logical px) — for outputs whose
+    /// size differs from the texture the scene was rendered into.
+    pub fn element_sized(
+        &self,
+        size: Option<Size<i32, smithay::utils::Logical>>,
+    ) -> Option<TextureRenderElement<GlesTexture>> {
         let t = self.targets.as_ref()?;
         Some(TextureRenderElement::from_texture_render_buffer(
             (0.0, 0.0),
             &t.buffer,
             None,
             None,
-            None,
+            size,
             Kind::Unspecified,
         ))
     }

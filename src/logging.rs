@@ -62,6 +62,14 @@ pub fn init(level: &str) -> anyhow::Result<PathBuf> {
     Ok(log_path)
 }
 
+/// DRM device fds opened by the DRM backend. On a panic we drop DRM master on them
+/// FIRST, so the VT / another session can take the display back even if unwinding goes
+/// wrong.
+pub static DRM_FDS: std::sync::Mutex<Vec<i32>> = std::sync::Mutex::new(Vec::new());
+
+/// DRM_IOCTL_DROP_MASTER = _IO('d', 0x1f).
+const DRM_IOCTL_DROP_MASTER: libc::c_ulong = 0x641f;
+
 /// Log panics through tracing so they land in the log file, then run the default
 /// hook (which prints to stderr and handles RUST_BACKTRACE).
 fn install_panic_hook() {
@@ -79,6 +87,12 @@ fn install_panic_hook() {
             .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
             .unwrap_or_else(|| "<unknown location>".to_string());
         tracing::error!(%location, "panic: {message}");
+        if let Ok(fds) = DRM_FDS.try_lock() {
+            for &fd in fds.iter() {
+                // SAFETY: a plain ioctl on an fd we opened; failure is harmless here.
+                unsafe { libc::ioctl(fd, DRM_IOCTL_DROP_MASTER) };
+            }
+        }
         default_hook(info);
     }));
 }

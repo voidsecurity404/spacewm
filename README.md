@@ -13,6 +13,23 @@ just check                            # fmt + clippy -D warnings + tests
 
 Logs: stderr and `~/.local/state/spacewm/spacewm.log` (previous run in `spacewm.log.old`).
 
+## Running as a real session
+
+Keep a second TTY or an SSH session open the first few times.
+
+```sh
+spacewm --drm-probe                     # list GPUs, connectors, modes (changes nothing)
+# from a text TTY (Ctrl+Alt+F3), logged in as yourself — never with sudo:
+spacewm --drm-test                      # the island for 10 s, then back to the TTY
+spacewm --backend drm --spawn foot      # the full desktop
+just install                          # prints the sudo commands for a login-manager entry
+```
+
+On the DRM backend: **Ctrl+Alt+Backspace** always exits, Ctrl+Alt+F1..F12 switch VTs,
+the modifier is Super (Alt only when nested). `XKB_DEFAULT_LAYOUT=us,ru` and
+`XKB_DEFAULT_OPTIONS=grp:alt_shift_toggle` select keyboard layouts until the config file
+exists. If the screen ever stays black, switch to another TTY and read the log.
+
 ## Stages
 
 0. Project skeleton: CLI, logging, errors, event loop

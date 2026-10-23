@@ -154,3 +154,40 @@ Shu sababli kadr hech qachon "qotmaydi" (eng uzun kadr ~2 ms).
 Bu chuqurlik buferini to'g'ri saqlaydi va standart usul. Bloklar uchun atlas emas,
 textura massivi ishlatiladi, shunda mipmap'lar qo'shni plitkalarga "oqmaydi". Paydo bo'lish
 joyi platforma atrofida tekislangan o'tloq bo'ladi va kamera eng ochiq tomonga qaraydi.
+
+## 6-bosqich
+
+**DRM master, KMS, CRTC, connector, plane.** DRM — kernelning GPU interfeysi
+(`/dev/dri/card1`). KMS (kernel mode setting) — uning displey qismi: qaysi monitorga
+qanday rezolyutsiya va qaysi buferni ko'rsatish. *Connector* — jismoniy port (eDP-1,
+HDMI-A-1); unda monitor, uning EDID'i (ishlab chiqaruvchi, model, mm o'lchami) va
+rejimlari bor. *CRTC* — "skanlovchi": framebuffer'ni o'qib, rejim taktida connector'ga
+uzatadi (sizda 4 ta, ya'ni bir vaqtda 4 ta monitor). *Plane* — CRTC apparatda
+qo'shadigan qatlam: primary (butun kadr), cursor (sichqoncha), overlay. *DRM master* —
+KMS'ni o'zgartirishga ruxsati bor yagona jarayon; aks holda ikki dastur bir ekranga
+navbatma-navbat yozib, tartibsizlik bo'lardi.
+
+**Nega vblank bo'yicha chizamiz, page flip nima.** Monitor ekranni yuqoridan pastga
+sekundiga 60 marta o'qiydi; kadrlar orasidagi qisqa pauza — vertical blank (vblank).
+Biz yangi kadrni alohida buferga chizamiz va `queue_frame` bilan "keyingi vblank'da shu
+buferga o'tkaz" deymiz — bu *page flip*. Almashinuv atomar, shuning uchun yarim chizilgan
+kadr hech qachon ko'rinmaydi (tearing yo'q). Kernel flip bo'lganini VBlank voqeasi bilan
+aytadi: aynan o'sha payt keyingi kadrni boshlash va mijozlarga frame callback yuborish
+vaqti. Shunda 60 Hz'dan ortiq behuda chizmaymiz, hech narsa o'zgarmasa umuman
+chizmaymiz (taymer bilan taxminiy vblank), va kechikish bir kadrdan oshmaydi.
+
+**libseat nima qiladi, nega root kerak emas.** GPU va /dev/input qurilmalarini faqat
+root ocha oladi. libseat (logind yoki seatd orqali) bizning login sessiyamiz nomidan
+ularni ochib, fd'ni bizga beradi va DRM master'ni topshiradi. Boshqa VT'ga o'tilganda
+sessiya qurilmalarni bizdan *tortib oladi* (PauseSession) — shuning uchun Ctrl+Alt+F1
+ishlaydi va qaytganda (ActivateSession) to'liq modeset qilib, hammasini qayta chizamiz.
+Root kompozitor xavfli: undagi har bir xato (bizda 10 000+ qator kod) va unga ulangan
+har bir mijoz butun tizimga yo'l topishi mumkin. Shuning uchun spacewm root'da ishga
+tushishdan bosh tortadi.
+
+**Sinov (haqiqiy eDP-1 da).** `tests/drm/` skriptlari spacewm'ni tty8 da haqiqiy logind
+sessiya sifatida ishga tushiradi: 60 s ishladi (80 screenshot), VT'ga chiqib-qaytganda
+rasm, oynalar va input qaytdi, Ctrl+Alt+F1, Mod+Enter va Ctrl+Alt+Backspace ishladi,
+2D rejim ham. Topilgan xato: libinput qurilmalarni ichki navbatga qo'yib fd'ni
+uyg'otmasdi — qurilmalar 3.5 s kechikib sozlanardi; endi navbatni darhol o'qiymiz.
+Sinalmaganlar: ikkinchi monitorni ulash (sizda yo'q edi), Firefox dmabuf, SDDM orqali kirish.

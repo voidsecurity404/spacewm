@@ -186,8 +186,16 @@ impl SpaceState {
 
         let mut seat_state = SeatState::new();
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, "seat0");
-        // us layout, 200 ms repeat delay, 25 repeats/s.
-        let xkb = XkbConfig { layout: "us", ..XkbConfig::default() };
+        // Empty XkbConfig fields mean "ask the environment": xkbcommon then reads
+        // XKB_DEFAULT_LAYOUT / _VARIANT / _OPTIONS (e.g. "us,ru" and
+        // "grp:alt_shift_toggle", set in spacewm-session) and falls back to plain "us".
+        // Stage 7.2 moves this into the config file. 200 ms repeat delay, 25 repeats/s.
+        let xkb = XkbConfig::default();
+        tracing::info!(
+            layout = std::env::var("XKB_DEFAULT_LAYOUT").unwrap_or_else(|_| "us".into()),
+            options = std::env::var("XKB_DEFAULT_OPTIONS").unwrap_or_default(),
+            "keyboard"
+        );
         seat.add_keyboard(xkb, 200, 25)
             .map_err(|e| anyhow::anyhow!("failed to create keyboard: {e:?}"))?;
         seat.add_pointer();

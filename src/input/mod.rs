@@ -201,6 +201,8 @@ pub fn process_input_event<B: InputBackend>(state: &mut SpaceState, event: Input
 enum KeyOutcome {
     Escape,
     Action(Action),
+    Emergency,
+    SwitchVt(i32),
 }
 
 pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState, time: InputTime) {
@@ -221,6 +223,19 @@ pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState,
         }
         let modkey = mods.logo || (nested && mods.alt);
         let sym = handle.raw_latin_sym_or_raw_current_sym();
+        // Emergency exit, checked before ANYTHING else and in every mode: on a real
+        // session this is the way out of a broken desktop.
+        if mods.ctrl && mods.alt && sym == Some(Keysym::BackSpace) {
+            state.input.suppressed_keys.insert(keycode);
+            return FilterResult::Intercept(Some(KeyOutcome::Emergency));
+        }
+        // Ctrl+Alt+F1..F12: the keymap turns these into XF86Switch_VT_n.
+        let vt = handle.modified_sym().raw();
+        if !nested && (keysyms::KEY_XF86Switch_VT_1..=keysyms::KEY_XF86Switch_VT_12).contains(&vt) {
+            state.input.suppressed_keys.insert(keycode);
+            let n = (vt - keysyms::KEY_XF86Switch_VT_1 + 1) as i32;
+            return FilterResult::Intercept(Some(KeyOutcome::SwitchVt(n)));
+        }
         let route = route_key(state.render_mode, state.mode, modkey, nested, mods, sym);
         if route != KeyRoute::Forward {
             state.input.suppressed_keys.insert(keycode);
@@ -244,6 +259,11 @@ pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState,
     match outcome {
         Some(Some(KeyOutcome::Escape)) => mode::set_mode(state, InputMode::Walk, None),
         Some(Some(KeyOutcome::Action(action))) => run_action(state, action),
+        Some(Some(KeyOutcome::Emergency)) => {
+            tracing::warn!("Ctrl+Alt+Backspace: emergency exit");
+            state.quit();
+        }
+        Some(Some(KeyOutcome::SwitchVt(vt))) => state.backend.change_vt(vt),
         _ => {}
     }
 }
@@ -300,6 +320,11 @@ fn toggle_debug(state: &mut SpaceState) {
             .insert_source(Timer::from_duration(second), move |_, _, state| {
                 let camera = state.view.camera;
                 state.view.stats.report(&camera);
+                if let crate::backend::Backend::Drm(drm) = &mut state.backend {
+                    for (output, flips, missed, hz) in drm.take_stats() {
+                        tracing::info!(output, flips, missed, hz = format!("{hz:.2}"), "drm");
+                    }
+                }
                 TimeoutAction::ToDuration(second)
             })
             .ok();

@@ -43,7 +43,7 @@ impl Backend {
             BackendKind::Headless => {
                 Self::Headless(headless::HeadlessBackend::init(cli, dh, loop_handle)?)
             }
-            BackendKind::Drm => Self::Drm(drm::DrmBackend::init(dh, loop_handle)?),
+            BackendKind::Drm => Self::Drm(drm::DrmBackend::init(cli, dh, loop_handle)?),
         })
     }
 
@@ -93,7 +93,17 @@ impl Backend {
         }
     }
 
-    pub fn update_led_state(&mut self, _led_state: LedState) {
-        // Keyboard LEDs only exist on real devices (Stage 6).
+    pub fn update_led_state(&mut self, led_state: LedState) {
+        // Keyboard LEDs (Caps/Num Lock) only exist on real devices.
+        if let Self::Drm(b) = self {
+            b.update_led_state(led_state);
+        }
+    }
+
+    /// Ctrl+Alt+Fn: switch to another VT (only meaningful on a real session).
+    pub fn change_vt(&mut self, vt: i32) {
+        if let Self::Drm(b) = self {
+            b.change_vt(vt);
+        }
     }
 }
