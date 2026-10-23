@@ -4,7 +4,7 @@
 //! back from the framebuffer. PNG encoding happens on a worker thread so a big screenshot
 //! never stalls the compositor; the result is reported back to whoever asked (IPC).
 
-use std::{fs::OpenOptions, io::BufWriter, path::PathBuf};
+use std::{fs::OpenOptions, io::BufWriter, os::unix::fs::OpenOptionsExt, path::PathBuf};
 
 use smithay::{
     backend::{allocator::Fourcc, renderer::ExportMem},
@@ -95,7 +95,9 @@ pub fn save_async(request: ScreenshotRequest, image: CapturedImage, done: Sender
 
 fn write_png(path: &PathBuf, force: bool, image: &CapturedImage) -> Result<(), String> {
     let mut options = OpenOptions::new();
-    options.write(true);
+    // O_NOFOLLOW: if the name was swapped for a symlink after the path was checked, fail
+    // instead of writing wherever it points.
+    options.write(true).custom_flags(libc::O_NOFOLLOW);
     if force {
         options.create(true).truncate(true);
     } else {

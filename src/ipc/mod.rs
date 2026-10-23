@@ -106,9 +106,7 @@ impl IpcServer {
             )
             .map_err(|e| anyhow::anyhow!("ipc listener source: {}", e.error))?;
 
-        // Child processes (and spacectl run from them) find us through this.
-        // SAFETY: single-threaded at this point of startup.
-        unsafe { std::env::set_var("SPACEWM_SOCKET", &path) };
+        // Children find us through SPACEWM_SOCKET, which spawn.rs sets for them.
         tracing::info!(path = %path.display(), allow_input_injection, "IPC socket ready");
         Ok(Self {
             path,
@@ -242,10 +240,8 @@ fn close(state: &mut SpaceState, id: ConnectionId) {
 }
 
 fn on_readable(state: &mut SpaceState, id: ConnectionId) -> PostAction {
-    let mut lines = Vec::new();
     let mut eof = false;
-    let mut too_long = false;
-    {
+    let (lines, too_long) = {
         let Some(conn) = state.ipc.as_mut().and_then(|ipc| ipc.connections.get_mut(&id)) else {
             return PostAction::Remove;
         };
@@ -268,28 +264,14 @@ fn on_readable(state: &mut SpaceState, id: ConnectionId) -> PostAction {
                 break;
             }
         }
-        while let Some(pos) = conn.read_buf.iter().position(|&b| b == b'\n') {
-            let line: Vec<u8> = conn.read_buf.drain(..=pos).collect();
-            if line.len() > proto::MAX_REQUEST_BYTES + 1 {
-                too_long = true;
-                break;
-            }
-            lines.push(line);
-        }
-        if conn.read_buf.len() > proto::MAX_REQUEST_BYTES {
-            too_long = true;
-        }
-    }
+        take_lines(&mut conn.read_buf)
+    };
 
     for line in lines {
-        let text = String::from_utf8_lossy(&line);
-        let text = text.trim();
-        if text.is_empty() {
-            continue;
-        }
-        let response = match serde_json::from_str::<Request>(text) {
-            Ok(request) => handle_request(state, id, request),
-            Err(e) => Some(Response::error(format!("malformed request: {e}"))),
+        let response = match parse_request(&line) {
+            None => continue,
+            Some(Ok(request)) => handle_request(state, id, request),
+            Some(Err(e)) => Some(e),
         };
         if let Some(response) = response {
             if reply(state, id, &response).is_err() {
@@ -356,6 +338,33 @@ fn reply(state: &mut SpaceState, id: ConnectionId, response: &Response) -> Resul
     Ok(())
 }
 
+/// Split complete request lines off the front of `buf`. `true` if a line (complete or
+/// still growing) is over the size limit: the client is then dropped.
+fn take_lines(buf: &mut Vec<u8>) -> (Vec<Vec<u8>>, bool) {
+    let mut lines = Vec::new();
+    while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+        let line: Vec<u8> = buf.drain(..=pos).collect();
+        if line.len() > proto::MAX_REQUEST_BYTES + 1 {
+            return (lines, true);
+        }
+        lines.push(line);
+    }
+    (lines, buf.len() > proto::MAX_REQUEST_BYTES)
+}
+
+/// Parse one request line; anything that isn't a valid request gets an error response.
+fn parse_request(line: &[u8]) -> Option<Result<Request, Response>> {
+    let text = std::str::from_utf8(line).map_err(|_| Response::error("request is not UTF-8"));
+    let text = match text {
+        Ok(t) => t.trim(),
+        Err(e) => return Some(Err(e)),
+    };
+    if text.is_empty() {
+        return None;
+    }
+    Some(serde_json::from_str(text).map_err(|e| Response::error(format!("malformed request: {e}"))))
+}
+
 fn finite(values: &[f64]) -> Result<(), Response> {
     if values.iter().all(|v| v.is_finite() && v.abs() < 1e7) {
         Ok(())
@@ -400,15 +409,76 @@ fn handle_request(state: &mut SpaceState, id: ConnectionId, request: Request) ->
             }
             None => Response::error(format!("no panel {panel}")),
         },
-        Request::Spawn { command } => {
+        Request::Spawn { command, shell } => {
+            if shell && !state.config.general.ipc_allow_shell {
+                return Some(Response::error(
+                    "shell commands are disabled (set general.ipc_allow_shell = true in the config)",
+                ));
+            }
             // The window this opens may take focus (see `mode::on_new_window`).
             state.expect_window_until =
                 Some(std::time::Instant::now() + crate::input::mode::SPAWN_FOCUS_WINDOW);
-            match crate::spawn::spawn(&command, &state.socket_name) {
+            let result = if shell {
+                crate::spawn::spawn_shell(&command, &state.socket_name)
+            } else {
+                crate::spawn::spawn(&command, &state.socket_name)
+            };
+            match result {
                 Ok(pid) => Response::Spawned { pid },
                 Err(e) => Response::error(e),
             }
         }
+        Request::MovePanel { id: panel, position, yaw_deg } => {
+            let mut values: Vec<f64> = position.iter().map(|&v| v as f64).collect();
+            values.extend(yaw_deg.map(|v| v as f64));
+            if let Err(e) = finite(&values) {
+                return Some(e);
+            }
+            if position.iter().any(|v| v.abs() > 10_000.0) {
+                return Some(Response::error("position out of range (±10000 m)"));
+            }
+            let Some(p) = state.world.panels_mut().iter_mut().find(|p| p.id == panel) else {
+                return Some(Response::error(format!("no panel {panel}")));
+            };
+            p.position = glam::Vec3::from(position);
+            if let Some(yaw) = yaw_deg {
+                p.rotation = glam::Quat::from_rotation_y(yaw.to_radians());
+            }
+            if state.grab.is_some_and(|g| g.panel == panel) {
+                state.grab = None; // the explicit position wins over carrying it
+            }
+            panel_changed(state)
+        }
+        Request::ScalePanel { id: panel, pixels_per_unit } => {
+            if !(200.0..=3000.0).contains(&pixels_per_unit) {
+                return Some(Response::error("pixels_per_unit must be 200..3000"));
+            }
+            let Some(p) = state.world.panels_mut().iter_mut().find(|p| p.id == panel) else {
+                return Some(Response::error(format!("no panel {panel}")));
+            };
+            p.pixels_per_unit = pixels_per_unit;
+            panel_changed(state)
+        }
+        Request::SetMode { mode } => {
+            if state.render_mode != crate::cli::RenderMode::Scene3D {
+                return Some(Response::error("modes exist only in the 3D view"));
+            }
+            let target = match mode {
+                proto::ModeTarget::Walk => crate::input::mode::InputMode::Walk,
+                proto::ModeTarget::Window(panel) => {
+                    if !state.world.panels().iter().any(|p| p.id == panel) {
+                        return Some(Response::error(format!("no panel {panel}")));
+                    }
+                    crate::input::mode::InputMode::Window { panel }
+                }
+            };
+            crate::input::mode::set_mode(state, target, None);
+            Response::Ok
+        }
+        Request::ReloadConfig => match state.reload_config() {
+            Ok(()) => Response::Ok,
+            Err(e) => Response::error(e),
+        },
         Request::Screenshot { path, force } => match validate_screenshot_path(&path, force) {
             Ok(path) => {
                 state.pending_screenshots.push(ScreenshotRequest {
@@ -495,6 +565,14 @@ fn handle_request(state: &mut SpaceState, id: ConnectionId, request: Request) ->
             }
         }
     })
+}
+
+/// A panel moved or was rescaled by IPC: redraw and remember it like a manual change.
+fn panel_changed(state: &mut SpaceState) -> Response {
+    state.view.dirty = true;
+    state.layout_changed();
+    state.queue_redraw();
+    Response::Ok
 }
 
 fn press(p: PressMode) -> PressAction {
@@ -687,6 +765,58 @@ impl IpcServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn requests_are_split_into_lines() {
+        let mut buf = b"{\"request\":\"version\"}\n{\"request\":\"quit\"}\n{\"requ".to_vec();
+        let (lines, too_long) = take_lines(&mut buf);
+        assert_eq!(lines.len(), 2);
+        assert!(!too_long);
+        assert_eq!(buf, b"{\"requ", "the partial line waits for more data");
+        assert_eq!(parse_request(&lines[0]), Some(Ok(Request::Version)));
+        assert_eq!(parse_request(&lines[1]), Some(Ok(Request::Quit)));
+    }
+
+    #[test]
+    fn oversized_requests_are_rejected() {
+        // A complete line over the limit...
+        let mut buf = vec![b'x'; proto::MAX_REQUEST_BYTES + 10];
+        buf.push(b'\n');
+        assert!(take_lines(&mut buf).1);
+        // ...and one still growing without a newline.
+        let mut buf = vec![b'x'; proto::MAX_REQUEST_BYTES + 1];
+        assert!(take_lines(&mut buf).1);
+        // Exactly at the limit is fine.
+        let mut buf = vec![b' '; proto::MAX_REQUEST_BYTES];
+        buf.push(b'\n');
+        assert!(!take_lines(&mut buf).1);
+    }
+
+    #[test]
+    fn malformed_requests_get_errors_not_panics() {
+        for bad in [
+            &b"not json"[..],
+            b"{\"request\":\"spawn\"}",
+            b"{\"request\":\"move_panel\",\"id\":1,\"position\":[1,2]}",
+            b"{\"request\":\"focus_panel\",\"id\":-1}",
+            b"\xff\xfe",
+            b"[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[",
+        ] {
+            assert!(matches!(parse_request(bad), Some(Err(Response::Error { .. }))), "{bad:?}");
+        }
+        assert_eq!(parse_request(b"   \r"), None, "blank lines are ignored");
+    }
+
+    #[test]
+    fn numbers_must_be_finite() {
+        assert!(finite(&[1.0, -2.5]).is_ok());
+        assert!(finite(&[f64::NAN]).is_err());
+        assert!(finite(&[f64::INFINITY]).is_err());
+        assert!(finite(&[1e9]).is_err());
+        // JSON has no NaN literal, so it can't even be sent.
+        assert!(parse_request(b"{\"request\":\"teleport\",\"position\":[NaN,0,0]}")
+            .is_some_and(|r| r.is_err()));
+    }
 
     #[test]
     fn screenshot_paths_are_confined_to_home() {
