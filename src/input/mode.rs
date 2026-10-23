@@ -69,7 +69,7 @@ impl Default for InputSettings {
     fn default() -> Self {
         Self {
             mouse_sensitivity: 0.0025,
-            walk_speed: 4.0,
+            walk_speed: crate::world::player::WALK_SPEED,
             reach_distance: 6.0,
             window_cursor_speed: 1.0,
         }
@@ -125,11 +125,7 @@ pub fn set_mode(state: &mut SpaceState, new_mode: InputMode, hit: Option<&PanelH
                 pointer.motion(
                     state,
                     None,
-                    &MotionEvent {
-                        location,
-                        serial,
-                        time: InputTime::now(),
-                    },
+                    &MotionEvent { location, serial, time: InputTime::now() },
                 );
                 pointer.frame(state);
             }
@@ -139,21 +135,11 @@ pub fn set_mode(state: &mut SpaceState, new_mode: InputMode, hit: Option<&PanelH
     state.view.controls.clear();
     state.view.dirty = true;
     state.queue_redraw();
-    crate::ipc::broadcast(
-        state,
-        Event::ModeChanged {
-            mode: new_mode.name().into(),
-        },
-    );
+    crate::ipc::broadcast(state, Event::ModeChanged { mode: new_mode.name().into() });
 }
 
 fn panel_window(state: &SpaceState, panel: PanelId) -> Option<Window> {
-    state
-        .world
-        .panels()
-        .iter()
-        .find(|p| p.id == panel)
-        .map(|p| p.window.clone())
+    state.world.panels().iter().find(|p| p.id == panel).map(|p| p.window.clone())
 }
 
 fn set_activated(window: &Window, activated: bool) {
@@ -166,20 +152,24 @@ fn set_activated(window: &Window, activated: bool) {
 /// Recompute the panel under the crosshair and the highlight. Called before each frame.
 pub fn update_hover(state: &mut SpaceState) {
     let ray = raycast::camera_center_ray(&state.view.camera);
-    state.hover = raycast::pick(&ray, &state.world, 1000.0);
     let reach = state.input_settings.reach_distance;
+    // Blocks occlude panels: a panel behind a wall can't be hovered or clicked.
+    let block = raycast::voxel_ray(&ray, 128.0, |c| state.voxels.solid(c));
+    let panel = raycast::pick(&ray, &state.world, 1000.0);
+    state.hover = panel.filter(|p| block.is_none_or(|b| p.t < b.t));
+    let target = block
+        .filter(|b| b.t <= reach && state.mode == InputMode::Walk && state.grab.is_none())
+        .filter(|b| state.hover.is_none_or(|p| b.t < p.t));
+    if target.map(|t| t.block) != state.target_block.map(|t| t.block) {
+        state.view.dirty = true; // the outline moved
+    }
+    state.target_block = target;
     let highlight = match state.mode {
         InputMode::Walk => Highlight {
-            hovered: state
-                .hover
-                .filter(|h| !h.from_back && h.t <= reach)
-                .map(|h| h.panel),
+            hovered: state.hover.filter(|h| !h.from_back && h.t <= reach).map(|h| h.panel),
             focused: None,
         },
-        InputMode::Window { panel } => Highlight {
-            hovered: None,
-            focused: Some(panel),
-        },
+        InputMode::Window { panel } => Highlight { hovered: None, focused: Some(panel) },
     };
     if highlight != state.highlight {
         state.highlight = highlight;
@@ -204,9 +194,7 @@ pub fn try_enter_hovered(state: &mut SpaceState) -> bool {
 /// A new toplevel appeared. In 3D it gets focus only if the user just asked for a new
 /// program; otherwise it waits to be clicked.
 pub fn on_new_window(state: &mut SpaceState, panel: PanelId) {
-    let expected = state
-        .expect_window_until
-        .is_some_and(|until| Instant::now() < until);
+    let expected = state.expect_window_until.is_some_and(|until| Instant::now() < until);
     if expected {
         state.expect_window_until = None;
         set_mode(state, InputMode::Window { panel }, None);
@@ -230,10 +218,7 @@ pub fn move_virtual_cursor(state: &mut SpaceState, delta: Point<f64, Logical>, t
     let Some(p) = state.world.panels().iter().find(|p| p.id == panel) else {
         return;
     };
-    let output_h = state
-        .primary_output_geometry()
-        .map(|g| g.size.h)
-        .unwrap_or(1080) as f64;
+    let output_h = state.primary_output_geometry().map(|g| g.size.h).unwrap_or(1080) as f64;
     let camera = &state.view.camera;
     let distance = camera.position.distance(p.position).max(0.05) as f64;
     // Screen px per metre at that distance, and panel px per metre.
@@ -244,10 +229,8 @@ pub fn move_virtual_cursor(state: &mut SpaceState, delta: Point<f64, Logical>, t
     let mut c = state.virtual_cursor + delta.upscale(factor);
     // Clamp to the window's bbox (not just its geometry) so popups that hang outside the
     // window stay reachable.
-    c.x =
-        c.x.clamp(bbox.loc.x as f64, (bbox.loc.x + bbox.size.w) as f64 - 1.0);
-    c.y =
-        c.y.clamp(bbox.loc.y as f64, (bbox.loc.y + bbox.size.h) as f64 - 1.0);
+    c.x = c.x.clamp(bbox.loc.x as f64, (bbox.loc.x + bbox.size.w) as f64 - 1.0);
+    c.y = c.y.clamp(bbox.loc.y as f64, (bbox.loc.y + bbox.size.h) as f64 - 1.0);
     state.virtual_cursor = c;
     send_window_pointer(state, time);
     state.view.dirty = true;
@@ -275,10 +258,7 @@ pub fn point_virtual_cursor(state: &mut SpaceState, screen: Point<f64, Logical>,
     let Some(t) = raycast::ray_plane(&ray, p.position, p.normal()) else {
         return;
     };
-    let local = p
-        .model_matrix()
-        .inverse()
-        .transform_point3(ray.origin + ray.dir * t);
+    let local = p.model_matrix().inverse().transform_point3(ray.origin + ray.dir * t);
     let (w, h) = (p.size_px.0 as f64, p.size_px.1 as f64);
     let bbox = p.bbox_px;
     let x = ((local.x as f64 + 0.5) * w)
@@ -308,11 +288,7 @@ pub fn send_window_pointer(state: &mut SpaceState, time: InputTime) {
     pointer.motion(
         state,
         under,
-        &MotionEvent {
-            location,
-            serial: SERIAL_COUNTER.next_serial(),
-            time,
-        },
+        &MotionEvent { location, serial: SERIAL_COUNTER.next_serial(), time },
     );
     pointer.frame(state);
 }

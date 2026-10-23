@@ -98,14 +98,8 @@ impl HeadlessBackend {
             .create_buffer(Fourcc::Abgr8888, (size.w, size.h).into())
             .map_err(|e| SpaceError::Render(format!("offscreen target: {e}")))?;
 
-        let output = create_output(
-            dh,
-            "headless-1",
-            "headless",
-            size,
-            REFRESH_MHZ,
-            Transform::Normal,
-        );
+        let output =
+            create_output(dh, "headless-1", "headless", size, REFRESH_MHZ, Transform::Normal);
         let damage_tracker = OutputDamageTracker::from_output(&output);
         let (dmabuf_state, dmabuf_global) = super::winit::create_dmabuf_global(dh, &mut renderer);
 
@@ -154,9 +148,7 @@ fn find_render_node() -> Result<PathBuf, SpaceError> {
         .map_err(|e| SpaceError::Backend(format!("/dev/dri: {e}")))?
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| {
-            p.file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with("renderD"))
+            p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("renderD"))
         })
         .collect();
     nodes.sort();
@@ -177,11 +169,7 @@ fn render(state: &mut SpaceState) {
     let size = b.size;
     let scale = output.current_scale().fractional_scale().into();
     let time = state.start_time.elapsed();
-    let age = if b.rendered_once && state.pending_screenshots.is_empty() {
-        1
-    } else {
-        0
-    };
+    let age = if b.rendered_once && state.pending_screenshots.is_empty() { 1 } else { 0 };
 
     let frame_start = Instant::now();
     crate::input::before_frame(state);
@@ -190,11 +178,8 @@ fn render(state: &mut SpaceState) {
     };
     // 3D: advance the camera and re-render the scene texture first. The scene pass uses
     // our own framebuffers, so it must run before the output framebuffer is bound.
-    let mut prepared = (state.render_mode == RenderMode::Scene3D).then(|| {
-        state
-            .view
-            .prepare(&mut b.renderer, size, crate::scene_inputs!(state, time))
-    });
+    let mut prepared = (state.render_mode == RenderMode::Scene3D)
+        .then(|| state.view.prepare(&mut b.renderer, size, crate::scene_inputs!(state, time)));
 
     let mut framebuffer = match b.renderer.bind(&mut b.target) {
         Ok(fb) => fb,
@@ -237,12 +222,7 @@ fn render(state: &mut SpaceState) {
     b.rendered_once = true;
 
     let capture = (!state.pending_screenshots.is_empty()).then(|| {
-        screenshot::start_capture(
-            &mut b.renderer,
-            &framebuffer,
-            b.size,
-            output.current_transform(),
-        )
+        screenshot::start_capture(&mut b.renderer, &framebuffer, b.size, output.current_transform())
     });
     drop(framebuffer);
     if let Some(capture) = capture {
@@ -274,12 +254,9 @@ pub fn finish_frame(
 ) {
     let scene_rendered = prepared.as_ref().is_some_and(|p| p.scene_rendered);
     if state.view.stats.enabled {
-        state
-            .view
-            .stats
-            .record(frame_start.elapsed(), scene_rendered);
+        state.view.stats.record(frame_start.elapsed(), scene_rendered);
     }
-    if prepared.is_some_and(|p| p.continuous) {
+    if prepared.is_some_and(|p| p.continuous) || state.animating() {
         state.queue_redraw();
     }
 }

@@ -63,10 +63,7 @@ impl CursorThemeCache {
             theme,
             size,
             shapes: HashMap::new(),
-            fallback: LoadedCursor {
-                images: fallback,
-                buffers: HashMap::new(),
-            },
+            fallback: LoadedCursor { images: fallback, buffers: HashMap::new() },
         }
     }
 
@@ -81,10 +78,7 @@ impl CursorThemeCache {
         let entry = self.shapes.entry(icon).or_insert_with(|| {
             let mut names = vec![icon.name()];
             names.extend_from_slice(icon.alt_names());
-            load_shape(theme, &names).map(|images| LoadedCursor {
-                images,
-                buffers: HashMap::new(),
-            })
+            load_shape(theme, &names).map(|images| LoadedCursor { images, buffers: HashMap::new() })
         });
         let cursor = entry.as_mut().unwrap_or(&mut self.fallback);
         let index = frame_index(&cursor.images, self.size * scale, time.as_millis() as u32);
@@ -114,10 +108,7 @@ fn load_shape(theme: &CursorTheme, names: &[&str]) -> Option<Vec<Image>> {
     names.iter().find_map(|name| {
         let path = theme.load_icon(name)?;
         let mut data = Vec::new();
-        std::fs::File::open(path)
-            .ok()?
-            .read_to_end(&mut data)
-            .ok()?;
+        std::fs::File::open(path).ok()?.read_to_end(&mut data).ok()?;
         let images = parse_xcursor(&data)?;
         (!images.is_empty()).then_some(images)
     })
@@ -130,12 +121,8 @@ fn frame_index(images: &[Image], size: u32, millis: u32) -> usize {
         .min_by_key(|img| (size as i64 - img.size as i64).abs())
         .map(|img| img.size)
         .unwrap_or(0);
-    let frames: Vec<usize> = images
-        .iter()
-        .enumerate()
-        .filter(|(_, img)| img.size == nearest)
-        .map(|(i, _)| i)
-        .collect();
+    let frames: Vec<usize> =
+        images.iter().enumerate().filter(|(_, img)| img.size == nearest).map(|(i, _)| i).collect();
     let total: u32 = frames.iter().map(|&i| images[i].delay).sum();
     if total == 0 {
         return frames.first().copied().unwrap_or(0);
@@ -184,16 +171,9 @@ fn builtin_arrow() -> Image {
             let fill = inside(px, py);
             // Outline: outside the arrow but within ~1.2 px of it.
             let near = !fill
-                && [
-                    (-1.2, 0.0),
-                    (1.2, 0.0),
-                    (0.0, -1.2),
-                    (0.0, 1.2),
-                    (-0.9, -0.9),
-                    (0.9, 0.9),
-                ]
-                .iter()
-                .any(|(dx, dy)| inside(px + dx, py + dy));
+                && [(-1.2, 0.0), (1.2, 0.0), (0.0, -1.2), (0.0, 1.2), (-0.9, -0.9), (0.9, 0.9)]
+                    .iter()
+                    .any(|(dx, dy)| inside(px + dx, py + dy));
             let i = ((y * W + x) * 4) as usize;
             if fill {
                 pixels[i..i + 4].copy_from_slice(&[255, 255, 255, 255]);
@@ -261,9 +241,7 @@ where
         }
         CursorImageStatus::Surface(surface) => {
             let hotspot = cursor_hotspot(surface);
-            let pos = (location - hotspot.to_f64())
-                .to_physical(scale)
-                .to_i32_round();
+            let pos = (location - hotspot.to_f64()).to_physical(scale).to_i32_round();
             render_elements_from_surface_tree(renderer, surface, pos, scale, 1.0, Kind::Cursor)
                 .into_iter()
                 .map(SpaceRenderElement::Surface)

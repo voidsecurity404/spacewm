@@ -66,9 +66,7 @@ pub fn window_is_opaque(window: &Window) -> bool {
     };
     let geo = window.geometry();
     with_renderer_surface_state(&surface, |state| {
-        state
-            .opaque_regions()
-            .is_some_and(|regions| regions.iter().any(|r| r.contains_rect(geo)))
+        state.opaque_regions().is_some_and(|regions| regions.iter().any(|r| r.contains_rect(geo)))
     })
     .unwrap_or(false)
 }
@@ -78,26 +76,17 @@ impl PanelTextureCache {
         let (max_size, anisotropy) = renderer
             .with_context(|gl| unsafe {
                 let max = gl.get_parameter_i32(glow::MAX_TEXTURE_SIZE);
-                let aniso = if gl
-                    .supported_extensions()
-                    .contains("GL_EXT_texture_filter_anisotropic")
-                {
-                    gl.get_parameter_f32(MAX_TEXTURE_MAX_ANISOTROPY_EXT)
-                        .min(8.0)
-                } else {
-                    1.0
-                };
+                let aniso =
+                    if gl.supported_extensions().contains("GL_EXT_texture_filter_anisotropic") {
+                        gl.get_parameter_f32(MAX_TEXTURE_MAX_ANISOTROPY_EXT).min(8.0)
+                    } else {
+                        1.0
+                    };
                 (max, aniso)
             })
             .unwrap_or((4096, 1.0));
         tracing::debug!(max_size, anisotropy, "panel textures");
-        Self {
-            targets: HashMap::new(),
-            max_size,
-            anisotropy,
-            mipmaps: true,
-            updates: 0,
-        }
+        Self { targets: HashMap::new(), max_size, anisotropy, mipmaps: true, updates: 0 }
     }
 
     pub fn get(&self, id: PanelId) -> Option<&PanelTarget> {
@@ -108,8 +97,7 @@ impl PanelTextureCache {
     /// if any texture changed (the scene must then be redrawn).
     pub fn update(&mut self, renderer: &mut GlowRenderer, world: &mut World) -> bool {
         // Drop textures of panels that no longer exist.
-        self.targets
-            .retain(|id, _| world.panels().iter().any(|p| p.id == *id));
+        self.targets.retain(|id, _| world.panels().iter().any(|p| p.id == *id));
 
         let mut changed = false;
         for panel in world.panels_mut().iter_mut().filter(|p| p.content_dirty) {
@@ -174,9 +162,7 @@ impl PanelTextureCache {
         // The texture keeps its previous contents, so after the first frame its "age" is 1.
         let age = if target.rendered_once { 1 } else { 0 };
         let damaged = {
-            let mut fb = renderer
-                .bind(&mut target.texture)
-                .map_err(|e| e.to_string())?;
+            let mut fb = renderer.bind(&mut target.texture).map_err(|e| e.to_string())?;
             let result = target
                 .damage_tracker
                 .render_output(renderer, &mut fb, age, &elements, [0.0, 0.0, 0.0, 0.0])
@@ -213,11 +199,7 @@ impl PanelTextureCache {
                 gl.bind_texture(glow::TEXTURE_2D, Some(tex));
                 // Immutable storage with the full mip chain allocated up front.
                 gl.tex_storage_2d(glow::TEXTURE_2D, levels, glow::RGBA8, w, h);
-                let min = if levels > 1 {
-                    glow::LINEAR_MIPMAP_LINEAR
-                } else {
-                    glow::LINEAR
-                };
+                let min = if levels > 1 { glow::LINEAR_MIPMAP_LINEAR } else { glow::LINEAR };
                 gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, min as i32);
                 gl.tex_parameter_i32(
                     glow::TEXTURE_2D,

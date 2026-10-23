@@ -15,8 +15,12 @@ SPACE_PID=""
 kc() { "$SPACECTL" --socket "$SOCK" "$@"; }
 
 space_start() {
-    "$SPACEWM" --backend headless --allow-input-injection --ipc-socket "$SOCK" "$@" \
-        >"$OUT/spacewm.log" 2>&1 &
+    # Never touch the user's real saved layout: tests get their own file unless they
+    # pass --layout themselves (later arguments win in clap).
+    local layout=(--layout "$OUT/layout-$$.json")
+    case " $* " in *" --layout "*) layout=() ;; esac
+    "$SPACEWM" --backend headless --allow-input-injection --ipc-socket "$SOCK" \
+        "${layout[@]}" "$@" >"$OUT/spacewm.log" 2>&1 &
     SPACE_PID=$!
     for _ in $(seq 50); do
         [ -S "$SOCK" ] && kc version >/dev/null 2>&1 && return 0
@@ -28,6 +32,7 @@ space_start() {
 }
 
 space_stop() {
+    rm -f "$OUT/layout-$$.json"
     [ -n "$SPACE_PID" ] || return 0
     kc quit >/dev/null 2>&1 || kill "$SPACE_PID" 2>/dev/null || true
     wait "$SPACE_PID" 2>/dev/null
@@ -89,3 +94,20 @@ focused() { kc --json list | python3 -c "import json,sys; print([p['id'] for p i
 # The distance at which a panel shows 1 window px per screen px on the 1280x720 headless
 # output: 720 / (2 * 800 * tan(37.5 deg)).
 PIXEL_PERFECT=0.58644
+
+# Put the camera DIST metres BEHIND panel SEL, looking at its back.
+behind_panel() {
+    local sel=$1 dist=${2:-0.9}
+    local args
+    args=$(kc --json list | python3 -c "
+import json, math, sys
+sel, dist = sys.argv[1], float(sys.argv[2])
+p = [p for p in json.load(sys.stdin)['panels'] if str(p['id']) == sel or sel in (p['app_id'] or '')][0]
+y = math.radians(p['yaw_deg'])
+x, py, z = p['position']
+# Behind = along -normal; looking along +normal means camera yaw = 180 - panel yaw.
+print(x - math.sin(y) * dist, py, z - math.cos(y) * dist, 180 - p['yaw_deg'])
+" "$sel" "$dist")
+    read -r cx cy cz cyaw <<<"$args"
+    kc teleport "$cx" "$cy" "$cz" --yaw "$cyaw" --pitch 0
+}

@@ -55,13 +55,7 @@ impl XdgShellHandler for SpaceState {
         tracing::info!(id, x = position.x, y = position.y, "new toplevel");
         // In 3D the window becomes a panel in front of the camera.
         let distance = self.spawn_distance(DEFAULT_WINDOW_SIZE);
-        self.world.add_window(
-            id,
-            window.clone(),
-            DEFAULT_WINDOW_SIZE,
-            &self.view.camera,
-            distance,
-        );
+        self.world.add_window(id, window.clone(), DEFAULT_WINDOW_SIZE, &self.view.camera, distance);
         self.view.dirty = true;
         crate::ipc::broadcast(self, Event::PanelOpened { id, app_id: None });
 
@@ -117,8 +111,7 @@ impl XdgShellHandler for SpaceState {
             return;
         };
         let Ok(mut grab) =
-            self.popups
-                .grab_popup(KeyboardFocusTarget::Window(window), kind, &seat, serial)
+            self.popups.grab_popup(KeyboardFocusTarget::Window(window), kind, &seat, serial)
         else {
             return;
         };
@@ -216,6 +209,18 @@ impl XdgShellHandler for SpaceState {
         let destroyed = self.window_for_surface(surface.wl_surface());
         if let Some(window) = &destroyed {
             self.space.unmap_elem(window);
+            // Remember where it was, so it comes back to the same spot next time.
+            if let Some(saved) =
+                self.world.panel_for_window(window).and_then(crate::state::saved_panel)
+            {
+                self.layout.remember(saved);
+                self.layout_changed();
+            }
+            if self.grab.is_some_and(|g| {
+                self.world.panel_for_window(window).is_some_and(|p| p.id == g.panel)
+            }) {
+                self.grab = None;
+            }
             self.world.remove_window(window);
             self.view.dirty = true;
             let id = crate::state::window_id(window);
@@ -241,6 +246,9 @@ impl XdgShellHandler for SpaceState {
 
     fn app_id_changed(&mut self, surface: ToplevelSurface) {
         tracing::info!(app_id = ?toplevel_app_id(surface.wl_surface()), "app_id set");
+        if let Some(window) = self.window_for_surface(surface.wl_surface()) {
+            self.restore_placement(&window);
+        }
     }
 
     fn title_changed(&mut self, surface: ToplevelSurface) {
@@ -250,10 +258,7 @@ impl XdgShellHandler for SpaceState {
 
 impl SpaceState {
     fn next_cascade_position(&mut self) -> Point<i32, Logical> {
-        let origin = self
-            .primary_output_geometry()
-            .map(|g| g.loc)
-            .unwrap_or_default();
+        let origin = self.primary_output_geometry().map(|g| g.loc).unwrap_or_default();
         let i = self.cascade_index;
         self.cascade_index = (self.cascade_index + 1) % CASCADE_WRAP;
         origin + Point::from((CASCADE_STEP * i + 20, CASCADE_STEP * i + 20))
@@ -275,11 +280,7 @@ impl SpaceState {
             }
         }
         if let Some(keyboard) = self.seat.get_keyboard() {
-            keyboard.set_focus(
-                self,
-                window.cloned().map(KeyboardFocusTarget::Window),
-                serial,
-            );
+            keyboard.set_focus(self, window.cloned().map(KeyboardFocusTarget::Window), serial);
         }
     }
 
@@ -301,11 +302,7 @@ impl SpaceState {
             let geo = window.geometry();
             Rectangle::new(
                 (-POPUP_MARGIN_3D, -POPUP_MARGIN_3D).into(),
-                (
-                    geo.size.w + 2 * POPUP_MARGIN_3D,
-                    geo.size.h + 2 * POPUP_MARGIN_3D,
-                )
-                    .into(),
+                (geo.size.w + 2 * POPUP_MARGIN_3D, geo.size.h + 2 * POPUP_MARGIN_3D).into(),
             )
         } else {
             let Some(output_geo) = self.primary_output_geometry() else {
@@ -334,11 +331,8 @@ impl SpaceState {
 /// an initial configure before the client may attach a buffer; the client signals it is
 /// ready by committing without a buffer. Same for popups.
 pub fn handle_commit(state: &mut SpaceState, surface: &WlSurface) {
-    if let Some(window) = state
-        .space
-        .elements()
-        .find(|w| w.wl_surface().as_deref() == Some(surface))
-        .cloned()
+    if let Some(window) =
+        state.space.elements().find(|w| w.wl_surface().as_deref() == Some(surface)).cloned()
     {
         if let Some(toplevel) = window.toplevel() {
             if !toplevel.is_initial_configure_sent() {

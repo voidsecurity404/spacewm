@@ -12,9 +12,7 @@ use crate::state::SpaceState;
 /// Errors are logged, never fatal.
 pub fn spawn(cmd: &str, socket: &OsStr) -> Result<u32, String> {
     let args = shell_words::split(cmd).map_err(|e| format!("bad command '{cmd}': {e}"))?;
-    let (program, rest) = args
-        .split_first()
-        .ok_or_else(|| "empty command".to_string())?;
+    let (program, rest) = args.split_first().ok_or_else(|| "empty command".to_string())?;
     let mut command = Command::new(program);
     command
         .args(rest)
@@ -38,9 +36,7 @@ pub fn spawn(cmd: &str, socket: &OsStr) -> Result<u32, String> {
             Ok(())
         });
     }
-    let mut child = command
-        .spawn()
-        .map_err(|e| format!("failed to start '{program}': {e}"))?;
+    let mut child = command.spawn().map_err(|e| format!("failed to start '{program}': {e}"))?;
     let pid = child.id();
     tracing::info!(pid, command = cmd, "spawned");
     // Reap the child when it exits so it doesn't stay a zombie.

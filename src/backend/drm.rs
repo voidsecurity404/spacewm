@@ -23,9 +23,7 @@ impl DrmBackend {
         _dh: &DisplayHandle,
         _loop_handle: &LoopHandle<'static, SpaceState>,
     ) -> Result<Self, SpaceError> {
-        Err(SpaceError::Backend(
-            "drm backend: not implemented yet (stage 6)".into(),
-        ))
+        Err(SpaceError::Backend("drm backend: not implemented yet (stage 6)".into()))
     }
 
     pub fn renderer(&mut self) -> &mut GlowRenderer {

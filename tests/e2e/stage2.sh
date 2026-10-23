@@ -4,13 +4,17 @@ source "$(dirname "$0")/lib.sh"
 PX="python3 $(dirname "$0")/pixel.py"
 
 space_start --render 3d
+# A fixed viewpoint high above the island, looking out to sea (open sky above, terrain
+# and water below), so these checks don't depend on what the terrain looks like at spawn.
+kc teleport 0 30 40 --yaw 0 --pitch -10
 sleep 0.3
 A=$(shot s2-start)
 # Sky at the top center, floor (green) at the bottom center.
 $PX near "$A" 640 20 135 191 242 30 >/dev/null || fail "no sky at top: $($PX "$A" 640 20)"
 G=$($PX "$A" 640 700)
-python3 -c "r,g,b=map(int,'$G'.split()); exit(0 if g>r+30 and g>b+30 else 1)" || fail "no green floor at bottom: $G"
-pass "sky above, floor below"
+# (Since Stage 5 the ground is the stone platform, not a green checkerboard.)
+python3 -c "r,g,b=map(int,'$G'.split()); exit(0 if b < 200 and abs(b-242) > 40 else 1)" || fail "sky at the bottom too: $G"
+pass "sky above, ground below"
 
 # Walk mode: moving the mouse right turns the camera right.
 kc input move-by 400 0

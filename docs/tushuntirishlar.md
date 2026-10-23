@@ -124,3 +124,33 @@ oynasi oladi (5 soniya ichida), qolganlarini bosish kerak.
 harakatni uzatmaydi. Shu sababli o'z backend'imizni yozdik: host pointer qulflanadi
 (pointer-constraints) va relative-pointer'dan cheksiz burilish olinadi. Ctrl+Alt+G
 sichqonchani host'ga qaytaradi, oynaga bosish uni yana qulflaydi.
+
+## 5-bosqich
+
+**Nega chunklar va face culling? Qancha uchburchak tejaladi?** Olam 16×16×16 bloklik
+chunklarga bo'lingan. Bitta blok o'zgarsa, faqat uning chunki (va chegarada bo'lsa qo'shnisi)
+qayta mesh qilinadi. Ko'rinmaydigan chunklar (orqada yoki 8 chunkdan uzoqda) umuman
+chizilmaydi. Face culling: blokning yuzi faqat yonidagi blok shaffof bo'lsa chiziladi.
+Misol: to'liq tosh chunk sodda usulda 4096 blok × 12 uchburchak = 49 152 uchburchak bo'ladi.
+Cullingdan keyin faqat tashqi qobiq qoladi: 6 × 256 yuz × 2 = 3 072 uchburchak (94% kam).
+Yer ostidagi tosh qatlamlarda deyarli hech narsa chizilmaydi.
+
+**Eksa bo'yicha ajratilgan AABB to'qnashuvi:** o'yinchi 0.6×1.8×0.6 m quti. Har fizika
+qadamida (sekundiga 120 marta) avval faqat Y bo'yicha siljiydi: kesishgan qattiq blok
+bo'lsa, quti uning yuzasigacha qaytariladi va "yerda" bayrog'i qo'yiladi. Keyin xuddi
+shunday X, keyin Z bo'yicha. Har eksa alohida hal qilingani uchun devorga tegsangiz
+yopishib qolmaysiz, uning bo'ylab sirpanasiz, burchakda esa blok ichiga kirib qolmaysiz.
+Qat'iy qadam (1/120 s) tufayli sakrash balandligi FPS'ga bog'liq emas.
+
+**Nega GL asosiy threadda, meshing esa worker'da?** OpenGL konteksti bitta threadga
+bog'langan: u qaysi threadda "current" bo'lsa, GL chaqiruvlari faqat o'sha yerda ishlaydi.
+Boshqa threaddan chaqirish aniqlanmagan xatti-harakat yoki crash beradi. Meshing esa sof
+hisoblash: chunk nusxasidan (qo'shnilardan bir blok chegarasi bilan) uchlar ro'yxatini
+yasaydi, GL'ga tegmaydi. Shuning uchun u worker threadda bajariladi. Tayyor mesh calloop
+kanali orqali qaytadi, asosiy thread esa uni bir kadrda ko'pi bilan 4 tadan GPU'ga yuklaydi.
+Shu sababli kadr hech qachon "qotmaydi" (eng uzun kadr ~2 ms).
+
+**Ongli qarorlar:** barglar shaffof o'tishda emas, alpha-test (cutout) bilan chiziladi.
+Bu chuqurlik buferini to'g'ri saqlaydi va standart usul. Bloklar uchun atlas emas,
+textura massivi ishlatiladi, shunda mipmap'lar qo'shni plitkalarga "oqmaydi". Paydo bo'lish
+joyi platforma atrofida tekislangan o'tloq bo'ladi va kamera eng ochiq tomonga qaraydi.

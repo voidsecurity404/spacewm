@@ -4,7 +4,14 @@
 //! holds the same windows for `--render 2d`, output tracking (wl_surface.enter) and
 //! frame callbacks; the two simply describe the same windows in different ways.
 
+pub mod block;
+pub mod chunk;
+pub mod layout;
+pub mod mesh;
 pub mod panel;
+pub mod player;
+pub mod terrain;
+pub mod voxels;
 
 use glam::Vec3;
 use smithay::wayland::seat::WaylandFocus;
@@ -50,10 +57,7 @@ pub fn spawn_distance(
     // The view at distance d is 2·d·tan(fov/2) tall and `aspect` times that wide.
     let fit_h = size_m.y / (0.85 * 2.0 * half);
     let fit_w = size_m.x / (0.85 * 2.0 * half * aspect);
-    pixel_perfect_distance(output_size.1, ppu, fov_y_deg)
-        .max(fit_h)
-        .max(fit_w)
-        .clamp(0.5, 3.0)
+    pixel_perfect_distance(output_size.1, ppu, fov_y_deg).max(fit_h).max(fit_w).clamp(0.5, 3.0)
 }
 
 impl<W: PartialEq> World<W> {
@@ -79,10 +83,7 @@ impl<W: PartialEq> World<W> {
         let mut pos = camera.position + camera.forward() * distance;
         let step = right * panel.world_size().x * 1.1;
         for _ in 0..64 {
-            let taken = self
-                .panels
-                .iter()
-                .any(|p| p.position.distance(pos) < MIN_SPAWN_SEPARATION);
+            let taken = self.panels.iter().any(|p| p.position.distance(pos) < MIN_SPAWN_SEPARATION);
             if !taken {
                 break;
             }
@@ -120,9 +121,7 @@ impl<W: PartialEq> World<W> {
 impl World<Window> {
     /// The panel whose window's surface tree contains `root` (a toplevel surface).
     pub fn panel_for_surface_mut(&mut self, root: &WlSurface) -> Option<&mut Panel> {
-        self.panels
-            .iter_mut()
-            .find(|p| p.window.wl_surface().as_deref() == Some(root))
+        self.panels.iter_mut().find(|p| p.window.wl_surface().as_deref() == Some(root))
     }
 }
 
@@ -131,12 +130,7 @@ mod tests {
     use super::*;
 
     fn camera() -> Camera {
-        Camera {
-            position: Vec3::new(0.0, 1.7, 0.0),
-            yaw: 0.0,
-            pitch: -0.3,
-            ..Camera::default()
-        }
+        Camera { position: Vec3::new(0.0, 1.7, 0.0), yaw: 0.0, pitch: -0.3, ..Camera::default() }
     }
 
     #[test]

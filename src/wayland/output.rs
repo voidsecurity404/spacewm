@@ -34,10 +34,7 @@ pub fn create_output(
             serial_number: "Unknown".into(),
         },
     );
-    let mode = Mode {
-        size,
-        refresh: refresh_mhz,
-    };
+    let mode = Mode { size, refresh: refresh_mhz };
     output.change_current_state(
         Some(mode),
         Some(transform),
@@ -58,10 +55,7 @@ pub fn create_output(
 
 /// Update an output after its size changed (winit window resized).
 pub fn resize_output(output: &Output, size: Size<i32, Physical>, refresh_mhz: i32) {
-    let mode = Mode {
-        size,
-        refresh: refresh_mhz,
-    };
+    let mode = Mode { size, refresh: refresh_mhz };
     output.change_current_state(Some(mode), None, None, None);
     output.set_preferred(mode);
 }

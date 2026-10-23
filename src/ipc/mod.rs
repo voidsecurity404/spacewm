@@ -208,10 +208,9 @@ fn accept(state: &mut SpaceState, stream: UnixStream) {
     ipc.next_id += 1;
     let token = state
         .loop_handle
-        .insert_source(
-            Generic::new(reader, Interest::READ, Mode::Level),
-            move |_, _, state| Ok(on_readable(state, id)),
-        )
+        .insert_source(Generic::new(reader, Interest::READ, Mode::Level), move |_, _, state| {
+            Ok(on_readable(state, id))
+        })
         .ok();
     let Some(ipc) = state.ipc.as_mut() else {
         return;
@@ -247,11 +246,7 @@ fn on_readable(state: &mut SpaceState, id: ConnectionId) -> PostAction {
     let mut eof = false;
     let mut too_long = false;
     {
-        let Some(conn) = state
-            .ipc
-            .as_mut()
-            .and_then(|ipc| ipc.connections.get_mut(&id))
-        else {
+        let Some(conn) = state.ipc.as_mut().and_then(|ipc| ipc.connections.get_mut(&id)) else {
             return PostAction::Remove;
         };
         let mut chunk = [0u8; 16 * 1024];
@@ -305,11 +300,7 @@ fn on_readable(state: &mut SpaceState, id: ConnectionId) -> PostAction {
     }
 
     if too_long {
-        let _ = reply(
-            state,
-            id,
-            &Response::error("request too large (max 64 KiB)"),
-        );
+        let _ = reply(state, id, &Response::error("request too large (max 64 KiB)"));
         close(state, id);
         return PostAction::Remove;
     }
@@ -338,10 +329,8 @@ fn reply(state: &mut SpaceState, id: ConnectionId, response: &Response) -> Resul
             .insert_source(
                 Generic::new(writer, Interest::WRITE, Mode::Level),
                 move |_, _, state| {
-                    let Some(conn) = state
-                        .ipc
-                        .as_mut()
-                        .and_then(|ipc| ipc.connections.get_mut(&id))
+                    let Some(conn) =
+                        state.ipc.as_mut().and_then(|ipc| ipc.connections.get_mut(&id))
                     else {
                         return Ok(PostAction::Remove);
                     };
@@ -360,11 +349,7 @@ fn reply(state: &mut SpaceState, id: ConnectionId, response: &Response) -> Resul
                 },
             )
             .ok();
-        if let Some(conn) = state
-            .ipc
-            .as_mut()
-            .and_then(|ipc| ipc.connections.get_mut(&id))
-        {
+        if let Some(conn) = state.ipc.as_mut().and_then(|ipc| ipc.connections.get_mut(&id)) {
             conn.write_token = token;
         }
     }
@@ -387,9 +372,7 @@ fn handle_request(state: &mut SpaceState, id: ConnectionId, request: Request) ->
             version: env!("CARGO_PKG_VERSION").into(),
             backend: state.backend.name().into(),
         },
-        Request::ListPanels => Response::Panels {
-            panels: list_panels(state),
-        },
+        Request::ListPanels => Response::Panels { panels: list_panels(state) },
         Request::FocusPanel { id: panel } => match state.window_by_id(panel) {
             Some(_) if state.render_mode == crate::cli::RenderMode::Scene3D => {
                 crate::input::mode::set_mode(
@@ -442,11 +425,7 @@ fn handle_request(state: &mut SpaceState, id: ConnectionId, request: Request) ->
             state.quit();
             Response::Ok
         }
-        Request::Teleport {
-            position,
-            yaw_deg,
-            pitch_deg,
-        } => {
+        Request::Teleport { position, yaw_deg, pitch_deg } => {
             let mut values: Vec<f64> = position.iter().map(|&v| v as f64).collect();
             values.extend(yaw_deg.map(|v| v as f64));
             values.extend(pitch_deg.map(|v| v as f64));
@@ -455,6 +434,12 @@ fn handle_request(state: &mut SpaceState, id: ConnectionId, request: Request) ->
             }
             let camera = &mut state.view.camera;
             camera.position = glam::Vec3::from(position);
+            // Teleporting puts you in fly mode, so you stay where you were put instead of
+            // falling (double-tap Space to walk again).
+            state.player = crate::world::player::Player::new(
+                camera.position - glam::Vec3::new(0.0, crate::world::player::EYE_HEIGHT, 0.0),
+            );
+            state.player.flying = true;
             if let Some(yaw) = yaw_deg {
                 camera.yaw = yaw.to_radians().rem_euclid(std::f32::consts::TAU);
             }
@@ -465,12 +450,35 @@ fn handle_request(state: &mut SpaceState, id: ConnectionId, request: Request) ->
             state.queue_redraw();
             Response::Ok
         }
+        Request::SetBlock { pos, block } => {
+            if pos.iter().any(|v| v.abs() > 100_000) {
+                return Some(Response::error("position out of range"));
+            }
+            match serde_json::from_value::<crate::world::block::Block>(serde_json::Value::String(
+                block.clone(),
+            )) {
+                Ok(b) => {
+                    let p = glam::IVec3::from(pos);
+                    state.voxels.set_block(p, b);
+                    state.layout.record_block(p, b);
+                    state.layout_changed();
+                    state.queue_redraw();
+                    Response::Ok
+                }
+                Err(_) => Response::error(format!("unknown block '{block}'")),
+            }
+        }
+        Request::GetBlock { pos } => {
+            let b = state.voxels.map.block_at(glam::IVec3::from(pos));
+            Response::Block {
+                block: serde_json::to_value(b)
+                    .ok()
+                    .and_then(|v| v.as_str().map(String::from))
+                    .unwrap_or_default(),
+            }
+        }
         Request::Subscribe { events } => {
-            if let Some(conn) = state
-                .ipc
-                .as_mut()
-                .and_then(|ipc| ipc.connections.get_mut(&id))
-            {
+            if let Some(conn) = state.ipc.as_mut().and_then(|ipc| ipc.connections.get_mut(&id)) {
                 conn.subscriptions = events;
             }
             Response::Ok
@@ -552,17 +560,19 @@ fn list_panels(state: &SpaceState) -> Vec<PanelInfo> {
             let size = window.geometry().size;
             // 3D position of the panel (metres); 2D-only windows fall back to their place
             // in the 2D space.
-            let (position, yaw_deg) = match state.world.panel_for_window(window) {
+            let (position, yaw_deg, pixels_per_unit, visible) = match state.world.panel_for_window(window) {
                 Some(p) => {
                     let n = p.normal();
                     (
                         [p.position.x as f64, p.position.y as f64, p.position.z as f64],
                         (n.x as f64).atan2(n.z as f64).to_degrees(),
+                        p.pixels_per_unit as f64,
+                        p.visible,
                     )
                 }
                 None => {
                     let loc = state.space.element_location(window).unwrap_or_default();
-                    ([loc.x as f64, loc.y as f64, 0.0], 0.0)
+                    ([loc.x as f64, loc.y as f64, 0.0], 0.0, 0.0, true)
                 }
             };
             PanelInfo {
@@ -571,6 +581,8 @@ fn list_panels(state: &SpaceState) -> Vec<PanelInfo> {
                 title,
                 position,
                 yaw_deg,
+                pixels_per_unit,
+                visible,
                 size_px: [size.w, size.h],
                 focused: matches!(&focused, Some(crate::focus::KeyboardFocusTarget::Window(w)) if w == window),
                 kind: if window.x11_surface().is_some() { "x11" } else { "wayland" }.into(),
@@ -587,14 +599,10 @@ fn validate_screenshot_path(path: &str, force: bool) -> Result<PathBuf, String> 
         return Err("screenshot path must be absolute".into());
     }
     let home = std::env::var_os("HOME").ok_or("HOME is not set")?;
-    let home = Path::new(&home)
-        .canonicalize()
-        .map_err(|e| format!("HOME: {e}"))?;
+    let home = Path::new(&home).canonicalize().map_err(|e| format!("HOME: {e}"))?;
     let name = path.file_name().ok_or("screenshot path has no file name")?;
     let parent = path.parent().ok_or("screenshot path has no parent")?;
-    let parent = parent
-        .canonicalize()
-        .map_err(|e| format!("{}: {e}", parent.display()))?;
+    let parent = parent.canonicalize().map_err(|e| format!("{}: {e}", parent.display()))?;
     if !parent.starts_with(&home) {
         return Err(format!("screenshot path must be inside {}", home.display()));
     }
@@ -604,10 +612,7 @@ fn validate_screenshot_path(path: &str, force: bool) -> Result<PathBuf, String> 
             Err("refusing to write through a symlink".into())
         }
         Ok(meta) if !meta.is_file() => Err("target exists and is not a regular file".into()),
-        Ok(_) if !force => Err(format!(
-            "{} exists (use force to overwrite)",
-            full.display()
-        )),
+        Ok(_) if !force => Err(format!("{} exists (use force to overwrite)", full.display())),
         _ => Ok(full),
     }
 }
@@ -637,10 +642,8 @@ pub fn finish_screenshots(
         Err(e) => {
             tracing::warn!("screenshot capture failed: {e}");
             for request in pending.drain(..) {
-                let _ = done.send(ScreenshotDone {
-                    reply_to: request.reply_to,
-                    result: Err(e.clone()),
-                });
+                let _ = done
+                    .send(ScreenshotDone { reply_to: request.reply_to, result: Err(e.clone()) });
             }
         }
     }
@@ -651,11 +654,7 @@ pub fn on_screenshot_done(state: &mut SpaceState, done: ScreenshotDone) {
     let response = match done.result {
         Ok((path, width, height)) => {
             tracing::info!(path = %path.display(), width, height, "screenshot saved");
-            Response::Screenshot {
-                path: path.display().to_string(),
-                width,
-                height,
-            }
+            Response::Screenshot { path: path.display().to_string(), width, height }
         }
         Err(e) => Response::error(e),
     };

@@ -47,10 +47,7 @@ fn is_base_level(state: &mut SpaceState, keycode: Keycode, sym: Keysym) -> bool 
     keyboard.with_xkb_state(state, |ctx| {
         ctx.xkb()
             .lock()
-            .map(|xkb| {
-                xkb.raw_syms_for_key_in_layout(keycode, xkb.active_layout())
-                    .contains(&sym)
-            })
+            .map(|xkb| xkb.raw_syms_for_key_in_layout(keycode, xkb.active_layout()).contains(&sym))
             .unwrap_or(true)
     })
 }

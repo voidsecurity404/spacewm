@@ -1,10 +1,7 @@
 //! Everything about the 3D view of one output: camera, temporary controls, the scene
 //! renderer and frame statistics.
 
-use std::{
-    path::PathBuf,
-    time::{Duration, Instant},
-};
+use std::{path::PathBuf, time::Duration};
 
 use smithay::{
     backend::renderer::{
@@ -13,7 +10,7 @@ use smithay::{
     utils::{Physical, Size},
 };
 
-use glam::{Mat4, Vec2, Vec3, Vec4};
+use glam::{IVec3, Mat4, Vec2, Vec3, Vec4};
 use smithay::{
     backend::renderer::{damage::OutputDamageTracker, Bind, Offscreen},
     input::pointer::CursorImageStatus,
@@ -26,10 +23,11 @@ use super::{
     cursor::{cursor_elements, CursorThemeCache},
     panel_texture::{window_is_opaque, PanelTextureCache},
     scene::{PanelDraw, SceneRenderer},
+    voxels::RENDER_DISTANCE,
 };
 use crate::{
     input::{camera_controls::CameraControls, mode::Highlight},
-    world::{panel::PanelId, World},
+    world::{mesh::ChunkMeshData, panel::PanelId, World},
 };
 
 #[derive(Default)]
@@ -70,10 +68,7 @@ impl FrameStats {
             "debug"
         );
         let enabled = self.enabled;
-        *self = Self {
-            enabled,
-            ..Self::default()
-        };
+        *self = Self { enabled, ..Self::default() };
     }
 }
 
@@ -92,7 +87,6 @@ pub struct View3D {
     /// Set if creating the scene renderer failed; we fall back to a blank frame instead
     /// of retrying (and logging) every frame.
     failed: bool,
-    last_update: Option<Instant>,
     last_size: Size<i32, Physical>,
 }
 
@@ -118,6 +112,10 @@ pub struct SceneInputs<'a> {
     pub world: &'a mut World,
     pub highlight: Highlight,
     pub cursor: Option<PanelCursor<'a>>,
+    /// Chunk meshes from the mesher, waiting for upload.
+    pub chunk_meshes: &'a mut Vec<ChunkMeshData>,
+    /// The block the crosshair is on (gets an outline).
+    pub outline: Option<IVec3>,
 }
 
 /// Border colors (straight RGBA) and widths in window px.
@@ -150,7 +148,6 @@ impl View3D {
             stats: FrameStats::default(),
             pending_shader_reload: false,
             failed: false,
-            last_update: None,
             last_size: Size::default(),
         }
     }
@@ -158,21 +155,6 @@ impl View3D {
     pub fn request_shader_reload(&mut self) {
         self.pending_shader_reload = true;
         self.dirty = true;
-    }
-
-    /// Walk the camera for the time since the last frame. True if it moved.
-    pub fn advance(&mut self, speed: f32) -> bool {
-        // Frame-rate independent movement. After an idle period the gap is huge, so
-        // assume one 60 Hz frame instead of teleporting.
-        let now = Instant::now();
-        let dt = match self.last_update {
-            Some(last) if self.controls.is_moving() => {
-                now.duration_since(last).as_secs_f32().min(0.1)
-            }
-            _ => 1.0 / 60.0,
-        };
-        self.last_update = Some(now);
-        self.controls.update(&mut self.camera, dt, speed)
     }
 
     /// Run before binding the output framebuffer: update panel textures and re-render
@@ -183,11 +165,7 @@ impl View3D {
         size: Size<i32, Physical>,
         inputs: SceneInputs<'_>,
     ) -> Prepared {
-        let SceneInputs {
-            world,
-            highlight,
-            cursor,
-        } = inputs;
+        let SceneInputs { world, highlight, cursor, chunk_meshes, outline } = inputs;
         if size != self.last_size {
             self.camera.set_aspect(size.w, size.h);
             self.last_size = size;
@@ -205,20 +183,14 @@ impl View3D {
         }
         let continuous = self.controls.is_moving();
         let Some(scene) = self.scene.as_mut() else {
-            return Prepared {
-                element: None,
-                scene_rendered: false,
-                continuous,
-            };
+            return Prepared { element: None, scene_rendered: false, continuous };
         };
         if std::mem::take(&mut self.pending_shader_reload) {
             scene.reload_shaders(renderer);
         }
 
         // New window content → new panel textures → the scene must be redrawn.
-        let textures = self
-            .panel_textures
-            .get_or_insert_with(|| PanelTextureCache::new(renderer));
+        let textures = self.panel_textures.get_or_insert_with(|| PanelTextureCache::new(renderer));
         textures.updates = 0;
         if textures.update(renderer, world) {
             self.dirty = true;
@@ -250,21 +222,25 @@ impl View3D {
             None => None,
         };
 
+        // Newly meshed chunks (a few per frame).
+        if scene.upload_chunks(renderer, chunk_meshes) > 0 {
+            self.dirty = true;
+        }
+
         let mut scene_rendered = false;
         if self.dirty {
             let mut draws = panel_draws(world, textures, &self.camera, highlight);
             draws.extend(cursor_draw);
-            match scene.render(renderer, &self.camera, size, &draws) {
+            let voxel_frame = scene.voxels.visible(&self.camera, RENDER_DISTANCE, outline);
+            match scene.render(renderer, &self.camera, size, &draws, &voxel_frame) {
                 Ok(()) => scene_rendered = true,
                 Err(err) => tracing::error!("scene render failed: {err}"),
             }
             self.dirty = false;
         }
-        Prepared {
-            element: scene.element(),
-            scene_rendered,
-            continuous,
-        }
+        // More meshes waiting: come back next frame.
+        let continuous = continuous || !chunk_meshes.is_empty();
+        Prepared { element: scene.element(), scene_rendered, continuous }
     }
 }
 
@@ -339,11 +315,7 @@ fn cursor_draw(
     let p = world.panels().iter().find(|p| p.id == panel)?;
     let ppu = p.pixels_per_unit;
     let (gw, gh) = (p.size_px.0 as f32, p.size_px.1 as f32);
-    let local = Vec3::new(
-        (at.x as f32 - gw / 2.0) / ppu,
-        (gh / 2.0 - at.y as f32) / ppu,
-        0.001,
-    );
+    let local = Vec3::new((at.x as f32 - gw / 2.0) / ppu, (gh / 2.0 - at.y as f32) / ppu, 0.001);
     let size = CURSOR_TEX as f32 / ppu;
     let model = Mat4::from_rotation_translation(p.rotation, p.position)
         * Mat4::from_translation(local)
@@ -383,12 +355,8 @@ fn panel_draws(
             let sy = tex_size.y / p.bbox_px.size.h.max(1) as f32;
             let x0 = -p.bbox_px.loc.x as f32 * sx;
             let y0 = -p.bbox_px.loc.y as f32 * sy;
-            let geo_rect = Vec4::new(
-                x0,
-                y0,
-                x0 + p.size_px.0 as f32 * sx,
-                y0 + p.size_px.1 as f32 * sy,
-            );
+            let geo_rect =
+                Vec4::new(x0, y0, x0 + p.size_px.0 as f32 * sx, y0 + p.size_px.1 as f32 * sy);
             let (border_px, border_color) = if highlight.focused == Some(p.id) {
                 (FOCUS_BORDER_PX, FOCUS_COLOR)
             } else if highlight.hovered == Some(p.id) {

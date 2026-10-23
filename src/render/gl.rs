@@ -60,9 +60,7 @@ pub fn compile_shader(gl: &Gl, kind: u32, name: &str, src: &str) -> Result<glow:
         if !gl.get_shader_compile_status(shader) {
             let log = gl.get_shader_info_log(shader);
             gl.delete_shader(shader);
-            let line = shader_error_line(&log)
-                .map(|l| format!(" line {l}"))
-                .unwrap_or_default();
+            let line = shader_error_line(&log).map(|l| format!(" line {l}")).unwrap_or_default();
             return Err(SpaceError::Render(format!("{name}{line}: {}", log.trim())));
         }
         Ok(shader)
@@ -97,10 +95,7 @@ pub fn link_program(
         if !gl.get_program_link_status(program) {
             let log = gl.get_program_info_log(program);
             gl.delete_program(program);
-            return Err(SpaceError::Render(format!(
-                "{name}: link failed: {}",
-                log.trim()
-            )));
+            return Err(SpaceError::Render(format!("{name}: link failed: {}", log.trim())));
         }
         Ok(Program {
             id: program,
@@ -201,20 +196,8 @@ pub struct ColorVertex {
 impl Vertex for ColorVertex {
     fn attribs() -> &'static [Attrib] {
         &[
-            Attrib {
-                location: 0,
-                components: 3,
-                ty: glow::FLOAT,
-                normalized: false,
-                offset: 0,
-            },
-            Attrib {
-                location: 1,
-                components: 3,
-                ty: glow::FLOAT,
-                normalized: false,
-                offset: 12,
-            },
+            Attrib { location: 0, components: 3, ty: glow::FLOAT, normalized: false, offset: 0 },
+            Attrib { location: 1, components: 3, ty: glow::FLOAT, normalized: false, offset: 12 },
         ]
     }
 }
@@ -285,13 +268,7 @@ impl Mesh {
             gl.bind_buffer(glow::ARRAY_BUFFER, None);
             gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, None);
             gl_check(gl, "Mesh::new");
-            Ok(Self {
-                vao,
-                vbo,
-                ebo,
-                index_count: indices.len() as i32,
-                mode,
-            })
+            Ok(Self { vao, vbo, ebo, index_count: indices.len() as i32, mode })
         }
     }
 

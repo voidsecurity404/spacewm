@@ -36,6 +36,14 @@ pub enum Request {
         #[serde(default)]
         pitch_deg: Option<f32>,
     },
+    /// Change a block (recorded in the saved layout like a block placed by hand).
+    SetBlock {
+        pos: [i32; 3],
+        block: String,
+    },
+    GetBlock {
+        pos: [i32; 3],
+    },
     /// Turn this connection into an event stream.
     Subscribe {
         events: Vec<EventKind>,
@@ -129,6 +137,10 @@ impl Event {
     }
 }
 
+fn yes() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PanelInfo {
     pub id: u64,
@@ -139,6 +151,11 @@ pub struct PanelInfo {
     /// Panel rotation around Y in degrees; its front faces (sin yaw, 0, cos yaw).
     #[serde(default)]
     pub yaw_deg: f64,
+    /// Panel scale: window pixels per metre.
+    #[serde(default)]
+    pub pixels_per_unit: f64,
+    #[serde(default = "yes")]
+    pub visible: bool,
     pub size_px: [i32; 2],
     pub focused: bool,
     /// "wayland" or "x11".
@@ -149,34 +166,18 @@ pub struct PanelInfo {
 #[serde(tag = "response", rename_all = "snake_case")]
 pub enum Response {
     Ok,
-    Error {
-        message: String,
-    },
-    Version {
-        version: String,
-        backend: String,
-    },
-    Panels {
-        panels: Vec<PanelInfo>,
-    },
-    Spawned {
-        pid: u32,
-    },
-    Screenshot {
-        path: String,
-        width: u32,
-        height: u32,
-    },
-    Event {
-        event: Event,
-    },
+    Error { message: String },
+    Version { version: String, backend: String },
+    Panels { panels: Vec<PanelInfo> },
+    Spawned { pid: u32 },
+    Screenshot { path: String, width: u32, height: u32 },
+    Event { event: Event },
+    Block { block: String },
 }
 
 impl Response {
     pub fn error(message: impl Into<String>) -> Self {
-        Self::Error {
-            message: message.into(),
-        }
+        Self::Error { message: message.into() }
     }
 }
 
@@ -189,25 +190,13 @@ mod tests {
         let requests = vec![
             Request::Version,
             Request::ListPanels,
-            Request::Spawn {
-                command: "foot -e htop".into(),
-            },
-            Request::Screenshot {
-                path: "/home/u/a.png".into(),
-                force: true,
-            },
-            Request::Subscribe {
-                events: vec![EventKind::PanelOpened],
-            },
+            Request::Spawn { command: "foot -e htop".into() },
+            Request::Screenshot { path: "/home/u/a.png".into(), force: true },
+            Request::Subscribe { events: vec![EventKind::PanelOpened] },
             Request::Input {
-                action: InputAction::Key {
-                    combo: "Alt+Return".into(),
-                    state: PressMode::Tap,
-                },
+                action: InputAction::Key { combo: "Alt+Return".into(), state: PressMode::Tap },
             },
-            Request::Input {
-                action: InputAction::MoveTo { x: 1.5, y: 2.0 },
-            },
+            Request::Input { action: InputAction::MoveTo { x: 1.5, y: 2.0 } },
         ];
         for r in requests {
             let line = serde_json::to_string(&r).expect("serialize");
@@ -224,12 +213,7 @@ mod tests {
         let r: Request =
             serde_json::from_str(r#"{"request":"input","action":{"action":"type","text":"hi"}}"#)
                 .expect("parse");
-        assert_eq!(
-            r,
-            Request::Input {
-                action: InputAction::Type { text: "hi".into() }
-            }
-        );
+        assert_eq!(r, Request::Input { action: InputAction::Type { text: "hi".into() } });
         assert_eq!(
             serde_json::to_string(&Response::Ok).expect("serialize"),
             r#"{"response":"ok"}"#

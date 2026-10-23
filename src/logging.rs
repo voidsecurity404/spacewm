@@ -54,12 +54,7 @@ pub fn init(level: &str) -> anyhow::Result<PathBuf> {
                 .with_target(true),
         )
         // A Mutex<File> is a valid writer: each event locks, writes a line, unlocks.
-        .with(
-            fmt::layer()
-                .with_writer(Mutex::new(file))
-                .with_ansi(false)
-                .with_target(true),
-        )
+        .with(fmt::layer().with_writer(Mutex::new(file)).with_ansi(false).with_target(true))
         .try_init()
         .context("tracing subscriber already installed")?;
 

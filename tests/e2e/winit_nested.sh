@@ -13,7 +13,7 @@ trap 'kill $WP 2>/dev/null || true' EXIT
 for _ in $(seq 50); do [ -S "$XDG_RUNTIME_DIR/$HOST" ] && break; sleep 0.1; done
 
 WAYLAND_DISPLAY="$HOST" "$ROOT/target/debug/spacewm" --backend winit --render 2d \
-    --allow-input-injection --ipc-socket "$SOCK" >"$OUT/winit.log" 2>&1 &
+    --allow-input-injection --ipc-socket "$SOCK" --layout "$OUT/layout-winit.json" >"$OUT/winit.log" 2>&1 &
 KP=$!
 for _ in $(seq 50); do K version >/dev/null 2>&1 && break; sleep 0.1; done
 
@@ -29,9 +29,10 @@ echo "ok - winit nested backend (2D) renders, screenshots, exits cleanly"
 
 # 3D through the winit surface (Flipped180 output transform): sky must be on top.
 WAYLAND_DISPLAY="$HOST" "$ROOT/target/debug/spacewm" --backend winit --render 3d \
-    --allow-input-injection --ipc-socket "$SOCK" >"$OUT/winit3d.log" 2>&1 &
+    --allow-input-injection --ipc-socket "$SOCK" --layout "$OUT/layout-winit.json" >"$OUT/winit3d.log" 2>&1 &
 KP=$!
 for _ in $(seq 50); do K version >/dev/null 2>&1 && break; sleep 0.1; done
+K teleport 0 30 40 --yaw 0 --pitch -10
 sleep 0.5
 rm -f "$OUT/winit3d.png"; K screenshot "$OUT/winit3d.png" >/dev/null
 K quit; wait $KP

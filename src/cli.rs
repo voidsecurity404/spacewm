@@ -53,6 +53,15 @@ pub struct Cli {
     #[arg(long)]
     pub shader_dir: Option<PathBuf>,
 
+    /// Where panel placements and block edits are saved
+    /// (default: $XDG_STATE_HOME/spacewm/layout.json).
+    #[arg(long)]
+    pub layout: Option<PathBuf>,
+
+    /// World generation seed (the same seed always gives the same island).
+    #[arg(long, default_value_t = crate::world::terrain::DEFAULT_SEED)]
+    pub world_seed: u64,
+
     /// Headless backend: output size as WIDTHxHEIGHT.
     #[arg(long, default_value = "1280x720", value_parser = parse_size)]
     pub headless_size: (i32, i32),
@@ -73,17 +82,9 @@ pub struct Cli {
 
 /// Parse "1280x720" into (1280, 720).
 pub fn parse_size(s: &str) -> Result<(i32, i32), String> {
-    let (w, h) = s
-        .split_once('x')
-        .ok_or_else(|| format!("expected WIDTHxHEIGHT, got '{s}'"))?;
-    let w: i32 = w
-        .trim()
-        .parse()
-        .map_err(|_| format!("bad width in '{s}'"))?;
-    let h: i32 = h
-        .trim()
-        .parse()
-        .map_err(|_| format!("bad height in '{s}'"))?;
+    let (w, h) = s.split_once('x').ok_or_else(|| format!("expected WIDTHxHEIGHT, got '{s}'"))?;
+    let w: i32 = w.trim().parse().map_err(|_| format!("bad width in '{s}'"))?;
+    let h: i32 = h.trim().parse().map_err(|_| format!("bad height in '{s}'"))?;
     if !(64..=16384).contains(&w) || !(64..=16384).contains(&h) {
         return Err(format!("size out of range (64..=16384): '{s}'"));
     }

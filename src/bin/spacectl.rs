@@ -66,6 +66,25 @@ enum Command {
         #[arg(long, allow_hyphen_values = true)]
         pitch: Option<f32>,
     },
+    /// Set a block: X Y Z BLOCK (air, grass, dirt, stone, wood, leaves, glass, sand, water).
+    SetBlock {
+        #[arg(allow_hyphen_values = true)]
+        x: i32,
+        #[arg(allow_hyphen_values = true)]
+        y: i32,
+        #[arg(allow_hyphen_values = true)]
+        z: i32,
+        block: String,
+    },
+    /// Print the block at X Y Z.
+    GetBlock {
+        #[arg(allow_hyphen_values = true)]
+        x: i32,
+        #[arg(allow_hyphen_values = true)]
+        y: i32,
+        #[arg(allow_hyphen_values = true)]
+        z: i32,
+    },
     /// Print events as they happen.
     Watch,
     /// Synthetic input (needs spacewm --allow-input-injection).
@@ -147,11 +166,7 @@ fn find_socket(explicit: Option<PathBuf>) -> Result<PathBuf, String> {
         1 => Ok(found.remove(0)),
         _ => Err(format!(
             "several spacewm sockets found, pick one with --socket: {}",
-            found
-                .iter()
-                .map(|p| p.display().to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
+            found.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")
         )),
     }
 }
@@ -173,23 +188,14 @@ fn to_request(command: Command) -> Request {
         },
         Command::Screenshot { path, force } => {
             let path = std::path::absolute(&path).unwrap_or(path);
-            Request::Screenshot {
-                path: path.display().to_string(),
-                force,
-            }
+            Request::Screenshot { path: path.display().to_string(), force }
         }
         Command::Quit => Request::Quit,
-        Command::Teleport {
-            x,
-            y,
-            z,
-            yaw,
-            pitch,
-        } => Request::Teleport {
-            position: [x, y, z],
-            yaw_deg: yaw,
-            pitch_deg: pitch,
-        },
+        Command::SetBlock { x, y, z, block } => Request::SetBlock { pos: [x, y, z], block },
+        Command::GetBlock { x, y, z } => Request::GetBlock { pos: [x, y, z] },
+        Command::Teleport { x, y, z, yaw, pitch } => {
+            Request::Teleport { position: [x, y, z], yaw_deg: yaw, pitch_deg: pitch }
+        }
         Command::Watch => Request::Subscribe {
             events: vec![
                 EventKind::PanelOpened,
@@ -201,10 +207,7 @@ fn to_request(command: Command) -> Request {
         },
         Command::Input { action } => Request::Input {
             action: match action {
-                InputCmd::Key { combo, state } => InputAction::Key {
-                    combo,
-                    state: press(state),
-                },
+                InputCmd::Key { combo, state } => InputAction::Key { combo, state: press(state) },
                 InputCmd::Type { text } => InputAction::Type { text },
                 InputCmd::MoveTo { x, y } => InputAction::MoveTo { x, y },
                 InputCmd::MoveBy { dx, dy } => InputAction::MoveBy { dx, dy },
@@ -228,11 +231,7 @@ fn print_human(response: &Response) {
         Response::Error { message } => eprintln!("error: {message}"),
         Response::Version { version, backend } => println!("spacewm {version} ({backend})"),
         Response::Spawned { pid } => println!("started pid {pid}"),
-        Response::Screenshot {
-            path,
-            width,
-            height,
-        } => println!("{path} ({width}x{height})"),
+        Response::Screenshot { path, width, height } => println!("{path} ({width}x{height})"),
         Response::Panels { panels } => {
             println!(
                 "{:>4}  {:<7}  {:<3}  {:<22}  {:<11}  {:<20}  TITLE",
@@ -246,15 +245,13 @@ fn print_human(response: &Response) {
                     if p.focused { "*" } else { "" },
                     p.app_id.as_deref().unwrap_or("-"),
                     format!("{}x{}", p.size_px[0], p.size_px[1]),
-                    format!(
-                        "{:.2} {:.2} {:.2}",
-                        p.position[0], p.position[1], p.position[2]
-                    ),
+                    format!("{:.2} {:.2} {:.2}", p.position[0], p.position[1], p.position[2]),
                     p.title.as_deref().unwrap_or("")
                 );
             }
         }
         Response::Event { event } => println!("{event:?}"),
+        Response::Block { block } => println!("{block}"),
     }
 }
 
@@ -268,9 +265,7 @@ fn run() -> Result<bool, String> {
         .map_err(|e| format!("cannot connect to {}: {e}", path.display()))?;
     let mut line = serde_json::to_string(&request).map_err(|e| e.to_string())?;
     line.push('\n');
-    stream
-        .write_all(line.as_bytes())
-        .map_err(|e| e.to_string())?;
+    stream.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
 
     let mut reader = BufReader::new(stream);
     let mut ok = true;

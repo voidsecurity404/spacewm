@@ -35,17 +35,15 @@ use smithay::{
 
 use super::{
     camera::Camera,
-    gl::{build_program, gl_check, Attrib, ColorVertex, Gl, Mesh, Program, Vertex},
+    gl::{build_program, gl_check, Attrib, Gl, Mesh, Program, Vertex},
+    voxels::{VoxelFrame, VoxelRenderer, UPLOADS_PER_FRAME},
 };
-use crate::error::SpaceError;
+use crate::{error::SpaceError, world::mesh::ChunkMeshData};
 
 /// Sky blue, also the fog color so the horizon fades into the sky.
 pub const SKY_COLOR: [f32; 3] = [0.53, 0.75, 0.95];
 const FOG_START: f32 = 40.0;
 const FOG_END: f32 = 120.0;
-/// The floor must reach past FOG_END (half-size 128 m > 120 m), otherwise its edge shows as
-/// a hard line before the fog has faded it out.
-const FLOOR_TILES: i32 = 256;
 
 struct ShaderSource {
     name: &'static str,
@@ -57,6 +55,12 @@ const BASIC: ShaderSource = ShaderSource {
     name: "basic",
     vert: include_str!("shaders/basic.vert"),
     frag: include_str!("shaders/basic.frag"),
+};
+
+const VOXEL: ShaderSource = ShaderSource {
+    name: "voxel",
+    vert: include_str!("shaders/voxel.vert"),
+    frag: include_str!("shaders/voxel.frag"),
 };
 
 const PANEL: ShaderSource = ShaderSource {
@@ -74,13 +78,7 @@ struct PanelVertex {
 
 impl Vertex for PanelVertex {
     fn attribs() -> &'static [Attrib] {
-        &[Attrib {
-            location: 0,
-            components: 2,
-            ty: glow::FLOAT,
-            normalized: false,
-            offset: 0,
-        }]
+        &[Attrib { location: 0, components: 2, ty: glow::FLOAT, normalized: false, offset: 0 }]
     }
 }
 
@@ -115,56 +113,13 @@ struct SceneTargets {
 pub struct SceneRenderer {
     basic: Program,
     panel: Program,
-    floor: Mesh,
-    axes: Mesh,
+    voxel: Program,
+    pub voxels: VoxelRenderer,
     quad: Mesh,
     targets: Option<SceneTargets>,
     /// MSAA sample count (0 = off).
     samples: i32,
     shader_dir: Option<PathBuf>,
-}
-
-fn floor_mesh(gl: &Gl) -> Result<Mesh, SpaceError> {
-    let half = FLOOR_TILES / 2;
-    let light = [0.36, 0.62, 0.30];
-    let dark = [0.30, 0.54, 0.25];
-    let mut vertices = Vec::with_capacity((FLOOR_TILES * FLOOR_TILES * 4) as usize);
-    let mut indices = Vec::with_capacity((FLOOR_TILES * FLOOR_TILES * 6) as usize);
-    for z in -half..half {
-        for x in -half..half {
-            let color = if (x + z).rem_euclid(2) == 0 {
-                light
-            } else {
-                dark
-            };
-            let base = vertices.len() as u32;
-            let (x0, x1, z0, z1) = (x as f32, x as f32 + 1.0, z as f32, z as f32 + 1.0);
-            for (px, pz) in [(x0, z0), (x0, z1), (x1, z1), (x1, z0)] {
-                vertices.push(ColorVertex {
-                    pos: [px, 0.0, pz],
-                    color,
-                });
-            }
-            // Counter-clockwise when seen from above, so the top side is the front face.
-            indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
-        }
-    }
-    Mesh::new(gl, &vertices, &indices, glow::TRIANGLES)
-}
-
-fn axes_mesh(gl: &Gl) -> Result<Mesh, SpaceError> {
-    // Slightly above the floor so the lines don't z-fight with it.
-    let o = [0.0, 0.01, 0.0];
-    let v = |pos, color| ColorVertex { pos, color };
-    let vertices = [
-        v(o, [1.0, 0.0, 0.0]),
-        v([1.0, 0.01, 0.0], [1.0, 0.0, 0.0]),
-        v(o, [0.0, 1.0, 0.0]),
-        v([0.0, 1.01, 0.0], [0.0, 1.0, 0.0]),
-        v(o, [0.0, 0.0, 1.0]),
-        v([0.0, 0.01, 1.0], [0.0, 0.0, 1.0]),
-    ];
-    Mesh::new(gl, &vertices, &[0, 1, 2, 3, 4, 5], glow::LINES)
 }
 
 fn quad_mesh(gl: &Gl) -> Result<Mesh, SpaceError> {
@@ -191,12 +146,7 @@ fn load_program(gl: &Gl, src: &ShaderSource, dir: Option<&PathBuf>) -> Result<Pr
             Err(e) => Err(SpaceError::Render(format!("{}: {e}", path.display()))),
         }
     };
-    build_program(
-        gl,
-        src.name,
-        &read("vert", src.vert)?,
-        &read("frag", src.frag)?,
-    )
+    build_program(gl, src.name, &read("vert", src.vert)?, &read("frag", src.frag)?)
 }
 
 impl SceneRenderer {
@@ -204,27 +154,18 @@ impl SceneRenderer {
         let gl_result = renderer.with_context(|gl| -> Result<_, SpaceError> {
             let basic = load_program(gl, &BASIC, shader_dir.as_ref())?;
             let panel = load_program(gl, &PANEL, shader_dir.as_ref())?;
-            let floor = floor_mesh(gl)?;
-            let axes = axes_mesh(gl)?;
+            let voxel = load_program(gl, &VOXEL, shader_dir.as_ref())?;
+            let voxels = VoxelRenderer::new(gl)?;
             let quad = quad_mesh(gl)?;
             // How many samples the driver supports for MSAA renderbuffers.
             let max_samples = unsafe { gl.get_parameter_i32(glow::MAX_SAMPLES) };
-            Ok((basic, panel, floor, axes, quad, max_samples.min(4)))
+            Ok((basic, panel, voxel, voxels, quad, max_samples.min(4)))
         });
-        let (basic, panel, floor, axes, quad, samples) =
+        let (basic, panel, voxel, voxels, quad, samples) =
             gl_result.map_err(|e| SpaceError::Render(format!("GL context: {e}")))??;
         let samples = if samples >= 2 { samples } else { 0 };
         tracing::info!(msaa = samples, "3D scene renderer ready");
-        Ok(Self {
-            basic,
-            panel,
-            floor,
-            axes,
-            quad,
-            targets: None,
-            samples,
-            shader_dir,
-        })
+        Ok(Self { basic, panel, voxel, voxels, quad, targets: None, samples, shader_dir })
     }
 
     /// Recompile shaders from `--shader-dir`. On error the old program stays in use.
@@ -233,7 +174,9 @@ impl SceneRenderer {
             tracing::info!("shader reload needs --shader-dir");
             return;
         };
-        for (src, slot) in [(&BASIC, &mut self.basic), (&PANEL, &mut self.panel)] {
+        let slots =
+            [(&BASIC, &mut self.basic), (&PANEL, &mut self.panel), (&VOXEL, &mut self.voxel)];
+        for (src, slot) in slots {
             match renderer.with_context(|gl| load_program(gl, src, Some(&dir))) {
                 Ok(Ok(program)) => {
                     let old = std::mem::replace(slot, program);
@@ -265,16 +208,8 @@ impl SceneRenderer {
             let tex = gl.create_texture().map_err(SpaceError::Render)?;
             gl.bind_texture(glow::TEXTURE_2D, Some(tex));
             gl.tex_storage_2d(glow::TEXTURE_2D, 1, glow::RGBA8, w, h);
-            gl.tex_parameter_i32(
-                glow::TEXTURE_2D,
-                glow::TEXTURE_MIN_FILTER,
-                glow::LINEAR as i32,
-            );
-            gl.tex_parameter_i32(
-                glow::TEXTURE_2D,
-                glow::TEXTURE_MAG_FILTER,
-                glow::LINEAR as i32,
-            );
+            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
+            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
             gl.bind_texture(glow::TEXTURE_2D, None);
 
             let resolve_fbo = gl.create_framebuffer().map_err(SpaceError::Render)?;
@@ -350,13 +285,7 @@ impl SceneRenderer {
         };
         let buffer =
             TextureRenderBuffer::from_texture(renderer, texture, 1, Transform::Normal, None);
-        self.targets = Some(SceneTargets {
-            size,
-            msaa,
-            resolve_fbo,
-            resolve_depth,
-            buffer,
-        });
+        self.targets = Some(SceneTargets { size, msaa, resolve_fbo, resolve_depth, buffer });
         tracing::debug!(w, h, samples, "scene targets (re)created");
         Ok(())
     }
@@ -385,6 +314,7 @@ impl SceneRenderer {
         camera: &Camera,
         size: Size<i32, Physical>,
         panels: &[PanelDraw],
+        voxel_frame: &VoxelFrame,
     ) -> Result<(), SpaceError> {
         self.ensure_targets(renderer, size)?;
         let Some(targets) = self.targets.as_mut() else {
@@ -392,7 +322,10 @@ impl SceneRenderer {
         };
         let basic = &mut self.basic;
         let panel_program = &mut self.panel;
-        let (floor, axes, quad) = (&self.floor, &self.axes, &self.quad);
+        let voxel_program = &mut self.voxel;
+        let voxels = &self.voxels;
+        let quad = &self.quad;
+        let fog = (Vec3::from(SKY_COLOR), FOG_START, FOG_END);
         let (w, h) = (size.w, size.h);
         // Flip Y (see module docs) so the texture comes out top-row-first.
         let proj = Mat4::from_scale(Vec3::new(1.0, -1.0, 1.0)) * camera.projection_matrix();
@@ -428,18 +361,33 @@ impl SceneRenderer {
                 basic.set_vec3(gl, "u_fog_color", Vec3::from(SKY_COLOR));
                 basic.set_f32(gl, "u_fog_start", FOG_START);
                 basic.set_f32(gl, "u_fog_end", FOG_END);
-                floor.draw(gl);
-                axes.draw(gl);
-
-                draw_panels(
+                // Draw order matters for transparency:
+                // 1. opaque blocks (and alpha-tested leaves), 2. the aimed-at block's outline,
+                // 3. opaque panels, 4. glass/water far to near, 5. translucent panels and the
+                // cursor — each blended layer over everything behind it.
+                voxels.draw_opaque(
                     gl,
-                    panel_program,
-                    quad,
-                    panels,
+                    voxel_program,
+                    voxel_frame,
                     &view,
                     &proj,
                     camera.position,
+                    fog,
                 );
+                if let Some(block) = voxel_frame.outline {
+                    voxels.draw_outline(gl, basic, block);
+                }
+                draw_panels(gl, panel_program, quad, panels, true, &view, &proj, camera.position);
+                voxels.draw_translucent(
+                    gl,
+                    voxel_program,
+                    voxel_frame,
+                    &view,
+                    &proj,
+                    camera.position,
+                    fog,
+                );
+                draw_panels(gl, panel_program, quad, panels, false, &view, &proj, camera.position);
 
                 if let Some((msaa_fbo, _, _)) = msaa {
                     // Resolve: average the samples of each pixel into the texture.
@@ -476,6 +424,29 @@ impl SceneRenderer {
         Ok(())
     }
 
+    /// Upload up to `UPLOADS_PER_FRAME` finished chunk meshes. Returns how many.
+    pub fn upload_chunks(
+        &mut self,
+        renderer: &mut GlowRenderer,
+        pending: &mut Vec<ChunkMeshData>,
+    ) -> usize {
+        let n = pending.len().min(UPLOADS_PER_FRAME);
+        if n == 0 {
+            return 0;
+        }
+        let batch: Vec<_> = pending.drain(..n).collect();
+        let voxels = &mut self.voxels;
+        let _ = renderer.with_context(|gl| {
+            for data in batch {
+                if let Err(err) = voxels.upload(gl, data) {
+                    tracing::warn!("chunk upload failed: {err}");
+                }
+            }
+            restore_smithay_state(gl);
+        });
+        n
+    }
+
     /// The element showing the last rendered scene, covering the output.
     pub fn element(&self) -> Option<TextureRenderElement<GlesTexture>> {
         let t = self.targets.as_ref()?;
@@ -494,8 +465,8 @@ impl SceneRenderer {
         let _ = renderer.with_context(|gl| {
             self.basic.destroy(gl);
             self.panel.destroy(gl);
-            self.floor.destroy(gl);
-            self.axes.destroy(gl);
+            self.voxel.destroy(gl);
+            self.voxels.destroy(gl);
             self.quad.destroy(gl);
         });
     }
@@ -503,16 +474,18 @@ impl SceneRenderer {
 
 /// Panels are flat and visible from both sides: no face culling (the shader darkens
 /// the back). Premultiplied alpha blending: out = src + dst·(1 − src.a).
+#[allow(clippy::too_many_arguments)]
 fn draw_panels(
     gl: &Gl,
     program: &mut Program,
     quad: &Mesh,
     panels: &[PanelDraw],
+    opaque_pass: bool,
     view: &Mat4,
     proj: &Mat4,
     camera_pos: Vec3,
 ) {
-    if panels.is_empty() {
+    if !panels.iter().any(|p| p.opaque == opaque_pass) {
         return;
     }
     unsafe {
@@ -529,7 +502,7 @@ fn draw_panels(
     program.set_f32(gl, "u_fog_start", FOG_START);
     program.set_f32(gl, "u_fog_end", FOG_END);
     program.set_i32(gl, "u_tex", 0);
-    for p in panels {
+    for p in panels.iter().filter(|p| p.opaque == opaque_pass) {
         unsafe {
             gl.depth_mask(p.opaque);
             gl.bind_texture(glow::TEXTURE_2D, Some(p.texture));
@@ -557,9 +530,7 @@ fn check_complete(gl: &Gl, label: &str) -> Result<(), SpaceError> {
     if status == glow::FRAMEBUFFER_COMPLETE {
         Ok(())
     } else {
-        Err(SpaceError::Render(format!(
-            "{label} framebuffer incomplete: 0x{status:x}"
-        )))
+        Err(SpaceError::Render(format!("{label} framebuffer incomplete: 0x{status:x}")))
     }
 }
 

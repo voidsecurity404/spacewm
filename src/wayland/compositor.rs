@@ -50,10 +50,8 @@ impl CompositorHandler for SpaceState {
             while let Some(parent) = get_parent(&root) {
                 root = parent;
             }
-            if let Some(window) = self
-                .space
-                .elements()
-                .find(|w| w.wl_surface().as_deref() == Some(&root))
+            if let Some(window) =
+                self.space.elements().find(|w| w.wl_surface().as_deref() == Some(&root))
             {
                 // Updates the window's cached geometry/bounding box.
                 window.on_commit();
@@ -62,6 +60,16 @@ impl CompositorHandler for SpaceState {
 
         crate::wayland::xdg_shell::handle_commit(self, surface);
         self.mark_surface_dirty(surface);
+        // First content from a window whose app we never learned: keep the default spot.
+        if let Some(window) = self.window_for_surface(surface) {
+            let pending = self.world.panel_for_window(&window).is_some_and(|p| p.placement_pending);
+            if pending && window.bbox().size.w > 0 {
+                self.restore_placement(&window);
+                if let Some(p) = self.world.panels_mut().iter_mut().find(|p| p.window == window) {
+                    p.placement_pending = false;
+                }
+            }
+        }
         self.queue_redraw();
     }
 }

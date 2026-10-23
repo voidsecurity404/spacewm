@@ -32,9 +32,7 @@ impl SeatHandler for SpaceState {
     /// the selection (otherwise any background app could sniff what you copy).
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&KeyboardFocusTarget>) {
         let dh = &self.display_handle;
-        let client = focused
-            .and_then(|f| f.wl_surface())
-            .and_then(|s| dh.get_client(s.id()).ok());
+        let client = focused.and_then(|f| f.wl_surface()).and_then(|s| dh.get_client(s.id()).ok());
         set_data_device_focus(dh, seat, client.clone());
         set_primary_focus(dh, seat, client);
         let id = match focused {

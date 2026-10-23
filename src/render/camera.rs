@@ -68,12 +68,7 @@ impl Camera {
 
     /// `perspective_rh_gl`: right-handed, depth mapped to −1..1 as OpenGL expects.
     pub fn projection_matrix(&self) -> Mat4 {
-        Mat4::perspective_rh_gl(
-            self.fov_y_deg.to_radians(),
-            self.aspect,
-            self.near,
-            self.far,
-        )
+        Mat4::perspective_rh_gl(self.fov_y_deg.to_radians(), self.aspect, self.near, self.far)
     }
 
     /// Mouse look. Moving the mouse right (dx > 0) turns right; moving it down (dy > 0,
@@ -115,10 +110,7 @@ mod tests {
 
     #[test]
     fn yaw_zero_looks_down_negative_z() {
-        let cam = Camera {
-            pitch: 0.0,
-            ..Camera::default()
-        };
+        let cam = Camera { pitch: 0.0, ..Camera::default() };
         assert!(close(cam.forward(), Vec3::NEG_Z));
         assert!(close(cam.right(), Vec3::X));
         assert!(close(cam.up(), Vec3::Y));
@@ -127,11 +119,7 @@ mod tests {
     #[test]
     fn basis_is_orthonormal() {
         for (yaw, pitch) in [(0.3, 0.2), (2.0, -1.2), (5.5, 1.5)] {
-            let cam = Camera {
-                yaw,
-                pitch,
-                ..Camera::default()
-            };
+            let cam = Camera { yaw, pitch, ..Camera::default() };
             let (f, r, u) = (cam.forward(), cam.right(), cam.up());
             assert!(f.dot(r).abs() < 1e-5 && f.dot(u).abs() < 1e-5 && r.dot(u).abs() < 1e-5);
             assert!((f.length() - 1.0).abs() < 1e-5);
@@ -142,10 +130,7 @@ mod tests {
 
     #[test]
     fn positive_yaw_turns_right() {
-        let mut cam = Camera {
-            pitch: 0.0,
-            ..Camera::default()
-        };
+        let mut cam = Camera { pitch: 0.0, ..Camera::default() };
         cam.rotate(100.0, 0.0, std::f32::consts::FRAC_PI_2 / 100.0);
         assert!(close(cam.forward(), Vec3::X));
     }
@@ -172,11 +157,7 @@ mod tests {
 
     #[test]
     fn projects_a_known_point_to_screen_center() {
-        let cam = Camera {
-            position: Vec3::ZERO,
-            pitch: 0.0,
-            ..Camera::default()
-        };
+        let cam = Camera { position: Vec3::ZERO, pitch: 0.0, ..Camera::default() };
         let clip = cam.projection_matrix() * cam.view_matrix() * Vec4::new(0.0, 0.0, -10.0, 1.0);
         let ndc = clip.truncate() / clip.w;
         assert!(ndc.x.abs() < 1e-5 && ndc.y.abs() < 1e-5);
@@ -190,11 +171,7 @@ mod tests {
 
     #[test]
     fn center_screen_ray_matches_forward() {
-        let cam = Camera {
-            yaw: 0.7,
-            pitch: -0.3,
-            ..Camera::default()
-        };
+        let cam = Camera { yaw: 0.7, pitch: -0.3, ..Camera::default() };
         let (origin, dir) = cam.screen_ray(0.0, 0.0);
         assert!(close(dir, cam.forward()));
         assert!((origin - cam.position).length() < cam.near * 1.5);

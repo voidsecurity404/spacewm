@@ -27,10 +27,7 @@ pub fn init_wayland_listener(
 
     loop_handle
         .insert_source(source, |stream, _, state| {
-            match state
-                .display_handle
-                .insert_client(stream, new_client_state())
-            {
+            match state.display_handle.insert_client(stream, new_client_state()) {
                 Ok(client) => tracing::info!(client = ?client.id(), "new client connected"),
                 // A broken client must never take the compositor down.
                 Err(err) => tracing::warn!("failed to insert new client: {err}"),
@@ -41,17 +38,14 @@ pub fn init_wayland_listener(
     // The Display's fd becomes readable when any client sent requests. Level mode: keep
     // waking us while there is unread data.
     loop_handle
-        .insert_source(
-            Generic::new(display, Interest::READ, Mode::Level),
-            |_, display, state| {
-                // SAFETY: we never drop the display while the source exists.
-                let display = unsafe { display.get_mut() };
-                if let Err(err) = display.dispatch_clients(state) {
-                    tracing::error!("failed to dispatch clients: {err}");
-                }
-                Ok(PostAction::Continue)
-            },
-        )
+        .insert_source(Generic::new(display, Interest::READ, Mode::Level), |_, display, state| {
+            // SAFETY: we never drop the display while the source exists.
+            let display = unsafe { display.get_mut() };
+            if let Err(err) = display.dispatch_clients(state) {
+                tracing::error!("failed to dispatch clients: {err}");
+            }
+            Ok(PostAction::Continue)
+        })
         .map_err(|e| anyhow::anyhow!("failed to insert display source: {}", e.error))?;
 
     Ok(socket_name)

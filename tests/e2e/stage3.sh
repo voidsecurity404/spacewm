@@ -10,7 +10,7 @@ wait_windows 1
 sleep 0.6
 # Look straight at the panel so its layout on screen is predictable.
 read -r X Y Z < <(pos 1)
-kc teleport "$X" "$Y" "$(python3 -c "print($Z + 0.9)")" --yaw 0 --pitch 0
+face_panel 1 0.9
 sleep 0.3
 A=$(shot s3-front)
 # foot's title bar (light) is at the TOP of the panel, the terminal (dark) below it:
@@ -45,13 +45,13 @@ kc input key Super+F3
 kc input key Super+Return
 wait_windows 2
 sleep 0.5
-read -r X2 _ _ < <(pos 2)
-python3 -c "exit(0 if $X2 - $X > 1.2 else 1)" || fail "second panel at x=$X2 overlaps the first at x=$X"
-pass "second panel spawns to the right (x $X -> $X2)"
+read -r X2 Y2 Z2 < <(pos 2)
+python3 -c "import math; exit(0 if math.dist(($X,$Y,$Z), ($X2,$Y2,$Z2)) > 1.2 else 1)" || fail "second panel at ($X2,$Y2,$Z2) overlaps the first at ($X,$Y,$Z)"
+pass "second panel spawns beside the first, not inside it"
 
 # Back side is a dark silhouette (in Walk mode: Window mode dims unfocused panels).
 kc input key Super+Escape
-kc teleport "$X" "$Y" "$(python3 -c "print($Z - 0.9)")" --yaw 180 --pitch 0
+behind_panel 1 0.9
 sleep 0.3
 C=$(shot s3-back)
 $PX near "$C" 500 300 26 26 26 12 >/dev/null || fail "back side not dark: $($PX "$C" 500 300)"

@@ -145,35 +145,23 @@ impl ApplicationHandler for App {
             WindowEvent::CloseRequested => NestedEvent::CloseRequested,
             WindowEvent::Focused(focused) => NestedEvent::Focus(focused),
             // Key repeat is done by clients (wl_keyboard repeat info), so drop host repeats.
-            WindowEvent::KeyboardInput {
-                event,
-                is_synthetic,
-                ..
-            } if !is_synthetic && !event.repeat => {
+            WindowEvent::KeyboardInput { event, is_synthetic, .. }
+                if !is_synthetic && !event.repeat =>
+            {
                 let Some(scancode) = event.physical_key.to_scancode() else {
                     return;
                 };
-                NestedEvent::Key {
-                    scancode,
-                    pressed: event.state == ElementState::Pressed,
+                NestedEvent::Key { scancode, pressed: event.state == ElementState::Pressed }
+            }
+            WindowEvent::PointerMoved { position, source: PointerSource::Mouse, .. } => {
+                NestedEvent::PointerMoved { x: position.x, y: position.y }
+            }
+            WindowEvent::PointerButton { state, button: ButtonSource::Mouse(button), .. } => {
+                NestedEvent::Button {
+                    code: button_code(button),
+                    pressed: state == ElementState::Pressed,
                 }
             }
-            WindowEvent::PointerMoved {
-                position,
-                source: PointerSource::Mouse,
-                ..
-            } => NestedEvent::PointerMoved {
-                x: position.x,
-                y: position.y,
-            },
-            WindowEvent::PointerButton {
-                state,
-                button: ButtonSource::Mouse(button),
-                ..
-            } => NestedEvent::Button {
-                code: button_code(button),
-                pressed: state == ElementState::Pressed,
-            },
             WindowEvent::MouseWheel { delta, .. } => NestedEvent::Scroll(delta),
             WindowEvent::PointerLeft { .. } => NestedEvent::PointerLeft,
             _ => return,
@@ -290,9 +278,8 @@ impl WinitBackend {
         loop_handle: &LoopHandle<'static, SpaceState>,
     ) -> Result<Self, SpaceError> {
         let err = |what: &str, e: &dyn std::fmt::Display| SpaceError::Backend(format!("{what}: {e}"));
-        let mut event_loop = EventLoop::builder()
-            .build()
-            .map_err(|e| err("winit event loop", &e))?;
+        let mut event_loop =
+            EventLoop::builder().build().map_err(|e| err("winit event loop", &e))?;
         let mut app = App {
             attributes: WindowAttributes::default()
                 .with_title("spacewm (nested)")
@@ -309,22 +296,15 @@ impl WinitBackend {
                 return Err(SpaceError::Backend(format!("winit window: {e}")));
             }
         }
-        let window = app
-            .window
-            .clone()
-            .ok_or_else(|| SpaceError::Backend("no window".into()))?;
+        let window = app.window.clone().ok_or_else(|| SpaceError::Backend("no window".into()))?;
         // Events produced while creating the window are not interesting.
         app.events.clear();
 
         // SAFETY: the window outlives the display (both live in this struct).
         let display =
             unsafe { EGLDisplay::new(window.clone()) }.map_err(|e| err("EGL display", &e))?;
-        let attributes = GlAttributes {
-            version: (3, 0),
-            profile: None,
-            debug: false,
-            vsync: false,
-        };
+        let attributes =
+            GlAttributes { version: (3, 0), profile: None, debug: false, vsync: false };
         let context =
             EGLContext::new_with_config(&display, attributes, PixelFormatRequirements::_8_bit())
                 .map_err(|e| err("EGL context", &e))?;
@@ -356,11 +336,7 @@ impl WinitBackend {
                 )
             }
             .map_err(|e| err("EGL surface", &e))?,
-            _ => {
-                return Err(SpaceError::Backend(
-                    "nested mode needs a Wayland or X11 host".into(),
-                ))
-            }
+            _ => return Err(SpaceError::Backend("nested mode needs a Wayland or X11 host".into())),
         };
         let _ = context.unbind();
         // SAFETY: fresh context, used only by this renderer.
@@ -372,14 +348,8 @@ impl WinitBackend {
         // Flipped180: an EGL window surface has its origin at the bottom-left, while smithay
         // renders with the origin at the top-left; the output transform makes the final
         // image upright in the host window.
-        let output = create_output(
-            dh,
-            "spacewm-1",
-            "nested",
-            output_size,
-            REFRESH_MHZ,
-            Transform::Flipped180,
-        );
+        let output =
+            create_output(dh, "spacewm-1", "nested", output_size, REFRESH_MHZ, Transform::Flipped180);
         let damage_tracker = OutputDamageTracker::from_output(&output);
         log_gl_info(&mut renderer);
         let (dmabuf_state, dmabuf_global) = create_dmabuf_global(dh, &mut renderer);
@@ -442,10 +412,7 @@ impl WinitBackend {
         // Locked: the host cursor stays put and only relative motion is reported (Wayland
         // pointer-constraints). Not every host supports it (X11), so fall back to Confined.
         let locked = self.window.set_cursor_grab(CursorGrabMode::Locked).is_ok()
-            || self
-                .window
-                .set_cursor_grab(CursorGrabMode::Confined)
-                .is_ok();
+            || self.window.set_cursor_grab(CursorGrabMode::Confined).is_ok();
         self.pointer_locked = locked;
         self.pointer_released_by_user = false;
         tracing::debug!(locked, "nested pointer grab");
@@ -485,11 +452,9 @@ impl WinitBackend {
     /// querying the buffer age then fails with EGL_BAD_SURFACE.
     fn make_current(&self) {
         // SAFETY: the surface belongs to this context's display.
-        if let Err(e) = unsafe {
-            self.renderer
-                .egl_context()
-                .make_current_with_surface(&self.surface)
-        } {
+        if let Err(e) =
+            unsafe { self.renderer.egl_context().make_current_with_surface(&self.surface) }
+        {
             tracing::warn!("make_current failed: {e}");
         }
     }
@@ -527,11 +492,8 @@ pub fn create_dmabuf_global(
         .ok()
         .and_then(|device| device.try_get_render_node().ok().flatten());
     let mut state = DmabufState::new();
-    let feedback = render_node.and_then(|node| {
-        DmabufFeedbackBuilder::new(node.dev_id(), formats.clone())
-            .build()
-            .ok()
-    });
+    let feedback = render_node
+        .and_then(|node| DmabufFeedbackBuilder::new(node.dev_id(), formats.clone()).build().ok());
     let global = match feedback {
         Some(feedback) => {
             tracing::debug!("global: zwp_linux_dmabuf_v1 (v5 with feedback)");
@@ -587,11 +549,7 @@ fn handle_event(state: &mut SpaceState, event: NestedEvent) {
         }
         NestedEvent::Key { scancode, pressed } => {
             // xkb keycodes are evdev codes + 8 (an X11 legacy).
-            let key_state = if pressed {
-                KeyState::Pressed
-            } else {
-                KeyState::Released
-            };
+            let key_state = if pressed { KeyState::Pressed } else { KeyState::Released };
             crate::input::handle_key(state, Keycode::new(scancode + 8), key_state, time);
         }
         NestedEvent::RelativeMotion { dx, dy } => {
@@ -625,11 +583,7 @@ fn handle_event(state: &mut SpaceState, event: NestedEvent) {
                 }
                 return;
             }
-            let bstate = if pressed {
-                ButtonState::Pressed
-            } else {
-                ButtonState::Released
-            };
+            let bstate = if pressed { ButtonState::Pressed } else { ButtonState::Released };
             crate::input::handle_pointer_button(state, code, bstate, time);
         }
         NestedEvent::Scroll(delta) => {
@@ -684,11 +638,8 @@ fn render(state: &mut SpaceState) {
     };
     // 3D: advance the camera and re-render the scene texture first. The scene pass uses
     // our own framebuffers, so it must run before the output framebuffer is bound.
-    let mut prepared = (state.render_mode == RenderMode::Scene3D).then(|| {
-        state
-            .view
-            .prepare(&mut b.renderer, size, crate::scene_inputs!(state, time))
-    });
+    let mut prepared = (state.render_mode == RenderMode::Scene3D)
+        .then(|| state.view.prepare(&mut b.renderer, size, crate::scene_inputs!(state, time)));
 
     if Some(size) != b.bind_size {
         b.surface.resize(size.w, size.h, 0, 0);
@@ -737,12 +688,7 @@ fn render(state: &mut SpaceState) {
         }
     };
     let capture = (!state.pending_screenshots.is_empty()).then(|| {
-        screenshot::start_capture(
-            &mut b.renderer,
-            &framebuffer,
-            size,
-            output.current_transform(),
-        )
+        screenshot::start_capture(&mut b.renderer, &framebuffer, size, output.current_transform())
     });
     drop(framebuffer);
 
@@ -773,24 +719,21 @@ fn render(state: &mut SpaceState) {
         // requesting callbacks without drawing would spin us at 100% CPU.
         b.frame_callback_timer = b
             .loop_handle
-            .insert_source(
-                Timer::from_duration(Duration::from_micros(16_667)),
-                |_, _, state| {
-                    if let Backend::Winit(b) = &mut state.backend {
-                        b.frame_callback_timer = None;
-                        let output = b.output.clone();
-                        let time = state.start_time.elapsed();
-                        render::send_frame_callbacks(
-                            &output,
-                            &state.space,
-                            &state.cursor_status,
-                            state.dnd_icon.as_ref(),
-                            time,
-                        );
-                    }
-                    TimeoutAction::Drop
-                },
-            )
+            .insert_source(Timer::from_duration(Duration::from_micros(16_667)), |_, _, state| {
+                if let Backend::Winit(b) = &mut state.backend {
+                    b.frame_callback_timer = None;
+                    let output = b.output.clone();
+                    let time = state.start_time.elapsed();
+                    render::send_frame_callbacks(
+                        &output,
+                        &state.space,
+                        &state.cursor_status,
+                        state.dnd_icon.as_ref(),
+                        time,
+                    );
+                }
+                TimeoutAction::Drop
+            })
             .ok();
     }
     super::headless::finish_frame(state, frame_start, prepared);

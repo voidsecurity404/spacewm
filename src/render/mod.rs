@@ -3,14 +3,17 @@
 //! Stage 1: the flat 2D path (smithay's Space renderer) plus cursor, drag icon and
 //! screenshots. Stages 2-3 add the 3D scene and window panels.
 
+pub mod atlas;
 pub mod camera;
 pub mod crosshair;
 pub mod cursor;
+pub mod frustum;
 pub mod gl;
 pub mod panel_texture;
 pub mod scene;
 pub mod screenshot;
 pub mod view;
+pub mod voxels;
 
 use std::time::Duration;
 
@@ -62,9 +65,7 @@ where
     let mut elements =
         cursor::cursor_elements(renderer, cursor_status, cursor_theme, pointer, scale, time);
     if let Some(icon) = dnd_icon {
-        let pos = (pointer + icon.offset.to_f64())
-            .to_physical(scale)
-            .to_i32_round();
+        let pos = (pointer + icon.offset.to_f64()).to_physical(scale).to_i32_round();
         elements.extend(
             render_elements_from_surface_tree(
                 renderer,
@@ -183,6 +184,8 @@ macro_rules! scene_inputs {
                 }
                 $crate::input::mode::InputMode::Walk => None,
             },
+            chunk_meshes: &mut $state.voxels.pending,
+            outline: $state.target_block.map(|b| b.block),
         }
     };
 }

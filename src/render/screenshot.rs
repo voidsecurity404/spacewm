@@ -61,11 +61,7 @@ pub fn start_capture<R: ExportMem>(
     let mapping = renderer
         .copy_framebuffer(framebuffer, region, Fourcc::Abgr8888)
         .map_err(|e| format!("copy_framebuffer failed: {e:?}"))?;
-    Ok(PendingCapture {
-        mapping,
-        size,
-        flip_rows: transform == Transform::Flipped180,
-    })
+    Ok(PendingCapture { mapping, size, flip_rows: transform == Transform::Flipped180 })
 }
 
 /// Read the queued copy into RGBA pixels, top row first.
@@ -73,9 +69,8 @@ pub fn finish_capture<R: ExportMem>(
     renderer: &mut R,
     pending: PendingCapture<R::TextureMapping>,
 ) -> Result<CapturedImage, String> {
-    let data = renderer
-        .map_texture(&pending.mapping)
-        .map_err(|e| format!("map_texture failed: {e:?}"))?;
+    let data =
+        renderer.map_texture(&pending.mapping).map_err(|e| format!("map_texture failed: {e:?}"))?;
     let (w, h) = (pending.size.w as usize, pending.size.h as usize);
     let stride = w * 4;
     if data.len() < stride * h {
@@ -86,11 +81,7 @@ pub fn finish_capture<R: ExportMem>(
         let src = if pending.flip_rows { h - 1 - row } else { row };
         rgba.extend_from_slice(&data[src * stride..(src + 1) * stride]);
     }
-    Ok(CapturedImage {
-        width: w as u32,
-        height: h as u32,
-        rgba,
-    })
+    Ok(CapturedImage { width: w as u32, height: h as u32, rgba })
 }
 
 /// Encode and write on a worker thread, then report through `done`.
@@ -98,10 +89,7 @@ pub fn save_async(request: ScreenshotRequest, image: CapturedImage, done: Sender
     std::thread::spawn(move || {
         let result = write_png(&request.path, request.force, &image)
             .map(|()| (request.path.clone(), image.width, image.height));
-        let _ = done.send(ScreenshotDone {
-            reply_to: request.reply_to,
-            result,
-        });
+        let _ = done.send(ScreenshotDone { reply_to: request.reply_to, result });
     });
 }
 
@@ -114,9 +102,7 @@ fn write_png(path: &PathBuf, force: bool, image: &CapturedImage) -> Result<(), S
         // Atomic "fail if exists": no check-then-create race.
         options.create_new(true);
     }
-    let file = options
-        .open(path)
-        .map_err(|e| format!("{}: {e}", path.display()))?;
+    let file = options.open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut encoder = png::Encoder::new(BufWriter::new(file), image.width, image.height);
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);

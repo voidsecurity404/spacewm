@@ -55,16 +55,7 @@ sleep 0.2
 pass "Super+Escape works while another key is held"
 
 # Back sides can't be entered.
-read -r X Y Z YAW < <(kc --json list | python3 -c "import json,sys; p=json.load(sys.stdin)['panels'][0]; print(*p['position'], p['yaw_deg'])")
-python3 - "$X" "$Y" "$Z" "$YAW" > "$OUT/behind.txt" <<'PY'
-import math, sys
-x, y, z, yaw = map(float, sys.argv[1:])
-r = math.radians(yaw)
-# 1 m behind the panel, looking at its back (camera yaw = 180 - panel yaw).
-print(x - math.sin(r), y, z - math.cos(r), 180 - yaw)
-PY
-read -r BX BY BZ BYAW < "$OUT/behind.txt"
-kc teleport "$BX" "$BY" "$BZ" --yaw "$BYAW" --pitch 0
+behind_panel 1 1.0
 sleep 0.2
 kc input click
 sleep 0.2
@@ -84,7 +75,9 @@ kc input click
 sleep 0.4
 E=$(shot s4-clickdot)
 read -r CX CY N < <($PX find "$E" 0 255 255 60)
-python3 -c "import sys; sys.exit(0 if abs($CX-500) <= 2.5 and abs($CY-300) <= 2.5 else 1)" || fail "click landed at ($CX,$CY), wanted (500,300)"
+# (The cursor arrow covers the lower right of the mark, which pulls its centroid ~1.6 px
+# up even in 2D; 3 px allows for that plus sub-pixel resampling of the panel.)
+python3 -c "import sys; sys.exit(0 if abs($CX-500) <= 3 and abs($CY-300) <= 3 else 1)" || fail "click landed at ($CX,$CY), wanted (500,300)"
 pass "absolute click lands exactly (mark at $CX,$CY for click at 500,300)"
 # Relative motion: at 1:1, moving the mouse 150 px moves the cursor 150 window px.
 kc input move-by 150 80
@@ -93,7 +86,7 @@ sleep 0.4
 F=$(shot s4-clickdot-rel)
 read -r CX2 CY2 N2 < <($PX find "$F" 0 255 255 60)
 # clickdot keeps only the latest mark: it must be at (500+150, 300+80).
-python3 -c "import sys; sys.exit(0 if abs($CX2-650) <= 2.5 and abs($CY2-380) <= 2.5 else 1)" || fail "relative click landed at ($CX2,$CY2), wanted (650,380)"
+python3 -c "import sys; sys.exit(0 if abs($CX2-650) <= 3 and abs($CY2-380) <= 3 else 1)" || fail "relative click landed at ($CX2,$CY2), wanted (650,380)"
 pass "relative pointer speed matches the screen (mark at $CX2,$CY2 for 650,380)"
 kc input key Super+Escape
 

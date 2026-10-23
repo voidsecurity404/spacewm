@@ -38,6 +38,8 @@ pub struct Panel<W = Window> {
     pub visible: bool,
     /// The client committed new content: the texture must be re-rendered.
     pub content_dirty: bool,
+    /// We don't know the app yet (no app_id): a saved placement may still be applied.
+    pub placement_pending: bool,
 }
 
 impl<W> Panel<W> {
@@ -53,6 +55,7 @@ impl<W> Panel<W> {
             opacity: 1.0,
             visible: true,
             content_dirty: true,
+            placement_pending: true,
         }
     }
 
@@ -136,16 +139,8 @@ mod tests {
     fn model_matrix_maps_unit_square_to_panel() {
         let p = panel((800, 400));
         let c = p.corners_world();
-        assert!(
-            (c[0] - Vec3::new(-0.5, 1.95, -2.0)).length() < 1e-5,
-            "top-left {:?}",
-            c[0]
-        );
-        assert!(
-            (c[2] - Vec3::new(0.5, 1.45, -2.0)).length() < 1e-5,
-            "bottom-right {:?}",
-            c[2]
-        );
+        assert!((c[0] - Vec3::new(-0.5, 1.95, -2.0)).length() < 1e-5, "top-left {:?}", c[0]);
+        assert!((c[2] - Vec3::new(0.5, 1.45, -2.0)).length() < 1e-5, "bottom-right {:?}", c[2]);
     }
 
     #[test]
@@ -169,9 +164,7 @@ mod tests {
         assert!((tl - Vec3::new(-0.55, 2.0, -2.0)).length() < 1e-5, "{tl:?}");
         // Popup hanging below the window: bbox center moves down.
         p.bbox_px = Rectangle::new((0, 0).into(), (800, 600).into());
-        let bottom = p
-            .bbox_model_matrix()
-            .transform_point3(Vec3::new(0.0, -0.5, 0.0));
+        let bottom = p.bbox_model_matrix().transform_point3(Vec3::new(0.0, -0.5, 0.0));
         assert!((bottom.y - (1.45 - 0.25)).abs() < 1e-5, "{bottom:?}");
     }
 }

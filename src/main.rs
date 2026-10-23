@@ -54,13 +54,8 @@ fn main() -> anyhow::Result<()> {
         .with_context(|| format!("failed to start {:?} backend", cli.backend))?;
     tracing::info!(backend = backend.name(), "backend ready");
 
-    let mut state = SpaceState::new(
-        &mut display,
-        loop_handle.clone(),
-        event_loop.get_signal(),
-        cli,
-        backend,
-    )?;
+    let mut state =
+        SpaceState::new(&mut display, loop_handle.clone(), event_loop.get_signal(), cli, backend)?;
 
     // Tell clients which shm pixel formats our renderer can import.
     let shm_formats = state.backend.renderer().shm_formats();
@@ -83,11 +78,7 @@ fn main() -> anyhow::Result<()> {
     tracing::info!(socket = ?socket_name, "spacewm listening on {}", socket_name.to_string_lossy());
     state.socket_name = socket_name.clone();
 
-    let ipc_path = state
-        .cli
-        .ipc_socket
-        .clone()
-        .or_else(|| ipc::default_socket_path(&socket_name));
+    let ipc_path = state.cli.ipc_socket.clone().or_else(|| ipc::default_socket_path(&socket_name));
     match ipc_path {
         Some(path) => {
             match ipc::IpcServer::start(path, state.cli.allow_input_injection, &loop_handle) {
@@ -116,12 +107,11 @@ fn main() -> anyhow::Result<()> {
 
     state.queue_redraw();
     while state.running {
-        event_loop
-            .dispatch(None, &mut state)
-            .context("event loop dispatch failed")?;
+        event_loop.dispatch(None, &mut state).context("event loop dispatch failed")?;
         state.refresh_and_flush();
     }
 
+    state.save_layout();
     // GL objects can only be freed while the context exists, i.e. before the backend drops.
     if let Some(scene) = state.view.scene.take() {
         scene.destroy(state.backend.renderer());
@@ -129,9 +119,6 @@ fn main() -> anyhow::Result<()> {
     if let Some(mut ipc) = state.ipc.take() {
         ipc.shutdown(&loop_handle);
     }
-    tracing::info!(
-        uptime_s = state.start_time.elapsed().as_secs_f32(),
-        "spacewm exited cleanly"
-    );
+    tracing::info!(uptime_s = state.start_time.elapsed().as_secs_f32(), "spacewm exited cleanly");
     Ok(())
 }

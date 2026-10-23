@@ -84,10 +84,7 @@ impl WaylandDndGrabHandler for SpaceState {
                     source.cancel();
                     return;
                 };
-                self.dnd_icon = icon.map(|surface| DndIcon {
-                    surface,
-                    offset: (0, 0).into(),
-                });
+                self.dnd_icon = icon.map(|surface| DndIcon { surface, offset: (0, 0).into() });
                 let grab = DnDGrab::new_pointer(&self.display_handle, start_data, source, seat);
                 pointer.set_grab(self, grab, serial, Focus::Keep);
             }

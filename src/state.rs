@@ -137,6 +137,19 @@ pub struct SpaceState {
     pub crosshair: crate::render::crosshair::Crosshair,
     /// The user just started a program: its first window may take focus until then.
     pub expect_window_until: Option<Instant>,
+
+    /// The block world and the mesher.
+    pub voxels: crate::world::voxels::VoxelWorld,
+    pub player: crate::world::player::Player,
+    /// The block under the crosshair within reach (outline, break, place).
+    pub target_block: Option<crate::input::raycast::VoxelHit>,
+    /// A panel being carried (Mod+G).
+    pub grab: Option<crate::input::world_ops::Grab>,
+    /// Saved panel placements and block edits.
+    pub layout: crate::world::layout::Layout,
+    layout_timer: Option<smithay::reexports::calloop::RegistrationToken>,
+    /// When physics last ran (for the time step).
+    pub last_tick: Option<Instant>,
     pub debug_timer: Option<smithay::reexports::calloop::RegistrationToken>,
 
     /// Input bookkeeping: suppressed key releases, modifier choice, etc.
@@ -174,10 +187,7 @@ impl SpaceState {
         let mut seat_state = SeatState::new();
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, "seat0");
         // us layout, 200 ms repeat delay, 25 repeats/s.
-        let xkb = XkbConfig {
-            layout: "us",
-            ..XkbConfig::default()
-        };
+        let xkb = XkbConfig { layout: "us", ..XkbConfig::default() };
         seat.add_keyboard(xkb, 200, 25)
             .map_err(|e| anyhow::anyhow!("failed to create keyboard: {e:?}"))?;
         seat.add_pointer();
@@ -201,7 +211,18 @@ impl SpaceState {
             .map_err(|e| anyhow::anyhow!("screenshot channel: {}", e.error))?;
 
         let render_mode = cli.render;
-        let view = View3D::new(cli.shader_dir.clone());
+        let mut view = View3D::new(cli.shader_dir.clone());
+
+        let layout_path = match &cli.layout {
+            Some(path) => path.clone(),
+            None => crate::logging::state_dir()?.join("layout.json"),
+        };
+        let layout = crate::world::layout::Layout::load(layout_path);
+        let voxels =
+            crate::world::voxels::VoxelWorld::new(cli.world_seed, &layout.edits, &loop_handle)?;
+        let player = crate::world::player::Player::new(voxels.spawn);
+        view.camera.position = player.eye();
+        view.camera.yaw = voxels.spawn_yaw;
 
         Ok(Self {
             backend,
@@ -238,6 +259,13 @@ impl SpaceState {
             input_settings: Default::default(),
             crosshair: Default::default(),
             expect_window_until: None,
+            voxels,
+            player,
+            target_block: None,
+            grab: None,
+            layout,
+            layout_timer: None,
+            last_tick: None,
             debug_timer: None,
             input: InputState::default(),
             ipc: None,
@@ -253,6 +281,14 @@ impl SpaceState {
         self.loop_signal.wakeup();
     }
 
+    /// Something moves on its own (held keys, falling): keep rendering frames.
+    pub fn animating(&self) -> bool {
+        self.render_mode == crate::cli::RenderMode::Scene3D
+            && (self.view.controls.is_moving()
+                || (!self.player.on_ground && !self.player.flying)
+                || self.player.vel.length_squared() > 1e-6)
+    }
+
     /// Ask the backend for a new frame (something on screen changed).
     pub fn queue_redraw(&mut self) {
         self.backend.schedule_redraw();
@@ -264,10 +300,7 @@ impl SpaceState {
         while let Some(parent) = get_parent(&root) {
             root = parent;
         }
-        self.space
-            .elements()
-            .find(|w| w.wl_surface().as_deref() == Some(&root))
-            .cloned()
+        self.space.elements().find(|w| w.wl_surface().as_deref() == Some(&root)).cloned()
     }
 
     /// A client committed `surface`: flag the panel showing it so its texture is redrawn.
@@ -289,13 +322,67 @@ impl SpaceState {
 
     /// How far in front of the camera a new window of `size_px` appears.
     pub fn spawn_distance(&self, size_px: (i32, i32)) -> f32 {
-        let output = self
-            .primary_output_geometry()
-            .map(|g| (g.size.w, g.size.h))
-            .unwrap_or((1920, 1080));
+        let output =
+            self.primary_output_geometry().map(|g| (g.size.w, g.size.h)).unwrap_or((1920, 1080));
         let ppu = crate::world::panel::DEFAULT_PIXELS_PER_UNIT;
         let size_m = glam::Vec2::new(size_px.0 as f32, size_px.1 as f32) / ppu;
         crate::world::spawn_distance(size_m, output, ppu, self.view.camera.fov_y_deg)
+    }
+
+    /// Panels moved or blocks changed: save the layout 2 s from now (one save for a whole
+    /// burst of changes, e.g. while carrying a panel around).
+    pub fn layout_changed(&mut self) {
+        self.layout.dirty = true;
+        if self.layout_timer.is_some() {
+            return;
+        }
+        use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
+        self.layout_timer = self
+            .loop_handle
+            .insert_source(
+                Timer::from_duration(std::time::Duration::from_secs(2)),
+                |_, _, state| {
+                    state.layout_timer = None;
+                    state.save_layout();
+                    TimeoutAction::Drop
+                },
+            )
+            .ok();
+    }
+
+    pub fn save_layout(&mut self) {
+        if !self.layout.dirty {
+            return;
+        }
+        let open = self.world.panels().iter().filter_map(saved_panel).collect();
+        self.layout.save(open);
+    }
+
+    /// A panel's app is now known: put it where it was last time, if we remember.
+    pub fn restore_placement(&mut self, window: &Window) {
+        let Some(panel) = self.world.panel_for_window(window) else {
+            return;
+        };
+        if !panel.placement_pending {
+            return;
+        }
+        let (app_id, title) = window_names(window);
+        let Some(app_id) = app_id else {
+            return;
+        };
+        let saved = self.layout.take_placement(&app_id, title.as_deref());
+        let Some(panel) = self.world.panels_mut().iter_mut().find(|p| &p.window == window) else {
+            return;
+        };
+        panel.placement_pending = false;
+        if let Some(saved) = saved {
+            tracing::info!(app_id, "restored saved placement");
+            panel.position = saved.position();
+            panel.rotation = saved.rotation();
+            panel.pixels_per_unit = saved.pixels_per_unit;
+            panel.visible = !saved.hidden;
+            self.view.dirty = true;
+        }
     }
 
     pub fn window_by_id(&self, id: u64) -> Option<Window> {
@@ -312,9 +399,8 @@ impl SpaceState {
         // minus the geometry offset, e.g. client-side shadows), which is the origin that
         // `surface_under` expects.
         let (window, window_pos) = self.space.element_under(pos)?;
-        window
-            .surface_under(pos - window_pos.to_f64(), WindowSurfaceType::ALL)
-            .map(|(surface, surface_pos)| {
+        window.surface_under(pos - window_pos.to_f64(), WindowSurfaceType::ALL).map(
+            |(surface, surface_pos)| {
                 // An X11 window's surface is reported as its wl_surface; route through the
                 // X11Surface so focus handling stays X11-aware.
                 let target = match window.x11_surface() {
@@ -324,7 +410,8 @@ impl SpaceState {
                     _ => PointerFocusTarget::Surface(surface),
                 };
                 (target, (surface_pos + window_pos).to_f64())
-            })
+            },
+        )
     }
 
     /// Run after every event-loop dispatch: drop dead windows/popups and send everything
@@ -365,8 +452,33 @@ struct WindowId(u64);
 
 pub fn window_id(window: &Window) -> u64 {
     static NEXT: AtomicU64 = AtomicU64::new(1);
-    window
-        .user_data()
-        .get_or_insert(|| WindowId(NEXT.fetch_add(1, Ordering::Relaxed)))
-        .0
+    window.user_data().get_or_insert(|| WindowId(NEXT.fetch_add(1, Ordering::Relaxed))).0
+}
+
+/// app_id and title of a window (Wayland toplevel or X11).
+pub fn window_names(window: &Window) -> (Option<String>, Option<String>) {
+    if let Some(x11) = window.x11_surface() {
+        return (Some(x11.class()), Some(x11.title()));
+    }
+    match window.wl_surface() {
+        Some(s) => (
+            crate::wayland::xdg_shell::toplevel_app_id(&s),
+            crate::wayland::xdg_shell::toplevel_title(&s),
+        ),
+        None => (None, None),
+    }
+}
+
+/// What gets saved about a panel (nothing for windows without an app_id: we couldn't
+/// match them again anyway).
+pub fn saved_panel(p: &crate::world::panel::Panel) -> Option<crate::world::layout::SavedPanel> {
+    let (app_id, title) = window_names(&p.window);
+    Some(crate::world::layout::SavedPanel {
+        app_id: app_id?,
+        title_hint: title,
+        position: p.position.to_array(),
+        rotation: p.rotation.to_array(),
+        pixels_per_unit: p.pixels_per_unit,
+        hidden: !p.visible,
+    })
 }
