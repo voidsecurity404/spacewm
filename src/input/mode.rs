@@ -63,6 +63,11 @@ pub struct InputSettings {
     pub reach_distance: f32,
     /// 1.0 = the cursor on a panel moves as fast as a normal desktop cursor.
     pub window_cursor_speed: f64,
+    /// Touchpads: tap to click, natural (content follows fingers) scrolling.
+    pub touchpad_tap: bool,
+    pub touchpad_natural_scroll: bool,
+    /// Mice: no pointer acceleration (consistent aiming in Walk mode).
+    pub mouse_accel_flat: bool,
 }
 
 impl Default for InputSettings {
@@ -72,6 +77,9 @@ impl Default for InputSettings {
             walk_speed: crate::world::player::WALK_SPEED,
             reach_distance: 6.0,
             window_cursor_speed: 1.0,
+            touchpad_tap: true,
+            touchpad_natural_scroll: true,
+            mouse_accel_flat: true,
         }
     }
 }
