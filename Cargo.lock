@@ -932,6 +932,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "wayland-egl",
  "xcursor",
 ]
 

@@ -62,6 +62,8 @@ pub fn spawn_terminal(state: &mut SpaceState) {
         .into_iter()
         .find(|t| in_path(t))
         .unwrap_or("foot");
+    state.expect_window_until =
+        Some(std::time::Instant::now() + crate::input::mode::SPAWN_FOCUS_WINDOW);
     if let Err(err) = spawn(terminal, &state.socket_name) {
         tracing::warn!("{err}");
     }

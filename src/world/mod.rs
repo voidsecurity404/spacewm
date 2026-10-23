@@ -115,26 +115,6 @@ impl<W: PartialEq> World<W> {
     pub fn panel(&self, id: PanelId) -> Option<&Panel<W>> {
         self.panels.iter().find(|p| p.id == id)
     }
-
-    /// Draw order: opaque panels first (any order), then translucent ones from far to
-    /// near, so each blends over what is behind it.
-    pub fn iter_sorted_for_render(
-        &self,
-        camera_pos: Vec3,
-        is_opaque: impl Fn(&Panel<W>) -> bool,
-    ) -> Vec<&Panel<W>> {
-        let (mut opaque, mut translucent): (Vec<_>, Vec<_>) = self
-            .panels
-            .iter()
-            .filter(|p| p.visible)
-            .partition(|p| is_opaque(p) && p.opacity >= 1.0);
-        let dist = |p: &&Panel<W>| p.position.distance_squared(camera_pos);
-        // Front-to-back for opaque: the depth test then rejects hidden pixels early.
-        opaque.sort_by(|a, b| dist(a).total_cmp(&dist(b)));
-        translucent.sort_by(|a, b| dist(b).total_cmp(&dist(a)));
-        opaque.extend(translucent);
-        opaque
-    }
 }
 
 impl World<Window> {
@@ -190,25 +170,6 @@ mod tests {
         assert!(world.remove_window(&1).is_some());
         assert!(world.panel_for_window(&1).is_none());
         assert!(world.panel_for_window(&2).is_some());
-    }
-
-    #[test]
-    fn render_order_opaque_then_far_to_near() {
-        let mut world = World::<u32>::default();
-        let cam = camera();
-        for (w, d) in [(1, 1.0), (2, 5.0), (3, 3.0)] {
-            let id = world.add_window(w as u64, w, (100, 100), &cam, d);
-            if let Some(p) = world.panels_mut().iter_mut().find(|p| p.id == id) {
-                p.position = cam.position + Vec3::new(0.0, 0.0, -d);
-            }
-        }
-        // Window 1 is opaque; 2 and 3 translucent.
-        let order: Vec<u32> = world
-            .iter_sorted_for_render(cam.position, |p| p.window == 1)
-            .iter()
-            .map(|p| p.window)
-            .collect();
-        assert_eq!(order, vec![1, 2, 3]);
     }
 
     #[test]

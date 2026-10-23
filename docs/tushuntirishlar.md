@@ -95,3 +95,32 @@ texturasi yoki kamera o'zgarganda qayta chiziladi.
 `d = H / (2·800·tan(37.5°))`, 1080p'da ≈0.88 m. Agar panel ekranning 85 foizidan
 kattaroq bo'lib qolsa, biroz uzoqroqqa qo'yiladi. 2 m'da 1000 px'lik oyna 1080p ekranda
 ~440 px bo'lib, matn o'qib bo'lmas edi, bu esa "matn aniq ko'rinsin" talabiga zid.
+
+## 4-bosqich
+
+**Nur va tekislik kesishishi (raqamli misol):** nur `o + t·d`, tekislik esa `p0` nuqta va `n`
+normal bilan beriladi. Tekislikdagi har bir `p` nuqta uchun `dot(p − p0, n) = 0`. `p` o'rniga
+nurni qo'ysak, `t = dot(p0 − o, n) / dot(d, n)` chiqadi. Misol: kamera `o = (0, 1.7, 0)`,
+qarash yo'nalishi `d = (0, 0, −1)`. Panel `p0 = (0, 1.7, −2)` da, `n = (0, 0, 1)`. Unda
+`t = dot((0,0,−2), n) / dot(d, n) = −2 / −1 = 2`, ya'ni nur panelga 2 metrda tegadi. Agar
+`dot(d, n) ≈ 0` bo'lsa, nur tekislikka parallel va kesishish yo'q. `t < 0` bo'lsa, panel
+orqada qoladi.
+
+**3D nuqta qanday qilib Wayland koordinatasiga aylanadi?** Tegish nuqtasini panelning
+teskari model matritsasiga ko'paytiramiz. Shunda panel −0.5..0.5 o'lchamli birlik kvadratga
+aylanadi. `px = (x + 0.5)·kenglik`, `py = (0.5 − y)·balandlik` (Y teskari: Wayland'da y
+pastga o'sadi). Natija oyna geometriyasidagi piksel, klient aynan shuni kutadi. Test buni
+butun zanjir orqali tekshiradi: ekranga bosiladi → nur → panel → klient (weston-clickdot)
+belgi chizadi → panel texturasi → 3D → ekran. Belgi bosilgan joydan ±2 px ichida chiqadi.
+
+**Nega Wayland'da fokus aniq beriladi?** X11'da istalgan dastur o'zini fokusga qo'yishi,
+boshqa oynaning tugmalarini "tinglashi" yoki ularni soxta yuborishi mumkin edi.
+Wayland'da klaviatura fokusini faqat kompozitor beradi va klient faqat o'zi fokusda
+bo'lganda tugmalarni oladi. Shuning uchun spacewm'da fon dasturi yangi oyna ochib fokusni
+o'g'irlay olmaydi. Fokusni faqat foydalanuvchi o'zi hozirgina ishga tushirgan dasturning
+oynasi oladi (5 soniya ichida), qolganlarini bosish kerak.
+
+**Nested rejimda sichqoncha:** smithay'ning tayyor winit backend'i xom (relative)
+harakatni uzatmaydi. Shu sababli o'z backend'imizni yozdik: host pointer qulflanadi
+(pointer-constraints) va relative-pointer'dan cheksiz burilish olinadi. Ctrl+Alt+G
+sichqonchani host'ga qaytaradi, oynaga bosish uni yana qulflaydi.

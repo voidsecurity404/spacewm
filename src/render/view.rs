@@ -13,15 +13,24 @@ use smithay::{
     utils::{Physical, Size},
 };
 
-use glam::{Vec2, Vec4};
-use smithay::reexports::glow;
+use glam::{Mat4, Vec2, Vec3, Vec4};
+use smithay::{
+    backend::renderer::{damage::OutputDamageTracker, Bind, Offscreen},
+    input::pointer::CursorImageStatus,
+    reexports::glow,
+    utils::{Logical, Point, Transform},
+};
 
 use super::{
     camera::Camera,
+    cursor::{cursor_elements, CursorThemeCache},
     panel_texture::{window_is_opaque, PanelTextureCache},
     scene::{PanelDraw, SceneRenderer},
 };
-use crate::{input::camera_controls::CameraControls, world::World};
+use crate::{
+    input::{camera_controls::CameraControls, mode::Highlight},
+    world::{panel::PanelId, World},
+};
 
 #[derive(Default)]
 pub struct FrameStats {
@@ -73,6 +82,8 @@ pub struct View3D {
     pub controls: CameraControls,
     pub scene: Option<SceneRenderer>,
     pub panel_textures: Option<PanelTextureCache>,
+    /// The cursor drawn on the focused panel in Window mode.
+    cursor_target: Option<CursorTarget>,
     /// The scene must be re-rendered (camera moved, resized, shaders reloaded, ...).
     pub dirty: bool,
     pub shader_dir: Option<PathBuf>,
@@ -92,6 +103,40 @@ pub struct Prepared {
     pub continuous: bool,
 }
 
+/// The client's cursor, drawn on a panel (Window mode).
+pub struct PanelCursor<'a> {
+    pub panel: PanelId,
+    /// Window-geometry px.
+    pub at: Point<f64, Logical>,
+    pub status: &'a mut CursorImageStatus,
+    pub theme: &'a mut CursorThemeCache,
+    pub time: Duration,
+}
+
+/// What the scene needs from the rest of the compositor this frame.
+pub struct SceneInputs<'a> {
+    pub world: &'a mut World,
+    pub highlight: Highlight,
+    pub cursor: Option<PanelCursor<'a>>,
+}
+
+/// Border colors (straight RGBA) and widths in window px.
+const HOVER_COLOR: Vec4 = Vec4::new(0.45, 0.75, 1.0, 0.9);
+const HOVER_BORDER_PX: f32 = 6.0;
+const FOCUS_COLOR: Vec4 = Vec4::new(1.0, 0.62, 0.18, 1.0);
+const FOCUS_BORDER_PX: f32 = 6.0;
+/// Window mode: the other panels fade a little so the focused one stands out.
+const UNFOCUSED_OPACITY: f32 = 0.85;
+
+/// Cursor images are rendered into a square texture with the hotspot at its center.
+const CURSOR_TEX: i32 = 128;
+
+struct CursorTarget {
+    texture: GlesTexture,
+    damage_tracker: OutputDamageTracker,
+    rendered_once: bool,
+}
+
 impl View3D {
     pub fn new(shader_dir: Option<PathBuf>) -> Self {
         Self {
@@ -99,6 +144,7 @@ impl View3D {
             controls: CameraControls::default(),
             scene: None,
             panel_textures: None,
+            cursor_target: None,
             dirty: true,
             shader_dir,
             stats: FrameStats::default(),
@@ -114,16 +160,10 @@ impl View3D {
         self.dirty = true;
     }
 
-    /// Run before binding the output framebuffer: advance the camera and re-render the
-    /// scene texture if anything changed.
-    pub fn prepare(
-        &mut self,
-        renderer: &mut GlowRenderer,
-        size: Size<i32, Physical>,
-        world: &mut World,
-    ) -> Prepared {
-        // Time since the previous update, for frame-rate independent movement. After an
-        // idle period the gap is huge, so assume one 60 Hz frame instead of teleporting.
+    /// Walk the camera for the time since the last frame. True if it moved.
+    pub fn advance(&mut self, speed: f32) -> bool {
+        // Frame-rate independent movement. After an idle period the gap is huge, so
+        // assume one 60 Hz frame instead of teleporting.
         let now = Instant::now();
         let dt = match self.last_update {
             Some(last) if self.controls.is_moving() => {
@@ -132,9 +172,22 @@ impl View3D {
             _ => 1.0 / 60.0,
         };
         self.last_update = Some(now);
-        if self.controls.update(&mut self.camera, dt) {
-            self.dirty = true;
-        }
+        self.controls.update(&mut self.camera, dt, speed)
+    }
+
+    /// Run before binding the output framebuffer: update panel textures and re-render
+    /// the scene texture if anything changed.
+    pub fn prepare(
+        &mut self,
+        renderer: &mut GlowRenderer,
+        size: Size<i32, Physical>,
+        inputs: SceneInputs<'_>,
+    ) -> Prepared {
+        let SceneInputs {
+            world,
+            highlight,
+            cursor,
+        } = inputs;
         if size != self.last_size {
             self.camera.set_aspect(size.w, size.h);
             self.last_size = size;
@@ -172,9 +225,35 @@ impl View3D {
         }
         self.stats.panel_updates += textures.updates;
 
+        // The cursor on the focused panel: re-render its image if it changed.
+        let cursor_draw = match cursor {
+            Some(c) => match update_cursor_texture(
+                &mut self.cursor_target,
+                renderer,
+                c.status,
+                c.theme,
+                c.time,
+            ) {
+                Ok(changed) => {
+                    if changed {
+                        self.dirty = true;
+                    }
+                    self.cursor_target
+                        .as_ref()
+                        .and_then(|t| cursor_draw(world, c.panel, c.at, &t.texture))
+                }
+                Err(err) => {
+                    tracing::warn!("cursor texture: {err}");
+                    None
+                }
+            },
+            None => None,
+        };
+
         let mut scene_rendered = false;
         if self.dirty {
-            let draws = panel_draws(world, textures, &self.camera);
+            let mut draws = panel_draws(world, textures, &self.camera, highlight);
+            draws.extend(cursor_draw);
             match scene.render(renderer, &self.camera, size, &draws) {
                 Ok(()) => scene_rendered = true,
                 Err(err) => tracing::error!("scene render failed: {err}"),
@@ -189,11 +268,111 @@ impl View3D {
     }
 }
 
+/// Render the current cursor image into a small texture, hotspot at the center.
+/// Returns true if its content changed.
+fn update_cursor_texture(
+    target: &mut Option<CursorTarget>,
+    renderer: &mut GlowRenderer,
+    status: &mut CursorImageStatus,
+    theme: &mut CursorThemeCache,
+    time: Duration,
+) -> Result<bool, String> {
+    if target.is_none() {
+        let texture: GlesTexture = renderer
+            .create_buffer(
+                smithay::backend::allocator::Fourcc::Abgr8888,
+                (CURSOR_TEX, CURSOR_TEX).into(),
+            )
+            .map_err(|e| e.to_string())?;
+        // GL's default minification filter expects mipmaps this texture doesn't have; a
+        // texture sampled that way is "incomplete" and reads as opaque black.
+        if let Some(id) = std::num::NonZeroU32::new(texture.tex_id()) {
+            let _ = renderer.with_context(|gl| unsafe {
+                use smithay::reexports::glow::HasContext;
+                gl.bind_texture(glow::TEXTURE_2D, Some(glow::NativeTexture(id)));
+                gl.tex_parameter_i32(
+                    glow::TEXTURE_2D,
+                    glow::TEXTURE_MIN_FILTER,
+                    glow::LINEAR as i32,
+                );
+                gl.tex_parameter_i32(
+                    glow::TEXTURE_2D,
+                    glow::TEXTURE_MAG_FILTER,
+                    glow::LINEAR as i32,
+                );
+                gl.bind_texture(glow::TEXTURE_2D, None);
+            });
+        }
+        *target = Some(CursorTarget {
+            texture,
+            damage_tracker: OutputDamageTracker::new(
+                (CURSOR_TEX, CURSOR_TEX),
+                1.0,
+                Transform::Normal,
+            ),
+            rendered_once: false,
+        });
+    }
+    let Some(t) = target.as_mut() else {
+        return Ok(false);
+    };
+    let center = Point::from((CURSOR_TEX as f64 / 2.0, CURSOR_TEX as f64 / 2.0));
+    let elements = cursor_elements(renderer, status, theme, center, 1.0.into(), time);
+    let age = if t.rendered_once { 1 } else { 0 };
+    let mut fb = renderer.bind(&mut t.texture).map_err(|e| e.to_string())?;
+    let result = t
+        .damage_tracker
+        .render_output(renderer, &mut fb, age, &elements, [0.0, 0.0, 0.0, 0.0])
+        .map_err(|e| format!("{e:?}"))?;
+    t.rendered_once = true;
+    Ok(result.damage.is_some())
+}
+
+/// The cursor quad: centered on the hotspot, 1 mm in front of the panel so it never
+/// z-fights with it, and scaled like the panel content (texture px = window px).
+fn cursor_draw(
+    world: &World,
+    panel: PanelId,
+    at: Point<f64, Logical>,
+    texture: &GlesTexture,
+) -> Option<PanelDraw> {
+    let p = world.panels().iter().find(|p| p.id == panel)?;
+    let ppu = p.pixels_per_unit;
+    let (gw, gh) = (p.size_px.0 as f32, p.size_px.1 as f32);
+    let local = Vec3::new(
+        (at.x as f32 - gw / 2.0) / ppu,
+        (gh / 2.0 - at.y as f32) / ppu,
+        0.001,
+    );
+    let size = CURSOR_TEX as f32 / ppu;
+    let model = Mat4::from_rotation_translation(p.rotation, p.position)
+        * Mat4::from_translation(local)
+        * Mat4::from_scale(Vec3::new(size, size, 1.0));
+    let tex = glow::NativeTexture(std::num::NonZeroU32::new(texture.tex_id())?);
+    let n = CURSOR_TEX as f32;
+    Some(PanelDraw {
+        texture: tex,
+        model,
+        tex_size: Vec2::splat(n),
+        geo_rect: Vec4::new(0.0, 0.0, n, n),
+        opacity: 1.0,
+        border_px: 0.0,
+        border_color: Vec4::ZERO,
+        opaque: false,
+    })
+}
+
 /// What to draw for every visible panel that has a texture, in draw order.
-fn panel_draws(world: &World, textures: &PanelTextureCache, camera: &Camera) -> Vec<PanelDraw> {
-    world
-        .iter_sorted_for_render(camera.position, |p| window_is_opaque(&p.window))
-        .into_iter()
+fn panel_draws(
+    world: &World,
+    textures: &PanelTextureCache,
+    camera: &Camera,
+    highlight: Highlight,
+) -> Vec<PanelDraw> {
+    let mut draws: Vec<(PanelDraw, f32)> = world
+        .panels()
+        .iter()
+        .filter(|p| p.visible)
         .filter_map(|p| {
             let target = textures.get(p.id)?;
             let texture = glow::NativeTexture(std::num::NonZeroU32::new(target.texture.tex_id())?);
@@ -210,16 +389,36 @@ fn panel_draws(world: &World, textures: &PanelTextureCache, camera: &Camera) -> 
                 x0 + p.size_px.0 as f32 * sx,
                 y0 + p.size_px.1 as f32 * sy,
             );
-            Some(PanelDraw {
+            let (border_px, border_color) = if highlight.focused == Some(p.id) {
+                (FOCUS_BORDER_PX, FOCUS_COLOR)
+            } else if highlight.hovered == Some(p.id) {
+                (HOVER_BORDER_PX, HOVER_COLOR)
+            } else {
+                (0.0, Vec4::ZERO)
+            };
+            let dimmed = highlight.focused.is_some_and(|f| f != p.id);
+            let opacity = p.opacity * if dimmed { UNFOCUSED_OPACITY } else { 1.0 };
+            let draw = PanelDraw {
                 texture,
                 model: p.bbox_model_matrix(),
                 tex_size,
                 geo_rect,
-                opacity: p.opacity,
-                border_px: 0.0,
-                border_color: Vec4::ZERO,
-                opaque: window_is_opaque(&p.window) && p.opacity >= 1.0,
-            })
+                opacity,
+                border_px,
+                border_color,
+                opaque: window_is_opaque(&p.window) && opacity >= 1.0,
+            };
+            Some((draw, p.position.distance_squared(camera.position)))
         })
-        .collect()
+        .collect();
+    // Opaque first, near to far (the depth test then skips hidden pixels early); then
+    // translucent far to near so each blends over what is behind it. Decided on the
+    // FINAL opacity, so panels dimmed in Window mode count as translucent.
+    draws.sort_by(|(a, da), (b, db)| match (a.opaque, b.opaque) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        (true, true) => da.total_cmp(db),
+        (false, false) => db.total_cmp(da),
+    });
+    draws.into_iter().map(|(d, _)| d).collect()
 }

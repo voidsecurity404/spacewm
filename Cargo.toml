@@ -44,6 +44,8 @@ rustix = { version = "1", features = ["net", "process", "fs"] }
 # Signal mask reset in spawned children (see spawn.rs).
 libc = "0.2"
 xcursor = "0.3"
+# EGL window surfaces on a Wayland host (our own nested backend, see backend/winit.rs).
+wayland-egl = "0.32"
 png = "0.18"
 # Safe casts of vertex structs to bytes for GL buffer uploads.
 bytemuck = { version = "1", features = ["derive"] }

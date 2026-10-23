@@ -125,6 +125,18 @@ pub struct SpaceState {
     pub view: View3D,
     /// Windows as panels in 3D space.
     pub world: crate::world::World,
+    /// 3D: Walk (camera) or Window (input goes to one panel).
+    pub mode: crate::input::mode::InputMode,
+    /// The panel under the crosshair (any distance; back hits included).
+    pub hover: Option<crate::input::raycast::PanelHit>,
+    /// Which panels have a border this frame.
+    pub highlight: crate::input::mode::Highlight,
+    /// Window mode: the cursor position on the focused panel, window-geometry px.
+    pub virtual_cursor: Point<f64, Logical>,
+    pub input_settings: crate::input::mode::InputSettings,
+    pub crosshair: crate::render::crosshair::Crosshair,
+    /// The user just started a program: its first window may take focus until then.
+    pub expect_window_until: Option<Instant>,
     pub debug_timer: Option<smithay::reexports::calloop::RegistrationToken>,
 
     /// Input bookkeeping: suppressed key releases, modifier choice, etc.
@@ -219,6 +231,13 @@ impl SpaceState {
             render_mode,
             view,
             world: crate::world::World::default(),
+            mode: Default::default(),
+            hover: None,
+            highlight: Default::default(),
+            virtual_cursor: Point::default(),
+            input_settings: Default::default(),
+            crosshair: Default::default(),
+            expect_window_until: None,
             debug_timer: None,
             input: InputState::default(),
             ipc: None,

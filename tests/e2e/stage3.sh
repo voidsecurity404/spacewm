@@ -49,7 +49,8 @@ read -r X2 _ _ < <(pos 2)
 python3 -c "exit(0 if $X2 - $X > 1.2 else 1)" || fail "second panel at x=$X2 overlaps the first at x=$X"
 pass "second panel spawns to the right (x $X -> $X2)"
 
-# Back side is a dark silhouette.
+# Back side is a dark silhouette (in Walk mode: Window mode dims unfocused panels).
+kc input key Super+Escape
 kc teleport "$X" "$Y" "$(python3 -c "print($Z - 0.9)")" --yaw 180 --pitch 0
 sleep 0.3
 C=$(shot s3-back)

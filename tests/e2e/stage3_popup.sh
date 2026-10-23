@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
-# GTK popup menus are drawn into their window's panel (Stage 3 still uses 2D input).
+# GTK popup menus are drawn into their window's panel and can be used in Window mode.
 source "$(dirname "$0")/lib.sh"
 PX="python3 $(dirname "$0")/pixel.py"
 space_start --render 3d
 kc spawn gtk3-widget-factory >/dev/null
 wait_windows 1
 sleep 2
-read -r X Y Z < <(kc --json list | python3 -c "import json,sys; print(*json.load(sys.stdin)['panels'][0]['position'])")
-kc teleport "$X" "$Y" "$(python3 -c "print($Z + 1.6)")" --yaw 0 --pitch 0
+# Spawned by us, so it is focused (Window mode). Look at it at the 1:1 distance, where
+# one window px is one screen px and the window center is the screen center.
+face_panel widget-factory "$PIXEL_PERFECT"
 sleep 0.3
+read -r W H < <(kc --json list | python3 -c "import json,sys; p=json.load(sys.stdin)['panels'][0]; print(*p['size_px'])")
 A=$(shot s3-gtk)
-# Left-click the "Andrea" combo box (2D coordinates: Stage 3 still uses 2D input; the
-# right button is reserved for looking around in 3D) — it opens an xdg_popup menu.
-kc input move-to 484 270
+# The "Andrea" combo box sits at (464, 250) in window coordinates.
+read -r SX SY < <(python3 -c "print(640 + 464 - $W/2, 360 + 250 - $H/2)")
+kc input move-to "$SX" "$SY"
 kc input click
 sleep 0.8
 B=$(shot s3-gtk-menu)

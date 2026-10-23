@@ -82,3 +82,10 @@ print(x + math.sin(y) * dist, py, z + math.cos(y) * dist, -p['yaw_deg'])
     read -r cx cy cz cyaw <<<"$args"
     kc teleport "$cx" "$cy" "$cz" --yaw "$cyaw" --pitch 0
 }
+
+# Ids of panels with keyboard focus, e.g. "[1]" (empty list in Walk mode).
+focused() { kc --json list | python3 -c "import json,sys; print([p['id'] for p in json.load(sys.stdin)['panels'] if p['focused']])"; }
+
+# The distance at which a panel shows 1 window px per screen px on the 1280x720 headless
+# output: 720 / (2 * 800 * tan(37.5 deg)).
+PIXEL_PERFECT=0.58644

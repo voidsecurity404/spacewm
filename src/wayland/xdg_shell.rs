@@ -65,8 +65,13 @@ impl XdgShellHandler for SpaceState {
         self.view.dirty = true;
         crate::ipc::broadcast(self, Event::PanelOpened { id, app_id: None });
 
-        // New windows get keyboard focus, like on any desktop.
-        self.focus_window(Some(&window), SERIAL_COUNTER.next_serial());
+        if self.render_mode == RenderMode::Scene3D {
+            // 3D: only a window the user just asked for takes focus (no focus stealing).
+            crate::input::mode::on_new_window(self, id);
+        } else {
+            // 2D: new windows get keyboard focus, like on any desktop.
+            self.focus_window(Some(&window), SERIAL_COUNTER.next_serial());
+        }
     }
 
     fn popup_destroyed(&mut self, surface: PopupSurface) {
@@ -214,6 +219,7 @@ impl XdgShellHandler for SpaceState {
             self.world.remove_window(window);
             self.view.dirty = true;
             let id = crate::state::window_id(window);
+            crate::input::mode::on_panel_removed(self, id);
             crate::ipc::broadcast(self, Event::PanelClosed { id });
         }
         // If the focused window went away, focus the top-most remaining one.
@@ -226,7 +232,7 @@ impl XdgShellHandler for SpaceState {
                 _ => false,
             })
             .unwrap_or(false);
-        if keyboard_lost {
+        if keyboard_lost && self.render_mode == RenderMode::Flat2D {
             let top = self.space.elements().last().cloned();
             self.focus_window(top.as_ref(), SERIAL_COUNTER.next_serial());
         }

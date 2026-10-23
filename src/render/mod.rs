@@ -4,6 +4,7 @@
 //! screenshots. Stages 2-3 add the 3D scene and window panels.
 
 pub mod camera;
+pub mod crosshair;
 pub mod cursor;
 pub mod gl;
 pub mod panel_texture;
@@ -30,7 +31,7 @@ use smithay::{
     utils::{Logical, Point, Scale},
 };
 
-use crate::state::DndIcon;
+use crate::{cli::RenderMode, input::mode::InputMode, state::DndIcon};
 
 smithay::backend::renderer::element::render_elements! {
     /// Every kind of thing we draw on an output, so one list can hold them all.
@@ -78,6 +79,112 @@ where
         );
     }
     elements
+}
+
+/// Everything the 2D overlay (cursor, crosshair, drag icon) depends on.
+pub struct OverlayInputs<'a> {
+    pub render_mode: RenderMode,
+    pub mode: &'a InputMode,
+    pub cursor_status: &'a mut CursorImageStatus,
+    pub cursor_theme: &'a mut cursor::CursorThemeCache,
+    pub crosshair: &'a mut crosshair::Crosshair,
+    pub dnd_icon: Option<&'a DndIcon>,
+    /// Pointer in global 2D coordinates.
+    pub pointer: Point<f64, Logical>,
+    pub output: &'a Output,
+    pub space: &'a Space<Window>,
+    pub scale: Scale<f64>,
+    pub time: Duration,
+}
+
+/// 2D things drawn on top of the output, front-most first:
+/// - 2D mode: the client's cursor and the drag-and-drop icon;
+/// - 3D Walk mode: the crosshair at the screen center;
+/// - 3D Window mode: nothing (the cursor is drawn ON the panel, in 3D).
+pub fn overlay_elements<R>(renderer: &mut R, inputs: OverlayInputs<'_>) -> Vec<SpaceRenderElement<R>>
+where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Texture + Clone + Send + 'static,
+{
+    let geo = inputs.space.output_geometry(inputs.output);
+    match (inputs.render_mode, inputs.mode) {
+        (RenderMode::Flat2D, _) => {
+            let origin = geo.map(|g| g.loc.to_f64()).unwrap_or_default();
+            pointer_elements(
+                renderer,
+                inputs.cursor_status,
+                inputs.cursor_theme,
+                inputs.dnd_icon,
+                inputs.pointer - origin,
+                inputs.scale,
+                inputs.time,
+            )
+        }
+        (RenderMode::Scene3D, InputMode::Walk) => {
+            let Some(geo) = geo else {
+                return Vec::new();
+            };
+            let half = crosshair::SIZE as f64 / 2.0;
+            let center = geo.size.to_f64().to_point().downscale(2.0) - Point::from((half, half));
+            let pos = center.to_physical(inputs.scale);
+            MemoryRenderBufferRenderElement::from_buffer(
+                renderer,
+                pos,
+                inputs.crosshair.buffer(),
+                None,
+                None,
+                None,
+                Kind::Unspecified,
+            )
+            .map(|e| vec![SpaceRenderElement::Memory(e)])
+            .unwrap_or_default()
+        }
+        (RenderMode::Scene3D, InputMode::Window { .. }) => Vec::new(),
+    }
+}
+
+/// Build `OverlayInputs` from the state's fields while the backend is borrowed mutably
+/// (a macro, because a function taking `&mut SpaceState` would borrow the backend too).
+#[macro_export]
+macro_rules! overlay_inputs {
+    ($state:expr, $output:expr, $scale:expr, $time:expr) => {
+        $crate::render::OverlayInputs {
+            render_mode: $state.render_mode,
+            mode: &$state.mode,
+            cursor_status: &mut $state.cursor_status,
+            cursor_theme: &mut $state.cursor_theme,
+            crosshair: &mut $state.crosshair,
+            dnd_icon: $state.dnd_icon.as_ref(),
+            pointer: $state.pointer_location,
+            output: $output,
+            space: &$state.space,
+            scale: $scale,
+            time: $time,
+        }
+    };
+}
+
+/// Same idea for the 3D scene inputs.
+#[macro_export]
+macro_rules! scene_inputs {
+    ($state:expr, $time:expr) => {
+        $crate::render::view::SceneInputs {
+            world: &mut $state.world,
+            highlight: $state.highlight,
+            cursor: match $state.mode {
+                $crate::input::mode::InputMode::Window { panel } => {
+                    Some($crate::render::view::PanelCursor {
+                        panel,
+                        at: $state.virtual_cursor,
+                        status: &mut $state.cursor_status,
+                        theme: &mut $state.cursor_theme,
+                        time: $time,
+                    })
+                }
+                $crate::input::mode::InputMode::Walk => None,
+            },
+        }
+    };
 }
 
 /// Render one output in 2D: windows from the space with `overlay` drawn on top.

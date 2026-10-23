@@ -183,18 +183,18 @@ fn render(state: &mut SpaceState) {
         0
     };
 
-    let pointer = state.pointer_location
-        - state
-            .space
-            .output_geometry(&output)
-            .map(|g| g.loc.to_f64())
-            .unwrap_or_default();
-
     let frame_start = Instant::now();
+    crate::input::before_frame(state);
+    let Backend::Headless(b) = &mut state.backend else {
+        return;
+    };
     // 3D: advance the camera and re-render the scene texture first. The scene pass uses
     // our own framebuffers, so it must run before the output framebuffer is bound.
-    let mut prepared = (state.render_mode == RenderMode::Scene3D)
-        .then(|| state.view.prepare(&mut b.renderer, size, &mut state.world));
+    let mut prepared = (state.render_mode == RenderMode::Scene3D).then(|| {
+        state
+            .view
+            .prepare(&mut b.renderer, size, crate::scene_inputs!(state, time))
+    });
 
     let mut framebuffer = match b.renderer.bind(&mut b.target) {
         Ok(fb) => fb,
@@ -203,14 +203,9 @@ fn render(state: &mut SpaceState) {
             return;
         }
     };
-    let overlay = render::pointer_elements(
+    let overlay = render::overlay_elements(
         &mut b.renderer,
-        &mut state.cursor_status,
-        &mut state.cursor_theme,
-        state.dnd_icon.as_ref(),
-        pointer,
-        scale,
-        time,
+        crate::overlay_inputs!(state, &output, scale, time),
     );
     let result = match prepared.as_mut() {
         Some(prepared) => {

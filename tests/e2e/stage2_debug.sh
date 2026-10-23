@@ -7,11 +7,9 @@ cp "$ROOT"/src/render/shaders/basic.* "$SH/"
 
 space_start --render 3d --shader-dir "$SH"
 kc input key Super+F3
-kc input click right --state press
 kc input key w --state press
 sleep 2.2
 kc input key w --state release
-kc input click right --state release
 FPS=$(grep "debug" "$OUT/spacewm.log" | grep -o 'fps=[0-9]*' | cut -d= -f2 | sort -n | tail -1)
 [ -n "$FPS" ] && [ "$FPS" -ge 55 ] || fail "walking ran at ${FPS:-?} fps (want ~60)"
 MS=$(grep "debug" "$OUT/spacewm.log" | grep -o 'avg_frame_ms="[0-9.]*"' | tail -1)

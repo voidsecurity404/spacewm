@@ -4,6 +4,7 @@
   pixel.py FILE X Y            -> "R G B"
   pixel.py diff A B            -> fraction of pixels that differ (0.0 .. 1.0)
   pixel.py near FILE X Y R G B [TOL]  -> exit 0 if the pixel is within TOL (default 40)
+  pixel.py find FILE R G B [TOL]      -> "X Y N": centroid and count of matching pixels
 """
 import struct
 import sys
@@ -75,6 +76,23 @@ def main():
         ok = all(abs(p - q) <= tol for p, q in zip(got, (r, g, b)))
         print(*got)
         sys.exit(0 if ok else 1)
+    elif args[0] == "find":
+        img = read_png(args[1])
+        r, g, b = map(int, args[2:5])
+        tol = int(args[5]) if len(args) > 5 else 40
+        w, h = img[0], img[1]
+        xs = ys = n = 0
+        for y in range(h):
+            for x in range(w):
+                px = pixel(img, x, y)
+                if all(abs(p - q) <= tol for p, q in zip(px, (r, g, b))):
+                    xs += x
+                    ys += y
+                    n += 1
+        if n == 0:
+            print("none")
+            sys.exit(1)
+        print(round(xs / n, 1), round(ys / n, 1), n)
     else:
         print(*pixel(read_png(args[0]), int(args[1]), int(args[2])))
 

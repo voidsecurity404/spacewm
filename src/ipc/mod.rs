@@ -391,6 +391,14 @@ fn handle_request(state: &mut SpaceState, id: ConnectionId, request: Request) ->
             panels: list_panels(state),
         },
         Request::FocusPanel { id: panel } => match state.window_by_id(panel) {
+            Some(_) if state.render_mode == crate::cli::RenderMode::Scene3D => {
+                crate::input::mode::set_mode(
+                    state,
+                    crate::input::mode::InputMode::Window { panel },
+                    None,
+                );
+                Response::Ok
+            }
             Some(window) => {
                 state.focus_window(Some(&window), smithay::utils::SERIAL_COUNTER.next_serial());
                 state.queue_redraw();
@@ -409,10 +417,15 @@ fn handle_request(state: &mut SpaceState, id: ConnectionId, request: Request) ->
             }
             None => Response::error(format!("no panel {panel}")),
         },
-        Request::Spawn { command } => match crate::spawn::spawn(&command, &state.socket_name) {
-            Ok(pid) => Response::Spawned { pid },
-            Err(e) => Response::error(e),
-        },
+        Request::Spawn { command } => {
+            // The window this opens may take focus (see `mode::on_new_window`).
+            state.expect_window_until =
+                Some(std::time::Instant::now() + crate::input::mode::SPAWN_FOCUS_WINDOW);
+            match crate::spawn::spawn(&command, &state.socket_name) {
+                Ok(pid) => Response::Spawned { pid },
+                Err(e) => Response::error(e),
+            }
+        }
         Request::Screenshot { path, force } => match validate_screenshot_path(&path, force) {
             Ok(path) => {
                 state.pending_screenshots.push(ScreenshotRequest {
