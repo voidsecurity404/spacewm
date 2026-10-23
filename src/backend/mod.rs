@@ -1,26 +1,99 @@
 //! Backends: where frames are shown and where input comes from.
 //!
-//! winit (Stage 1) runs spacewm as a window inside the current desktop; drm
-//! (Stage 6) drives the GPU and input devices directly from a TTY.
+//! - winit: spacewm as a window inside the current desktop (safe for development).
+//! - headless: no screen at all; renders offscreen on the GPU's render node. Used by
+//!   automated tests together with IPC input injection and screenshots.
+//! - drm (Stage 6): drives monitors and input devices directly from a TTY.
 //!
-//! A trait object keeps main.rs simple for now. smithay's backend types are
-//! heavily generic, so we may replace this trait with an enum later if trait
-//! objects become awkward.
+//! This is an enum rather than a trait object: smithay's backend types are generic and
+//! each backend needs different calloop sources, so a `match` keeps things explicit.
 
-mod drm;
-mod winit;
+pub mod drm;
+pub mod headless;
+pub mod winit;
+
+use smithay::{
+    backend::renderer::glow::GlowRenderer,
+    input::keyboard::LedState,
+    output::Output,
+    reexports::{calloop::LoopHandle, wayland_server::DisplayHandle},
+    wayland::dmabuf::DmabufState,
+};
 
 pub use crate::cli::BackendKind;
 use crate::{error::SpaceError, state::SpaceState};
 
-pub trait Backend {
-    fn name(&self) -> &'static str;
-    fn init(&mut self, state: &mut SpaceState) -> Result<(), SpaceError>;
+// One instance for the whole run, so the size difference between variants doesn't matter.
+#[allow(clippy::large_enum_variant)]
+pub enum Backend {
+    Winit(winit::WinitBackend),
+    Headless(headless::HeadlessBackend),
+    Drm(drm::DrmBackend),
 }
 
-pub fn create(kind: BackendKind) -> Box<dyn Backend> {
-    match kind {
-        BackendKind::Winit => Box::new(winit::WinitBackend),
-        BackendKind::Drm => Box::new(drm::DrmBackend),
+impl Backend {
+    pub fn init(
+        kind: BackendKind,
+        cli: &crate::cli::Cli,
+        dh: &DisplayHandle,
+        loop_handle: &LoopHandle<'static, SpaceState>,
+    ) -> Result<Self, SpaceError> {
+        Ok(match kind {
+            BackendKind::Winit => Self::Winit(winit::WinitBackend::init(dh, loop_handle)?),
+            BackendKind::Headless => {
+                Self::Headless(headless::HeadlessBackend::init(cli, dh, loop_handle)?)
+            }
+            BackendKind::Drm => Self::Drm(drm::DrmBackend::init(dh, loop_handle)?),
+        })
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Winit(_) => "winit",
+            Self::Headless(_) => "headless",
+            Self::Drm(_) => "drm",
+        }
+    }
+
+    /// Nested inside another desktop: the host eats Super, so binds also accept Alt.
+    pub fn is_nested(&self) -> bool {
+        matches!(self, Self::Winit(_))
+    }
+
+    pub fn renderer(&mut self) -> &mut GlowRenderer {
+        match self {
+            Self::Winit(b) => b.renderer(),
+            Self::Headless(b) => b.renderer(),
+            Self::Drm(b) => b.renderer(),
+        }
+    }
+
+    pub fn dmabuf_state(&mut self) -> &mut DmabufState {
+        match self {
+            Self::Winit(b) => &mut b.dmabuf_state,
+            Self::Headless(b) => &mut b.dmabuf_state,
+            Self::Drm(b) => b.dmabuf_state(),
+        }
+    }
+
+    pub fn outputs(&self) -> Vec<Output> {
+        match self {
+            Self::Winit(b) => vec![b.output.clone()],
+            Self::Headless(b) => vec![b.output.clone()],
+            Self::Drm(b) => b.outputs(),
+        }
+    }
+
+    /// Something changed on screen: render a new frame as soon as the display allows.
+    pub fn schedule_redraw(&mut self) {
+        match self {
+            Self::Winit(b) => b.schedule_redraw(),
+            Self::Headless(b) => b.schedule_redraw(),
+            Self::Drm(b) => b.schedule_redraw(),
+        }
+    }
+
+    pub fn update_led_state(&mut self, _led_state: LedState) {
+        // Keyboard LEDs only exist on real devices (Stage 6).
     }
 }

@@ -1,0 +1,282 @@
+//! spacectl: control a running spacewm over its IPC socket.
+
+#[path = "../ipc/proto.rs"]
+#[allow(dead_code)]
+mod proto;
+
+use std::{
+    io::{BufRead, BufReader, Write},
+    os::unix::net::UnixStream,
+    path::PathBuf,
+    process::ExitCode,
+};
+
+use clap::{Parser, Subcommand};
+use proto::{EventKind, InputAction, MouseButton, PressMode, Request, Response};
+
+#[derive(Parser)]
+#[command(name = "spacectl", version, about = "Control a running spacewm")]
+struct Cli {
+    /// Socket path (default: $SPACEWM_SOCKET, or the only spacewm socket in $XDG_RUNTIME_DIR).
+    #[arg(long, global = true)]
+    socket: Option<PathBuf>,
+    /// Print raw JSON responses.
+    #[arg(long, global = true)]
+    json: bool,
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// spacewm version and backend.
+    Version,
+    /// List windows/panels.
+    #[command(alias = "list-panels")]
+    List,
+    /// Focus a panel by id.
+    Focus { id: u64 },
+    /// Ask a panel's app to close.
+    Close { id: u64 },
+    /// Start a program inside spacewm.
+    Spawn {
+        #[arg(trailing_var_arg = true, required = true)]
+        command: Vec<String>,
+    },
+    /// Save a PNG of the composited screen (path inside $HOME).
+    Screenshot {
+        path: PathBuf,
+        #[arg(long)]
+        force: bool,
+    },
+    /// Quit spacewm.
+    Quit,
+    /// Print events as they happen.
+    Watch,
+    /// Synthetic input (needs spacewm --allow-input-injection).
+    Input {
+        #[command(subcommand)]
+        action: InputCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum InputCmd {
+    /// Press a key combo, e.g. "Alt+Return".
+    Key {
+        combo: String,
+        #[arg(long, value_enum, default_value = "tap")]
+        state: PressArg,
+    },
+    /// Type text.
+    Type { text: String },
+    /// Move the pointer to output-local coordinates.
+    MoveTo { x: f64, y: f64 },
+    /// Move the pointer relatively.
+    MoveBy {
+        #[arg(allow_hyphen_values = true)]
+        dx: f64,
+        #[arg(allow_hyphen_values = true)]
+        dy: f64,
+    },
+    /// Click a mouse button.
+    Click {
+        #[arg(value_enum, default_value = "left")]
+        button: ButtonArg,
+        #[arg(long, value_enum, default_value = "tap")]
+        state: PressArg,
+    },
+    /// Scroll by wheel notches (positive = down/right).
+    Scroll {
+        #[arg(allow_hyphen_values = true)]
+        dy: f64,
+        #[arg(allow_hyphen_values = true, default_value_t = 0.0)]
+        dx: f64,
+    },
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum PressArg {
+    Press,
+    Release,
+    Tap,
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum ButtonArg {
+    Left,
+    Right,
+    Middle,
+}
+
+fn find_socket(explicit: Option<PathBuf>) -> Result<PathBuf, String> {
+    if let Some(p) = explicit {
+        return Ok(p);
+    }
+    if let Some(p) = std::env::var_os("SPACEWM_SOCKET") {
+        return Ok(PathBuf::from(p));
+    }
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR").ok_or("XDG_RUNTIME_DIR is not set")?;
+    let mut found: Vec<PathBuf> = std::fs::read_dir(&runtime)
+        .map_err(|e| e.to_string())?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("spacewm-") && n.ends_with(".sock"))
+        })
+        .collect();
+    found.sort();
+    match found.len() {
+        0 => Err("no running spacewm found (no spacewm-*.sock in $XDG_RUNTIME_DIR)".into()),
+        1 => Ok(found.remove(0)),
+        _ => Err(format!(
+            "several spacewm sockets found, pick one with --socket: {}",
+            found
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+    }
+}
+
+fn to_request(command: Command) -> Request {
+    let press = |p: PressArg| match p {
+        PressArg::Press => PressMode::Press,
+        PressArg::Release => PressMode::Release,
+        PressArg::Tap => PressMode::Tap,
+    };
+    match command {
+        Command::Version => Request::Version,
+        Command::List => Request::ListPanels,
+        Command::Focus { id } => Request::FocusPanel { id },
+        Command::Close { id } => Request::ClosePanel { id },
+        Command::Spawn { command } => Request::Spawn {
+            // Re-quote so the server's shell-words split restores the same argv.
+            command: shell_words::join(command),
+        },
+        Command::Screenshot { path, force } => {
+            let path = std::path::absolute(&path).unwrap_or(path);
+            Request::Screenshot {
+                path: path.display().to_string(),
+                force,
+            }
+        }
+        Command::Quit => Request::Quit,
+        Command::Watch => Request::Subscribe {
+            events: vec![
+                EventKind::PanelOpened,
+                EventKind::PanelClosed,
+                EventKind::FocusChanged,
+                EventKind::ModeChanged,
+                EventKind::ConfigReloaded,
+            ],
+        },
+        Command::Input { action } => Request::Input {
+            action: match action {
+                InputCmd::Key { combo, state } => InputAction::Key {
+                    combo,
+                    state: press(state),
+                },
+                InputCmd::Type { text } => InputAction::Type { text },
+                InputCmd::MoveTo { x, y } => InputAction::MoveTo { x, y },
+                InputCmd::MoveBy { dx, dy } => InputAction::MoveBy { dx, dy },
+                InputCmd::Click { button, state } => InputAction::Button {
+                    button: match button {
+                        ButtonArg::Left => MouseButton::Left,
+                        ButtonArg::Right => MouseButton::Right,
+                        ButtonArg::Middle => MouseButton::Middle,
+                    },
+                    state: press(state),
+                },
+                InputCmd::Scroll { dy, dx } => InputAction::Scroll { dx, dy },
+            },
+        },
+    }
+}
+
+fn print_human(response: &Response) {
+    match response {
+        Response::Ok => {}
+        Response::Error { message } => eprintln!("error: {message}"),
+        Response::Version { version, backend } => println!("spacewm {version} ({backend})"),
+        Response::Spawned { pid } => println!("started pid {pid}"),
+        Response::Screenshot {
+            path,
+            width,
+            height,
+        } => println!("{path} ({width}x{height})"),
+        Response::Panels { panels } => {
+            println!(
+                "{:>4}  {:<5}  {:<3}  {:<22}  {:<11}  TITLE",
+                "ID", "KIND", "FOC", "APP_ID", "SIZE"
+            );
+            for p in panels {
+                println!(
+                    "{:>4}  {:<5}  {:<3}  {:<22}  {:<11}  {}",
+                    p.id,
+                    p.kind,
+                    if p.focused { "*" } else { "" },
+                    p.app_id.as_deref().unwrap_or("-"),
+                    format!("{}x{}", p.size_px[0], p.size_px[1]),
+                    p.title.as_deref().unwrap_or("")
+                );
+            }
+        }
+        Response::Event { event } => println!("{event:?}"),
+    }
+}
+
+fn run() -> Result<bool, String> {
+    let cli = Cli::parse();
+    let path = find_socket(cli.socket)?;
+    let watching = matches!(cli.command, Command::Watch);
+    let request = to_request(cli.command);
+
+    let mut stream = UnixStream::connect(&path)
+        .map_err(|e| format!("cannot connect to {}: {e}", path.display()))?;
+    let mut line = serde_json::to_string(&request).map_err(|e| e.to_string())?;
+    line.push('\n');
+    stream
+        .write_all(line.as_bytes())
+        .map_err(|e| e.to_string())?;
+
+    let mut reader = BufReader::new(stream);
+    let mut ok = true;
+    loop {
+        let mut buf = String::new();
+        let n = reader.read_line(&mut buf).map_err(|e| e.to_string())?;
+        if n == 0 {
+            if watching {
+                return Ok(ok);
+            }
+            return Err("spacewm closed the connection".into());
+        }
+        let response: Response =
+            serde_json::from_str(buf.trim()).map_err(|e| format!("bad response: {e}"))?;
+        if matches!(response, Response::Error { .. }) {
+            ok = false;
+        }
+        if cli.json {
+            println!("{}", buf.trim());
+        } else {
+            print_human(&response);
+        }
+        // `watch`: the first response is the Ok for the subscription; keep reading events.
+        if !watching || !ok {
+            return Ok(ok);
+        }
+    }
+}
+
+fn main() -> ExitCode {
+    match run() {
+        Ok(true) => ExitCode::SUCCESS,
+        Ok(false) => ExitCode::FAILURE,
+        Err(e) => {
+            eprintln!("spacectl: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}

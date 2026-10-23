@@ -1,5 +1,19 @@
-//! Wayland protocol handlers (Stage 1).
+//! Wayland protocol handlers.
 //!
-//! One file per protocol: wl_compositor, xdg_shell, wl_shm, wl_seat, wl_output,
-//! data device (clipboard). Each implements a smithay handler trait on
-//! `SpaceState` and registers it with the matching `delegate_*!` macro.
+//! One file per protocol. Each implements a smithay handler trait on `SpaceState`. smithay
+//! then needs `Dispatch` impls that route every protocol request to those handlers; the
+//! single `delegate_dispatch2!` below generates them for ALL protocols at once (older
+//! smithay versions needed one `delegate_*!` macro per protocol).
+
+pub mod compositor;
+pub mod data_device;
+pub mod dmabuf;
+pub mod output;
+pub mod seat;
+pub mod shm;
+pub mod socket;
+pub mod xdg_shell;
+
+use crate::state::SpaceState;
+
+smithay::delegate_dispatch2!(SpaceState);

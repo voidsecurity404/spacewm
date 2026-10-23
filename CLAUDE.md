@@ -19,3 +19,10 @@
 ## Run
 - Dev: `cargo run -- --backend winit` (nested window)
 - Test clients: `WAYLAND_DISPLAY=spacewm-0 foot` or `weston-terminal`
+
+## Testing
+- Unit tests: `cargo test`. Lints: `cargo clippy --all-targets -- -D warnings`.
+- End-to-end: `just e2e` runs `tests/e2e/*.sh`. They start `spacewm --backend headless
+  --allow-input-injection` (offscreen on the GPU render node), drive real clients with
+  `spacectl input ...`, and save screenshots to `~/spacewm-test/` for visual checks.
+- Never run spacewm as root.

@@ -37,6 +37,22 @@ clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 toml = "0.9"
 directories = "6"
+serde_json = "1"
+shell-words = "1"
+# Unix socket credentials (SO_PEERCRED) and uid lookups for the IPC socket.
+rustix = { version = "1", features = ["net", "process", "fs"] }
+# Signal mask reset in spawned children (see spawn.rs).
+libc = "0.2"
+xcursor = "0.3"
+png = "0.18"
+
+[[bin]]
+name = "spacewm"
+path = "src/main.rs"
+
+[[bin]]
+name = "spacectl"
+path = "src/bin/spacectl.rs"
 
 [profile.dev]
 # 3D math and voxel meshing are painfully slow at opt-level 0.

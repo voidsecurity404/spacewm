@@ -1,28 +1,309 @@
 //! `SpaceState`: the single struct that owns all compositor state.
 //!
-//! It will grow to hold the Wayland Display handle, every protocol's state, the
-//! world, the camera and the input mode. smithay's handler traits
-//! (CompositorHandler, XdgShellHandler, SeatHandler, ...) are implemented on
-//! this one type, and calloop passes `&mut SpaceState` to every event callback.
-//! That is why everything lives in ONE struct: any callback can reach any state
-//! without Rc<RefCell<..>> or locks.
+//! smithay's handler traits (CompositorHandler, XdgShellHandler, SeatHandler, ...) are
+//! implemented on this one type, and calloop passes `&mut SpaceState` to every event
+//! callback. That is why everything lives in ONE struct: any callback can reach any
+//! state without Rc<RefCell<..>> or locks.
+//!
+//! Borrowing note: the renderer lives inside `backend`. Rendering code takes the fields
+//! it needs directly (`state.backend.renderer()` + `&state.space`), which the borrow
+//! checker allows because they are different fields. Methods on `&mut self` would borrow
+//! everything at once, so rendering is written as free functions.
 
-use std::time::Instant;
+use std::{
+    ffi::OsString,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::Instant,
+};
 
-use crate::cli::Cli;
+use smithay::wayland::seat::WaylandFocus;
+use smithay::{
+    desktop::{PopupManager, Space, Window, WindowSurfaceType},
+    input::{keyboard::XkbConfig, pointer::CursorImageStatus, Seat, SeatState},
+    reexports::{
+        calloop::{
+            channel::{self, Sender},
+            LoopHandle, LoopSignal,
+        },
+        wayland_server::{
+            backend::{ClientData, ClientId, DisconnectReason},
+            protocol::wl_surface::WlSurface,
+            Display, DisplayHandle,
+        },
+    },
+    utils::{Logical, Point},
+    wayland::{
+        compositor::{get_parent, CompositorClientState, CompositorState},
+        output::OutputManagerState,
+        selection::{
+            data_device::DataDeviceState, primary_selection::PrimarySelectionState,
+            wlr_data_control::DataControlState,
+        },
+        shell::xdg::XdgShellState,
+        shm::ShmState,
+    },
+};
+
+use crate::{
+    backend::Backend,
+    cli::Cli,
+    focus::PointerFocusTarget,
+    input::InputState,
+    ipc::IpcServer,
+    render::{
+        cursor::CursorThemeCache,
+        screenshot::{ScreenshotDone, ScreenshotRequest},
+    },
+};
+
+/// A drag-and-drop icon: the surface a client attached to the cursor while dragging.
+pub struct DndIcon {
+    pub surface: WlSurface,
+    pub offset: Point<i32, Logical>,
+}
 
 pub struct SpaceState {
+    /// Output + rendering + input devices. See `backend/mod.rs`.
+    pub backend: Backend,
     pub running: bool,
     pub start_time: Instant,
     pub cli: Cli,
+
+    /// Handle to the Wayland server: used to create globals and send events to clients.
+    pub display_handle: DisplayHandle,
+    /// Handle to the calloop event loop: used to insert event sources later
+    /// (timers, IPC connections, child process watchers).
+    pub loop_handle: LoopHandle<'static, SpaceState>,
+    pub loop_signal: LoopSignal,
+    /// The WAYLAND_DISPLAY value clients use to find us (e.g. "wayland-1").
+    pub socket_name: OsString,
+
+    // ---- Wayland protocol state (smithay keeps per-protocol bookkeeping here) ----
+    /// wl_compositor + wl_subcompositor: surfaces, buffers, commits, subsurfaces.
+    pub compositor_state: CompositorState,
+    /// xdg_wm_base: turns surfaces into application windows (toplevels) and popups.
+    pub xdg_shell_state: XdgShellState,
+    /// wl_shm: CPU shared-memory buffers (the client draws in RAM and shares an fd).
+    pub shm_state: ShmState,
+    /// wl_output + xdg-output: tells clients about our monitors (size, scale).
+    /// Never read: holding it keeps the xdg-output global alive.
+    #[allow(dead_code)]
+    pub output_manager_state: OutputManagerState,
+    /// wl_seat bookkeeping; `seat` is our one seat ("seat0") with keyboard + pointer.
+    pub seat_state: SeatState<SpaceState>,
+    pub seat: Seat<SpaceState>,
+    /// wl_data_device: clipboard (Ctrl+C / Ctrl+V) and drag-and-drop.
+    pub data_device_state: DataDeviceState,
+    /// zwp_primary_selection: the "select text, middle-click to paste" clipboard.
+    pub primary_selection_state: PrimarySelectionState,
+    /// zwlr_data_control: lets clipboard tools (wl-copy, wl-paste, clipboard managers)
+    /// read and set the clipboard without having a focused window.
+    pub data_control_state: DataControlState,
+
+    /// Menus and tooltips. Popups belong to a parent surface, not to the window list.
+    pub popups: PopupManager,
+    /// 2D layout of windows and outputs. In 3D mode (Stage 3+) windows live in the world
+    /// instead; the space then only tracks outputs.
+    pub space: Space<Window>,
+    /// Where new windows are placed in the 2D cascade (0..10).
+    pub cascade_index: i32,
+
+    /// Pointer position in global logical coordinates (2D mode).
+    pub pointer_location: Point<f64, Logical>,
+    /// What the client focused under the pointer asked the cursor to look like.
+    pub cursor_status: CursorImageStatus,
+    pub cursor_theme: CursorThemeCache,
+    pub dnd_icon: Option<DndIcon>,
+
+    /// Input bookkeeping: suppressed key releases, modifier choice, etc.
+    pub input: InputState,
+
+    /// IPC control socket (spacectl).
+    pub ipc: Option<IpcServer>,
+    /// Screenshots waiting for the next rendered frame.
+    pub pending_screenshots: Vec<ScreenshotRequest>,
+    /// Worker threads report finished screenshots here.
+    pub screenshot_tx: Sender<ScreenshotDone>,
 }
 
 impl SpaceState {
-    pub fn new(cli: Cli) -> Self {
-        Self {
+    pub fn new(
+        display: &mut Display<SpaceState>,
+        loop_handle: LoopHandle<'static, SpaceState>,
+        loop_signal: LoopSignal,
+        cli: Cli,
+        backend: Backend,
+    ) -> anyhow::Result<Self> {
+        let dh = display.handle();
+
+        // Globals are created in dependency order. Each one becomes visible to clients
+        // through wl_registry as soon as it exists.
+        let compositor_state = CompositorState::new::<Self>(&dh);
+        tracing::debug!("global: wl_compositor, wl_subcompositor");
+        let xdg_shell_state = XdgShellState::new::<Self>(&dh);
+        tracing::debug!("global: xdg_wm_base");
+        let shm_state = ShmState::new::<Self>(&dh, vec![]);
+        tracing::debug!("global: wl_shm");
+        let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
+        tracing::debug!("global: wl_output manager + zxdg_output_manager_v1");
+
+        let mut seat_state = SeatState::new();
+        let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, "seat0");
+        // us layout, 200 ms repeat delay, 25 repeats/s.
+        let xkb = XkbConfig {
+            layout: "us",
+            ..XkbConfig::default()
+        };
+        seat.add_keyboard(xkb, 200, 25)
+            .map_err(|e| anyhow::anyhow!("failed to create keyboard: {e:?}"))?;
+        seat.add_pointer();
+        tracing::debug!("global: wl_seat 'seat0' (keyboard + pointer)");
+
+        let data_device_state = DataDeviceState::new::<Self>(&dh);
+        tracing::debug!("global: wl_data_device_manager");
+        let primary_selection_state = PrimarySelectionState::new::<Self>(&dh);
+        tracing::debug!("global: zwp_primary_selection_device_manager_v1");
+        let data_control_state =
+            DataControlState::new::<Self, _>(&dh, Some(&primary_selection_state), |_| true);
+        tracing::debug!("global: zwlr_data_control_manager_v1");
+
+        let (screenshot_tx, screenshot_rx) = channel::channel();
+        loop_handle
+            .insert_source(screenshot_rx, |event, _, state| {
+                if let channel::Event::Msg(done) = event {
+                    crate::ipc::on_screenshot_done(state, done);
+                }
+            })
+            .map_err(|e| anyhow::anyhow!("screenshot channel: {}", e.error))?;
+
+        Ok(Self {
+            backend,
             running: true,
             start_time: Instant::now(),
             cli,
+            display_handle: dh,
+            loop_handle,
+            loop_signal,
+            socket_name: OsString::new(),
+            compositor_state,
+            xdg_shell_state,
+            shm_state,
+            output_manager_state,
+            seat_state,
+            seat,
+            data_device_state,
+            primary_selection_state,
+            data_control_state,
+            popups: PopupManager::default(),
+            space: Space::default(),
+            cascade_index: 0,
+            pointer_location: (0.0, 0.0).into(),
+            cursor_status: CursorImageStatus::default_named(),
+            cursor_theme: CursorThemeCache::load(),
+            dnd_icon: None,
+            input: InputState::default(),
+            ipc: None,
+            pending_screenshots: Vec::new(),
+            screenshot_tx,
+        })
+    }
+
+    /// Stop the compositor at the end of this loop iteration.
+    pub fn quit(&mut self) {
+        tracing::info!("quit requested");
+        self.running = false;
+        self.loop_signal.wakeup();
+    }
+
+    /// Ask the backend for a new frame (something on screen changed).
+    pub fn queue_redraw(&mut self) {
+        self.backend.schedule_redraw();
+    }
+
+    /// The window whose surface tree contains `surface` (walks up from subsurfaces).
+    pub fn window_for_surface(&self, surface: &WlSurface) -> Option<Window> {
+        let mut root = surface.clone();
+        while let Some(parent) = get_parent(&root) {
+            root = parent;
+        }
+        self.space
+            .elements()
+            .find(|w| w.wl_surface().as_deref() == Some(&root))
+            .cloned()
+    }
+
+    pub fn window_by_id(&self, id: u64) -> Option<Window> {
+        self.space.elements().find(|w| window_id(w) == id).cloned()
+    }
+
+    /// The surface under a point in global coordinates, and that surface's origin
+    /// in the same coordinates (what `pointer.motion` expects).
+    pub fn surface_under(
+        &self,
+        pos: Point<f64, Logical>,
+    ) -> Option<(PointerFocusTarget, Point<f64, Logical>)> {
+        // `element_under` returns where the window's buffer origin is drawn (its position
+        // minus the geometry offset, e.g. client-side shadows), which is the origin that
+        // `surface_under` expects.
+        let (window, window_pos) = self.space.element_under(pos)?;
+        window
+            .surface_under(pos - window_pos.to_f64(), WindowSurfaceType::ALL)
+            .map(|(surface, surface_pos)| {
+                // An X11 window's surface is reported as its wl_surface; route through the
+                // X11Surface so focus handling stays X11-aware.
+                let target = match window.x11_surface() {
+                    Some(x11) if x11.wl_surface().as_ref() == Some(&surface) => {
+                        PointerFocusTarget::X11(x11.clone())
+                    }
+                    _ => PointerFocusTarget::Surface(surface),
+                };
+                (target, (surface_pos + window_pos).to_f64())
+            })
+    }
+
+    /// Run after every event-loop dispatch: drop dead windows/popups and send everything
+    /// we queued for clients. Without the flush, clients would only see our events when
+    /// the next unrelated event happens.
+    pub fn refresh_and_flush(&mut self) {
+        self.space.refresh();
+        self.popups.cleanup();
+        if let Err(err) = self.display_handle.flush_clients() {
+            tracing::warn!("failed to flush clients: {err}");
         }
     }
+}
+
+/// Per-client data. smithay stores one of these for every connected client.
+#[derive(Default)]
+pub struct ClientState {
+    pub compositor_state: CompositorClientState,
+}
+
+impl ClientData for ClientState {
+    fn initialized(&self, client_id: ClientId) {
+        tracing::debug!(?client_id, "client initialized");
+    }
+    fn disconnected(&self, client_id: ClientId, reason: DisconnectReason) {
+        tracing::info!(?client_id, ?reason, "client disconnected");
+    }
+}
+
+/// Shorthand used by handlers that need an `Arc<ClientState>` for new clients.
+pub fn new_client_state() -> Arc<ClientState> {
+    Arc::new(ClientState::default())
+}
+
+/// Stable id of a window, shown by `spacectl list` and used by IPC requests.
+#[derive(Debug, Clone, Copy)]
+struct WindowId(u64);
+
+pub fn window_id(window: &Window) -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    window
+        .user_data()
+        .get_or_insert(|| WindowId(NEXT.fetch_add(1, Ordering::Relaxed)))
+        .0
 }
