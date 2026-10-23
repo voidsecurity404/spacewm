@@ -40,6 +40,13 @@ fn main() -> anyhow::Result<()> {
         // Read-only listing; needs no session, logging setup or event loop.
         return backend::drm::probe();
     }
+    if rustix::process::geteuid().is_root() {
+        // Root is never needed: libseat hands the GPU and input devices to a normal user.
+        // A root compositor would make every bug (and every client) far more dangerous.
+        return Err(anyhow!(
+            "do not run spacewm as root (no sudo): start it as your user from a TTY login"
+        ));
+    }
     if cli.drm_test {
         // A smoke test of GPU + monitor: the bare world, no clients, quit after 10 s.
         cli.backend = cli::BackendKind::Drm;
@@ -54,7 +61,11 @@ fn main() -> anyhow::Result<()> {
         log = %log_path.display(),
         "starting spacewm"
     );
+    // Errors also go to the log file: on a TTY nobody may be watching stderr.
+    run(cli).inspect_err(|err| tracing::error!("fatal: {err:#}"))
+}
 
+fn run(cli: Cli) -> anyhow::Result<()> {
     let mut event_loop: EventLoop<SpaceState> =
         EventLoop::try_new().context("failed to create event loop")?;
     let loop_handle = event_loop.handle();
