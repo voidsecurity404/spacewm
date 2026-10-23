@@ -3,8 +3,12 @@
 use std::{
     ffi::OsStr,
     os::unix::process::CommandExt,
+    path::PathBuf,
     process::{Command, Stdio},
-    sync::atomic::{AtomicU32, Ordering},
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Mutex,
+    },
 };
 
 use crate::state::SpaceState;
@@ -25,23 +29,47 @@ fn x_display() -> Option<String> {
     }
 }
 
-/// Run `cmd` (split like a shell would, but without a shell) as a client of our socket.
-/// Errors are logged, never fatal.
-pub fn spawn(cmd: &str, socket: &OsStr) -> Result<u32, String> {
-    let args = shell_words::split(cmd).map_err(|e| format!("bad command '{cmd}': {e}"))?;
-    let (program, rest) = args.split_first().ok_or_else(|| "empty command".to_string())?;
-    let mut command = Command::new(program);
-    command
-        .args(rest)
-        .env("WAYLAND_DISPLAY", socket)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    // X11 apps reach OUR XWayland; without it they must not reach a host X server.
+/// The IPC socket, exported to children as SPACEWM_SOCKET (spacectl finds spacewm through it).
+static IPC_SOCKET: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+pub fn set_ipc_socket(path: Option<PathBuf>) {
+    if let Ok(mut s) = IPC_SOCKET.lock() {
+        *s = path;
+    }
+}
+
+/// The environment our children need: our Wayland socket, our X display (or none, so
+/// they never reach a host X server), our IPC socket.
+fn session_env(command: &mut Command, socket: &OsStr) {
+    command.env("WAYLAND_DISPLAY", socket);
     match x_display() {
         Some(display) => command.env("DISPLAY", display),
         None => command.env_remove("DISPLAY"),
     };
+    match IPC_SOCKET.lock().ok().and_then(|s| s.clone()) {
+        Some(path) => command.env("SPACEWM_SOCKET", path),
+        None => command.env_remove("SPACEWM_SOCKET"),
+    };
+}
+
+/// Run `cmd` (split like a shell would, but without a shell) as a client of our socket.
+/// Errors are logged, never fatal.
+pub fn spawn(cmd: &str, socket: &OsStr) -> Result<u32, String> {
+    let args = shell_words::split(cmd).map_err(|e| format!("bad command '{cmd}': {e}"))?;
+    spawn_args(&args, cmd, socket)
+}
+
+/// Run `cmd` through `sh -c` (pipes, redirections, `&&`). Only for callers the user
+/// allowed to (config `general.ipc_allow_shell`).
+pub fn spawn_shell(cmd: &str, socket: &OsStr) -> Result<u32, String> {
+    spawn_args(&["sh".into(), "-c".into(), cmd.into()], cmd, socket)
+}
+
+fn spawn_args(args: &[String], label: &str, socket: &OsStr) -> Result<u32, String> {
+    let (program, rest) = args.split_first().ok_or_else(|| "empty command".to_string())?;
+    let mut command = Command::new(program);
+    command.args(rest).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    session_env(&mut command, socket);
     // SAFETY: only async-signal-safe libc calls between fork and exec.
     unsafe {
         command.pre_exec(|| {
@@ -58,7 +86,7 @@ pub fn spawn(cmd: &str, socket: &OsStr) -> Result<u32, String> {
     }
     let mut child = command.spawn().map_err(|e| format!("failed to start '{program}': {e}"))?;
     let pid = child.id();
-    tracing::info!(pid, command = cmd, "spawned");
+    tracing::info!(pid, command = label, "spawned");
     // Reap the child when it exits so it doesn't stay a zombie.
     std::thread::spawn(move || {
         if let Ok(status) = child.wait() {
@@ -97,7 +125,7 @@ pub fn spawn_terminal(state: &mut SpaceState) {
 /// Export our session variables to the D-Bus activation environment and systemd --user,
 /// so services started on demand (xdg-desktop-portal, mako, pipewire...) connect to
 /// spacewm. Only meaningful on a real session (DRM): nested, they already have a desktop.
-pub fn update_activation_environment() {
+pub fn update_activation_environment(socket: &OsStr) {
     if !in_path("dbus-update-activation-environment") {
         tracing::warn!("dbus-update-activation-environment not found; portals may not work");
         return;
@@ -105,6 +133,7 @@ pub fn update_activation_environment() {
     let mut command = Command::new("dbus-update-activation-environment");
     command
         .args(["--systemd", "WAYLAND_DISPLAY", "XDG_CURRENT_DESKTOP", "XDG_SESSION_TYPE"])
+        .env("WAYLAND_DISPLAY", socket)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());

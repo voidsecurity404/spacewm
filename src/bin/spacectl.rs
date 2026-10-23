@@ -38,11 +38,36 @@ enum Command {
     Focus { id: u64 },
     /// Ask a panel's app to close.
     Close { id: u64 },
-    /// Start a program inside spacewm.
+    /// Start a program inside spacewm: `spacectl spawn foot -e htop`. With --shell the words
+    /// are one shell command line (pipes, &&), allowed only with general.ipc_allow_shell.
     Spawn {
-        #[arg(trailing_var_arg = true, required = true)]
+        #[arg(long)]
+        shell: bool,
+        #[arg(trailing_var_arg = true, required = true, allow_hyphen_values = true)]
         command: Vec<String>,
     },
+    /// Move a panel to X Y Z (metres), optionally turning it.
+    Move {
+        id: u64,
+        #[arg(allow_hyphen_values = true)]
+        x: f32,
+        #[arg(allow_hyphen_values = true)]
+        y: f32,
+        #[arg(allow_hyphen_values = true)]
+        z: f32,
+        /// Rotation around Y in degrees (0 = facing +Z).
+        #[arg(long, allow_hyphen_values = true)]
+        yaw: Option<f32>,
+    },
+    /// Set a panel's scale in window pixels per metre (200..3000; bigger = smaller).
+    Scale { id: u64, pixels_per_unit: f32 },
+    /// Switch to walking, or into a window: `spacectl mode walk`, `spacectl mode window 3`.
+    Mode {
+        #[command(subcommand)]
+        target: ModeCmd,
+    },
+    /// Re-read the config file now and report errors.
+    ReloadConfig,
     /// Save a PNG of the composited screen (path inside $HOME).
     Screenshot {
         path: PathBuf,
@@ -92,6 +117,12 @@ enum Command {
         #[command(subcommand)]
         action: InputCmd,
     },
+}
+
+#[derive(Subcommand)]
+enum ModeCmd {
+    Walk,
+    Window { id: u64 },
 }
 
 #[derive(Subcommand)]
@@ -182,10 +213,23 @@ fn to_request(command: Command) -> Request {
         Command::List => Request::ListPanels,
         Command::Focus { id } => Request::FocusPanel { id },
         Command::Close { id } => Request::ClosePanel { id },
-        Command::Spawn { command } => Request::Spawn {
-            // Re-quote so the server's shell-words split restores the same argv.
-            command: shell_words::join(command),
+        Command::Spawn { shell, command } => Request::Spawn {
+            // Without --shell, re-quote so the server's shell-words split restores the
+            // same argv; with it, the words are one command line for sh -c.
+            command: if shell { command.join(" ") } else { shell_words::join(command) },
+            shell,
         },
+        Command::Move { id, x, y, z, yaw } => {
+            Request::MovePanel { id, position: [x, y, z], yaw_deg: yaw }
+        }
+        Command::Scale { id, pixels_per_unit } => Request::ScalePanel { id, pixels_per_unit },
+        Command::Mode { target } => Request::SetMode {
+            mode: match target {
+                ModeCmd::Walk => proto::ModeTarget::Walk,
+                ModeCmd::Window { id } => proto::ModeTarget::Window(id),
+            },
+        },
+        Command::ReloadConfig => Request::ReloadConfig,
         Command::Screenshot { path, force } => {
             let path = std::path::absolute(&path).unwrap_or(path);
             Request::Screenshot { path: path.display().to_string(), force }
@@ -250,8 +294,22 @@ fn print_human(response: &Response) {
                 );
             }
         }
-        Response::Event { event } => println!("{event:?}"),
+        Response::Event { event } => println!("{}", describe(event)),
         Response::Block { block } => println!("{block}"),
+    }
+}
+
+fn describe(event: &proto::Event) -> String {
+    use proto::Event;
+    match event {
+        Event::PanelOpened { id, app_id } => {
+            format!("panel opened: {id} {}", app_id.as_deref().unwrap_or(""))
+        }
+        Event::PanelClosed { id } => format!("panel closed: {id}"),
+        Event::FocusChanged { id: Some(id) } => format!("focus: {id}"),
+        Event::FocusChanged { id: None } => "focus: none".into(),
+        Event::ModeChanged { mode } => format!("mode: {mode}"),
+        Event::ConfigReloaded => "config reloaded".into(),
     }
 }
 

@@ -122,8 +122,8 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     }
 
     let socket_name = wayland::socket::init_wayland_listener(display, &loop_handle)?;
-    // SAFETY: still single-threaded; children inherit this variable.
-    unsafe { std::env::set_var("WAYLAND_DISPLAY", &socket_name) };
+    // Our own WAYLAND_DISPLAY is NOT changed: setenv while other threads (Mesa's) may
+    // call getenv is a data race. Children get the variable explicitly (spawn.rs).
     tracing::info!(socket = ?socket_name, "spacewm listening on {}", socket_name.to_string_lossy());
     state.socket_name = socket_name.clone();
 
@@ -141,7 +141,10 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     match ipc_path {
         Some(path) => {
             match ipc::IpcServer::start(path, state.cli.allow_input_injection, &loop_handle) {
-                Ok(server) => state.ipc = Some(server),
+                Ok(server) => {
+                    spawn::set_ipc_socket(Some(server.path.clone()));
+                    state.ipc = Some(server);
+                }
                 Err(err) => tracing::warn!("IPC disabled: {err:#}"),
             }
         }
@@ -173,7 +176,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         // On a real session we are the first program: tell D-Bus activated services
         // (portals, notification daemons) and systemd user units where our Wayland socket
         // is, or they would start without WAYLAND_DISPLAY and fail.
-        spawn::update_activation_environment();
+        spawn::update_activation_environment(&state.socket_name);
     }
 
     if let Some(e) = config_error {

@@ -19,9 +19,31 @@ pub enum Request {
     ClosePanel {
         id: u64,
     },
+    /// Start a program. `command` is split like a shell would but run WITHOUT one;
+    /// `shell: true` runs it through `sh -c` and needs `general.ipc_allow_shell`.
     Spawn {
         command: String,
+        #[serde(default)]
+        shell: bool,
     },
+    /// Put a panel somewhere (metres); optionally turn it (degrees around Y).
+    MovePanel {
+        id: u64,
+        position: [f32; 3],
+        #[serde(default)]
+        yaw_deg: Option<f32>,
+    },
+    /// Panel scale: window pixels per metre (200..3000; bigger = smaller panel).
+    ScalePanel {
+        id: u64,
+        pixels_per_unit: f32,
+    },
+    /// Walk, or use a window (3D only).
+    SetMode {
+        mode: ModeTarget,
+    },
+    /// Re-read the config file now (it is also reloaded automatically when saved).
+    ReloadConfig,
     Screenshot {
         path: String,
         #[serde(default)]
@@ -52,6 +74,14 @@ pub enum Request {
     Input {
         action: InputAction,
     },
+}
+
+/// `"walk"` or `{"window": <panel id>}`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModeTarget {
+    Walk,
+    Window(u64),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -190,7 +220,12 @@ mod tests {
         let requests = vec![
             Request::Version,
             Request::ListPanels,
-            Request::Spawn { command: "foot -e htop".into() },
+            Request::Spawn { command: "foot -e htop".into(), shell: false },
+            Request::MovePanel { id: 3, position: [0.0, 2.0, -4.0], yaw_deg: Some(90.0) },
+            Request::ScalePanel { id: 3, pixels_per_unit: 1200.0 },
+            Request::SetMode { mode: ModeTarget::Walk },
+            Request::SetMode { mode: ModeTarget::Window(2) },
+            Request::ReloadConfig,
             Request::Screenshot { path: "/home/u/a.png".into(), force: true },
             Request::Subscribe { events: vec![EventKind::PanelOpened] },
             Request::Input {
@@ -218,6 +253,14 @@ mod tests {
             serde_json::to_string(&Response::Ok).expect("serialize"),
             r#"{"response":"ok"}"#
         );
+        let r: Request =
+            serde_json::from_str(r#"{"request":"set_mode","mode":{"window":4}}"#).expect("parse");
+        assert_eq!(r, Request::SetMode { mode: ModeTarget::Window(4) });
+        let r: Request = serde_json::from_str(r#"{"request":"spawn","command":"foot"}"#)
+            .expect("shell defaults to false");
+        assert_eq!(r, Request::Spawn { command: "foot".into(), shell: false });
+        let e = serde_json::to_string(&Event::ConfigReloaded).expect("serialize");
+        assert_eq!(e, r#"{"event":"config_reloaded"}"#);
     }
 
     #[test]

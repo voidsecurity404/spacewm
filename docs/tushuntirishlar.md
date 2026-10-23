@@ -224,3 +224,15 @@ kuzatiladi — fayl emas, PAPKA, chunki muharrirlar yangi fayl yozib rename qila
 150 ms kutib (bir saqlash bir necha hodisa beradi) jonli qo'llanadi; xato bo'lsa eski
 sozlamalar qoladi va ekranda qizil panel chiqadi. Mod+Escape config'dan qat'i nazar doim
 ishlaydi — xato tahrir sizni oyna ichida qamab qo'ymasligi uchun.
+
+## 7.3-bosqich: IPC va spacectl
+
+Soket `$XDG_RUNTIME_DIR` (0700) ichida 0600 bilan yaratiladi va har ulanishda SO_PEERCRED
+bilan uid tekshiriladi: root ham rad etiladi (sinab ko'rildi). So'rov ≤64 KiB, ≤16 ulanish,
+o'qilmagan javob ≤1 MiB; hamma I/O non-blocking — osilib qolgan mijoz kompozitorni
+to'xtatmaydi. `spawn` buyruqni shell'siz ishga tushiradi (so'zlarga bo'linadi, lekin
+`|`, `>`, `$(...)` ishlamaydi); `--shell` faqat config'da `ipc_allow_shell = true`
+bo'lsa. Screenshot faqat `$HOME` ichiga, symlink orqali emas (O_NOFOLLOW), mavjud faylni
+faqat `force` bilan. Topilgan xato: spacewm o'z muhitini (`setenv`) Mesa thread'lari ishlab
+turganda o'zgartirar edi — bu data race; endi o'zgaruvchilar bolalarga aniq beriladi.
+Protokol: docs/ipc.md.
