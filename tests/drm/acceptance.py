@@ -74,7 +74,7 @@ try:
            "-p", "WorkingDirectory=/home/sar1k",
            "-p", "Environment=SPACEWM_BIN=/home/sar1k/spacewm/target/debug/spacewm",
            "/home/sar1k/spacewm/resources/spacewm-session", "--no-session-env",
-           "--ipc-socket", SOCK, "--layout", f"{OUT}/layout.json", "--spawn", "foot")
+           "--ipc-socket", SOCK, "--layout", f"{OUT}/layout.json", "--config", f"{OUT}/config.toml", "--spawn", "foot")
     say(f"started: {r.returncode} {r.stderr.strip()}")
     for _ in range(60):
         if os.path.exists(SOCK): break

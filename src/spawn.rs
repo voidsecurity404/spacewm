@@ -74,13 +74,22 @@ fn in_path(program: &str) -> bool {
 }
 
 pub fn spawn_terminal(state: &mut SpaceState) {
-    let terminal = ["foot", "weston-terminal", "alacritty", "kitty"]
-        .into_iter()
-        .find(|t| in_path(t))
-        .unwrap_or("foot");
+    // The configured terminal, or the first common one installed if it isn't.
+    let configured = state.config.general.terminal.clone();
+    let program = shell_words::split(&configured).ok().and_then(|w| w.into_iter().next());
+    let terminal = if program.as_deref().is_some_and(in_path) {
+        configured
+    } else {
+        let fallback = ["foot", "weston-terminal", "alacritty", "kitty", "xterm"]
+            .into_iter()
+            .find(|t| in_path(t))
+            .unwrap_or("foot");
+        tracing::warn!(configured, fallback, "terminal not found, using another one");
+        fallback.to_string()
+    };
     state.expect_window_until =
         Some(std::time::Instant::now() + crate::input::mode::SPAWN_FOCUS_WINDOW);
-    if let Err(err) = spawn(terminal, &state.socket_name) {
+    if let Err(err) = spawn(&terminal, &state.socket_name) {
         tracing::warn!("{err}");
     }
 }

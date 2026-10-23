@@ -9,9 +9,11 @@ pub mod crosshair;
 pub mod cursor;
 pub mod frustum;
 pub mod gl;
+pub mod notice;
 pub mod panel_texture;
 pub mod scene;
 pub mod screenshot;
+pub mod text;
 pub mod view;
 pub mod voxels;
 
@@ -96,9 +98,12 @@ pub struct OverlayInputs<'a> {
     pub space: &'a Space<Window>,
     pub scale: Scale<f64>,
     pub time: Duration,
+    /// Message box on top of everything (config errors).
+    pub notice: Option<&'a notice::Notice>,
 }
 
 /// 2D things drawn on top of the output, front-most first:
+/// - a notice (config error), in every mode;
 /// - 2D mode: the client's cursor and the drag-and-drop icon;
 /// - 3D Walk mode: the crosshair at the screen center;
 /// - 3D Window mode: nothing (the cursor is drawn ON the panel, in 3D).
@@ -108,6 +113,37 @@ where
     R::TextureId: Texture + Clone + Send + 'static,
 {
     let geo = inputs.space.output_geometry(inputs.output);
+    let mut elements = Vec::new();
+    if let (Some(notice), Some(geo)) = (inputs.notice, geo) {
+        // Centered, a bit above the middle (below the crosshair would look odd).
+        let x = (geo.size.w - notice.size.0) / 2;
+        let y = ((geo.size.h - notice.size.1) / 2 - geo.size.h / 8).max(0);
+        let pos = Point::<f64, Logical>::from((x as f64, y as f64)).to_physical(inputs.scale);
+        if let Ok(e) = MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            pos,
+            &notice.buffer,
+            None,
+            None,
+            None,
+            Kind::Unspecified,
+        ) {
+            elements.push(SpaceRenderElement::Memory(e));
+        }
+    }
+    elements.extend(mode_overlay(renderer, inputs, geo));
+    elements
+}
+
+fn mode_overlay<R>(
+    renderer: &mut R,
+    inputs: OverlayInputs<'_>,
+    geo: Option<smithay::utils::Rectangle<i32, Logical>>,
+) -> Vec<SpaceRenderElement<R>>
+where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Texture + Clone + Send + 'static,
+{
     match (inputs.render_mode, inputs.mode) {
         (RenderMode::Flat2D, _) => {
             let origin = geo.map(|g| g.loc.to_f64()).unwrap_or_default();
@@ -161,6 +197,7 @@ macro_rules! overlay_inputs {
             space: &$state.space,
             scale: $scale,
             time: $time,
+            notice: $state.notice.as_ref(),
         }
     };
 }

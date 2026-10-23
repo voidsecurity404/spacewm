@@ -253,6 +253,7 @@ pub fn finish_frame(
     prepared: Option<render::view::Prepared>,
 ) {
     let scene_rendered = prepared.as_ref().is_some_and(|p| p.scene_rendered);
+    state.last_frame = Some(frame_start);
     if state.view.stats.enabled {
         state.view.stats.record(frame_start.elapsed(), scene_rendered);
     }

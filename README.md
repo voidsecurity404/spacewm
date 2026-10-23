@@ -26,9 +26,15 @@ just install                          # prints the sudo commands for a login-man
 ```
 
 On the DRM backend: **Ctrl+Alt+Backspace** always exits, Ctrl+Alt+F1..F12 switch VTs,
-the modifier is Super (Alt only when nested). `XKB_DEFAULT_LAYOUT=us,ru` and
-`XKB_DEFAULT_OPTIONS=grp:alt_shift_toggle` select keyboard layouts until the config file
-exists. If the screen ever stays black, switch to another TTY and read the log.
+the modifier is Super (Alt only when nested). If the screen ever stays black, switch to
+another TTY and read the log.
+
+## Config
+
+`~/.config/spacewm/config.toml` is created with every option and its default on first
+start. Saved changes apply live (keybinds, mouse, keyboard layout, fov, fog, render
+distance...); a mistake keeps the previous settings and shows the error on screen.
+`spacewm --check-config` validates the file.
 
 ## Stages
 

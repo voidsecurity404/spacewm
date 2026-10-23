@@ -1,0 +1,97 @@
+# spacewm config. Every key is optional: delete a line to get its default back.
+# spacewm watches this file: saved changes apply within a second, no restart needed
+# (except where noted). A mistake keeps the previous settings and shows the error on
+# screen. Check the file with:  spacewm --check-config
+
+[general]
+# The "Mod" in keybinds: "super" (the Windows key) or "alt". Running nested in another
+# desktop with "super", Alt also works as Mod (the host usually takes Super combos).
+mod_key = "super"
+# Started by the spawn_terminal keybind (falls back to any installed terminal).
+terminal = "foot"
+# Programs started once when spacewm starts, e.g. ["foot", "firefox"]. Needs a restart.
+autostart = []
+# The island's shape. Needs a restart (block edits are kept per seed).
+world_seed = 1337
+# Allow `spacectl spawn --shell "..."` to run commands through sh -c. Without it, spacectl
+# can only start a program with arguments, never a shell pipeline.
+ipc_allow_shell = false
+
+[input]
+# Camera turn per pixel of mouse movement (radians).
+mouse_sensitivity = 0.0025
+invert_y = false
+# Metres per second; sprint is Ctrl.
+walk_speed = 4.3
+sprint_speed = 5.6
+# Panels farther than this (metres) can't be clicked into.
+reach_distance = 6.0
+# 1.0: the cursor on a panel moves as fast as on a normal desktop.
+window_cursor_speed = 1.0
+# xkb names, e.g. keyboard_layout = "us,ru" with keyboard_options = "grp:alt_shift_toggle".
+# Empty: $XKB_DEFAULT_LAYOUT etc., else "us".
+keyboard_layout = ""
+keyboard_variant = ""
+keyboard_options = ""
+# Held keys repeat after this many ms, this many times per second (0: off).
+repeat_delay = 200
+repeat_rate = 25
+# Touchpads (real session only).
+touchpad_natural_scroll = true
+touchpad_tap = true
+# Mice: "flat" (same hand movement, same turn: best for aiming) or "adaptive".
+mouse_accel = "flat"
+
+[render]
+# Vertical field of view, degrees (30-120).
+fov = 75.0
+# How far blocks are drawn, in 16-block chunks (2-16).
+render_distance_chunks = 8
+# Fade far blocks into the sky.
+fog = true
+# Smooth panel textures, so text stays readable from a distance.
+panel_mipmaps = true
+# When nothing moves, cap redraws caused by apps (blinking cursors, animations) to this
+# many per second. 0: no cap.
+max_fps_idle = 0
+# Frames always follow the monitor's refresh (no tearing); false is not supported yet.
+vsync = true
+
+[panels]
+# Window pixels per metre for new panels: 800 makes a 1000 px terminal 1.25 m wide.
+default_pixels_per_unit = 800.0
+# How far in front of you new panels appear: "auto" (one window pixel = one screen
+# pixel, so text is sharp; closer if the window wouldn't fit) or metres, e.g. 1.5.
+spawn_distance = "auto"
+# In Window mode, other panels are drawn slightly transparent.
+dim_unfocused = true
+
+# One section per monitor (names as in `spacewm --drm-probe`). Needs a restart.
+# [[output]]
+# name = "HDMI-A-1"
+# mode = "1920x1080@144"
+# scale = 1.0
+
+[keybinds]
+# A combo, a list of combos, or "" to unbind. Modifiers: Mod, Shift, Ctrl, Alt, Super.
+# Keys use xkb names: Return, Escape, space, F5, equal, minus, KP_Add, a-z, 0-9 ...
+# Mod+Escape always leaves a window too, whatever walk_mode says.
+spawn_terminal = "Mod+Return"
+close = "Mod+Shift+Q"
+quit = "Mod+Shift+E"
+walk_mode = "Mod+Escape"
+grab = "Mod+G"
+rotate = "Mod+R"
+reset_rotation = "Mod+Shift+R"
+scale_up = ["Mod+equal", "Mod+Shift+equal", "Mod+KP_Add"]
+scale_down = ["Mod+minus", "Mod+KP_Subtract"]
+hide = "Mod+H"
+debug = "Mod+F3"
+reload_shaders = "Mod+F5"
+# Block types for building (Mod+click breaks, Mod+right click places).
+select_block = ["Mod+1", "Mod+2", "Mod+3", "Mod+4", "Mod+5", "Mod+6", "Mod+7", "Mod+8"]
+
+# Keys that start programs:
+# [[keybinds.spawn]]
+# key = "Mod+B"
+# command = "firefox"

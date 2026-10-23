@@ -158,6 +158,20 @@ pub struct SpaceState {
     pub last_tick: Option<Instant>,
     pub debug_timer: Option<smithay::reexports::calloop::RegistrationToken>,
 
+    // ---- Config (Stage 7.2) ----
+    pub config: crate::config::Config,
+    pub config_path: std::path::PathBuf,
+    pub keybinds: crate::config::keys::Keybinds,
+    /// Watches the config file; dropping it stops the watch.
+    pub config_watcher: Option<notify::RecommendedWatcher>,
+    pub config_reload_timer: Option<smithay::reexports::calloop::RegistrationToken>,
+    /// Message box on screen (config errors).
+    pub notice: Option<crate::render::notice::Notice>,
+    /// When the last frame started (for `render.max_fps_idle`).
+    pub last_frame: Option<Instant>,
+    /// A delayed redraw waiting for the idle frame cap.
+    pub capped_redraw: Option<smithay::reexports::calloop::RegistrationToken>,
+
     /// Input bookkeeping: suppressed key releases, modifier choice, etc.
     pub input: InputState,
 
@@ -176,6 +190,8 @@ impl SpaceState {
         loop_signal: LoopSignal,
         cli: Cli,
         backend: Backend,
+        config: crate::config::Config,
+        config_path: std::path::PathBuf,
     ) -> anyhow::Result<Self> {
         let dh = display.handle();
 
@@ -193,17 +209,18 @@ impl SpaceState {
 
         let mut seat_state = SeatState::new();
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, "seat0");
-        // Empty XkbConfig fields mean "ask the environment": xkbcommon then reads
-        // XKB_DEFAULT_LAYOUT / _VARIANT / _OPTIONS (e.g. "us,ru" and
-        // "grp:alt_shift_toggle", set in spacewm-session) and falls back to plain "us".
-        // Stage 7.2 moves this into the config file. 200 ms repeat delay, 25 repeats/s.
-        let xkb = XkbConfig::default();
-        tracing::info!(
-            layout = std::env::var("XKB_DEFAULT_LAYOUT").unwrap_or_else(|_| "us".into()),
-            options = std::env::var("XKB_DEFAULT_OPTIONS").unwrap_or_default(),
-            "keyboard"
-        );
-        seat.add_keyboard(xkb, 200, 25)
+        // The layout comes from `[input]` in the config. Empty fields mean "ask the
+        // environment": xkbcommon then reads XKB_DEFAULT_LAYOUT / _VARIANT / _OPTIONS and
+        // falls back to plain "us".
+        let i = &config.input;
+        let xkb = XkbConfig {
+            layout: &i.keyboard_layout,
+            variant: &i.keyboard_variant,
+            options: (!i.keyboard_options.is_empty()).then(|| i.keyboard_options.clone()),
+            ..XkbConfig::default()
+        };
+        tracing::info!(layout = i.keyboard_layout, options = i.keyboard_options, "keyboard");
+        seat.add_keyboard(xkb, i.repeat_delay, i.repeat_rate)
             .map_err(|e| anyhow::anyhow!("failed to create keyboard: {e:?}"))?;
         seat.add_pointer();
         tracing::debug!("global: wl_seat 'seat0' (keyboard + pointer)");
@@ -233,8 +250,9 @@ impl SpaceState {
             None => crate::logging::state_dir()?.join("layout.json"),
         };
         let layout = crate::world::layout::Layout::load(layout_path);
-        let voxels =
-            crate::world::voxels::VoxelWorld::new(cli.world_seed, &layout.edits, &loop_handle)?;
+        // An explicit --world-seed wins over the config.
+        let seed = cli.world_seed.unwrap_or(config.general.world_seed);
+        let voxels = crate::world::voxels::VoxelWorld::new(seed, &layout.edits, &loop_handle)?;
         let player = crate::world::player::Player::new(voxels.spawn);
         view.camera.position = player.eye();
         view.camera.yaw = voxels.spawn_yaw;
@@ -284,6 +302,14 @@ impl SpaceState {
             layout_timer: None,
             last_tick: None,
             debug_timer: None,
+            keybinds: crate::config::keys::Keybinds::new(&config.keybinds),
+            config,
+            config_path,
+            config_watcher: None,
+            config_reload_timer: None,
+            notice: None,
+            last_frame: None,
+            capped_redraw: None,
             input: InputState::default(),
             ipc: None,
             pending_screenshots: Vec::new(),
@@ -309,6 +335,38 @@ impl SpaceState {
     /// Ask the backend for a new frame (something on screen changed).
     pub fn queue_redraw(&mut self) {
         self.backend.schedule_redraw();
+    }
+
+    /// A client committed new content. With `render.max_fps_idle` set and nothing else
+    /// moving, such redraws are spaced out to that rate (a blinking cursor or an animated
+    /// page then costs a fraction of the GPU time). Client frame callbacks follow our
+    /// frames, so the apps themselves slow down too.
+    pub fn queue_client_redraw(&mut self) {
+        let cap = self.config.render.max_fps_idle;
+        if cap == 0 || self.animating() {
+            self.queue_redraw();
+            return;
+        }
+        if self.capped_redraw.is_some() {
+            return; // one delayed redraw is already waiting
+        }
+        let interval = std::time::Duration::from_secs_f64(1.0 / cap as f64);
+        let wait = self
+            .last_frame
+            .map_or(std::time::Duration::ZERO, |t| interval.saturating_sub(t.elapsed()));
+        if wait.is_zero() {
+            self.queue_redraw();
+            return;
+        }
+        use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
+        self.capped_redraw = self
+            .loop_handle
+            .insert_source(Timer::from_duration(wait), |_, _, state| {
+                state.capped_redraw = None;
+                state.queue_redraw();
+                TimeoutAction::Drop
+            })
+            .ok();
     }
 
     /// The window whose surface tree contains `surface` (walks up from subsurfaces).
@@ -339,9 +397,12 @@ impl SpaceState {
 
     /// How far in front of the camera a new window of `size_px` appears.
     pub fn spawn_distance(&self, size_px: (i32, i32)) -> f32 {
+        if let crate::config::SpawnDistance::Metres(m) = self.config.panels.spawn_distance {
+            return m;
+        }
         let output =
             self.primary_output_geometry().map(|g| (g.size.w, g.size.h)).unwrap_or((1920, 1080));
-        let ppu = crate::world::panel::DEFAULT_PIXELS_PER_UNIT;
+        let ppu = self.world.default_ppu;
         let size_m = glam::Vec2::new(size_px.0 as f32, size_px.1 as f32) / ppu;
         crate::world::spawn_distance(size_m, output, ppu, self.view.camera.fov_y_deg)
     }

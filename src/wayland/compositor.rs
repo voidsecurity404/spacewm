@@ -75,7 +75,7 @@ impl CompositorHandler for SpaceState {
                 }
             }
         }
-        self.queue_redraw();
+        self.queue_client_redraw();
     }
 }
 

@@ -28,7 +28,12 @@ use smithay::{
     utils::{Logical, Point, SERIAL_COUNTER},
 };
 
-use crate::{cli::RenderMode, focus::KeyboardFocusTarget, state::SpaceState};
+use crate::{
+    cli::RenderMode,
+    config::keys::{Keybinds, Mods},
+    focus::KeyboardFocusTarget,
+    state::SpaceState,
+};
 use mode::InputMode;
 
 #[derive(Default)]
@@ -63,46 +68,16 @@ pub enum Action {
     TogglePanelHidden,
     /// 0-based index into `Block::PLACEABLE` (Mod+1 = 0).
     SelectBlock(u8),
+    /// Back to walking (3D).
+    WalkMode,
+    /// Run `[[keybinds.spawn]]` entry n.
+    Spawn(usize),
 }
 
-/// Compositor keybinds. `modkey` is Super (or Alt when nested, because the host desktop
-/// usually grabs Super combos before they reach us). Keysyms are the layout's base
-/// (unshifted) symbols, so Mod+Shift+Q matches `q`, not `Q`.
-pub fn keybind_action(
-    modkey: bool,
-    nested: bool,
-    mods: &ModifiersState,
-    sym: Option<Keysym>,
-) -> Option<Action> {
-    let sym = sym?;
-    if nested && mods.ctrl && mods.alt && !mods.shift && sym.raw() == keysyms::KEY_g {
-        return Some(Action::ReleasePointer);
-    }
-    if !modkey {
-        return None;
-    }
-    match (mods.shift, mods.ctrl, sym.raw()) {
-        (false, false, keysyms::KEY_Return) => Some(Action::SpawnTerminal),
-        (true, false, keysyms::KEY_q) => Some(Action::CloseWindow),
-        (true, false, keysyms::KEY_e) => Some(Action::Quit),
-        (false, false, keysyms::KEY_F3) => Some(Action::ToggleDebug),
-        (false, false, keysyms::KEY_F5) => Some(Action::ReloadShaders),
-        (false, false, keysyms::KEY_g) => Some(Action::Grab),
-        (false, false, keysyms::KEY_r) => Some(Action::RotatePanel),
-        (true, false, keysyms::KEY_r) => Some(Action::ResetPanelRotation),
-        // "+" is Shift+"=" on most layouts; accept both, and the keypad.
-        (_, false, keysyms::KEY_equal | keysyms::KEY_plus | keysyms::KEY_KP_Add) => {
-            Some(Action::ScalePanelUp)
-        }
-        (false, false, keysyms::KEY_minus | keysyms::KEY_KP_Subtract) => {
-            Some(Action::ScalePanelDown)
-        }
-        (false, false, keysyms::KEY_h) => Some(Action::TogglePanelHidden),
-        (false, false, k @ keysyms::KEY_1..=keysyms::KEY_8) => {
-            Some(Action::SelectBlock((k - keysyms::KEY_1) as u8))
-        }
-        _ => None,
-    }
+/// The nested-only escape hatch: Ctrl+Alt+G gives the mouse back to the host desktop
+/// (like a VM window). Fixed, not configurable, so it can't be lost to a config typo.
+fn is_release_pointer(nested: bool, mods: &ModifiersState, sym: Option<Keysym>) -> bool {
+    nested && mods.ctrl && mods.alt && !mods.shift && sym.map(|s| s.raw()) == Some(keysyms::KEY_g)
 }
 
 /// Where a key press goes.
@@ -121,22 +96,24 @@ pub enum KeyRoute {
 
 /// Decide what a key press does. Pure, so it can be unit tested.
 ///
-/// Mod+Escape is checked FIRST and unconditionally: if it ever failed, the user would be
-/// trapped inside a window with no way back to walking.
+/// Mod+Escape is checked FIRST and unconditionally — whatever the config says: if it ever
+/// failed, the user would be trapped inside a window with no way back to walking.
 pub fn route_key(
     render: RenderMode,
     mode: InputMode,
-    modkey: bool,
-    nested: bool,
-    mods: &ModifiersState,
+    binds: &Keybinds,
+    mods: Mods,
     sym: Option<Keysym>,
 ) -> KeyRoute {
     let three_d = render == RenderMode::Scene3D;
-    if three_d && modkey && sym == Some(Keysym::Escape) {
+    if three_d && mods.mod_ && sym == Some(Keysym::Escape) {
         return KeyRoute::EscapeToWalk;
     }
-    if let Some(action) = keybind_action(modkey, nested, mods, sym) {
-        return KeyRoute::Bind(action);
+    match sym.and_then(|sym| binds.get(mods, sym)) {
+        Some(Action::WalkMode) if three_d => return KeyRoute::EscapeToWalk,
+        Some(Action::WalkMode) => {}
+        Some(action) => return KeyRoute::Bind(action),
+        None => {}
     }
     match (three_d, mode) {
         (false, _) => KeyRoute::Forward,
@@ -221,7 +198,6 @@ pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState,
                 FilterResult::Forward
             };
         }
-        let modkey = mods.logo || (nested && mods.alt);
         let sym = handle.raw_latin_sym_or_raw_current_sym();
         // Emergency exit, checked before ANYTHING else and in every mode: on a real
         // session this is the way out of a broken desktop.
@@ -236,7 +212,12 @@ pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState,
             let n = (vt - keysyms::KEY_XF86Switch_VT_1 + 1) as i32;
             return FilterResult::Intercept(Some(KeyOutcome::SwitchVt(n)));
         }
-        let route = route_key(state.render_mode, state.mode, modkey, nested, mods, sym);
+        if is_release_pointer(nested, mods, sym) {
+            state.input.suppressed_keys.insert(keycode);
+            return FilterResult::Intercept(Some(KeyOutcome::Action(Action::ReleasePointer)));
+        }
+        let combo_mods = Mods::from_state(mods, state.config.general.mod_key, nested);
+        let route = route_key(state.render_mode, state.mode, &state.keybinds, combo_mods, sym);
         if route != KeyRoute::Forward {
             state.input.suppressed_keys.insert(keycode);
         }
@@ -301,6 +282,17 @@ pub fn run_action(state: &mut SpaceState, action: Action) {
         Action::ScalePanelDown => world_ops::scale_target(state, false),
         Action::TogglePanelHidden => world_ops::toggle_hidden(state),
         Action::SelectBlock(i) => world_ops::select_block(state, i as usize),
+        Action::WalkMode => mode::set_mode(state, InputMode::Walk, None),
+        Action::Spawn(i) => {
+            if let Some(bind) = state.config.keybinds.spawn.get(i) {
+                let command = bind.command.clone();
+                state.expect_window_until =
+                    Some(std::time::Instant::now() + mode::SPAWN_FOCUS_WINDOW);
+                if let Err(err) = crate::spawn::spawn(&command, &state.socket_name) {
+                    tracing::warn!("{err}");
+                }
+            }
+        }
     }
     state.queue_redraw();
 }
@@ -404,7 +396,8 @@ fn look(state: &mut SpaceState, delta: Point<f64, Logical>) {
         return;
     }
     let sensitivity = state.input_settings.mouse_sensitivity;
-    state.view.camera.rotate(delta.x as f32, delta.y as f32, sensitivity);
+    let dy = if state.input_settings.invert_y { -delta.y } else { delta.y };
+    state.view.camera.rotate(delta.x as f32, dy as f32, sensitivity);
     state.view.dirty = true;
     state.queue_redraw();
 }
@@ -493,7 +486,8 @@ fn walk_click(state: &mut SpaceState, button: u32) {
         return;
     }
     let mods = state.seat.get_keyboard().map(|k| k.modifier_state()).unwrap_or_default();
-    let modkey = mods.logo || (state.backend.is_nested() && mods.alt);
+    let modkey =
+        Mods::from_state(&mods, state.config.general.mod_key, state.backend.is_nested()).mod_;
     match (modkey, button) {
         (true, BTN_LEFT) => world_ops::break_block(state),
         (true, BTN_RIGHT) => world_ops::place_block(state),
@@ -555,109 +549,94 @@ pub fn handle_pointer_axis(state: &mut SpaceState, frame: AxisFrame) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn mods(shift: bool, ctrl: bool, alt: bool, logo: bool) -> ModifiersState {
-        ModifiersState { shift, ctrl, alt, logo, ..Default::default() }
-    }
+    use crate::config::keys::KeybindsConfig;
 
     const D3: RenderMode = RenderMode::Scene3D;
     const WIN: InputMode = InputMode::Window { panel: 1 };
+    const MOD: Mods = Mods { mod_: true, shift: false, ctrl: false, alt: false, super_: false };
+    const NONE: Mods = Mods { mod_: false, shift: false, ctrl: false, alt: false, super_: false };
 
-    #[test]
-    fn binds_need_the_mod_key() {
-        let m = mods(false, false, false, false);
-        assert_eq!(keybind_action(false, false, &m, Some(Keysym::Return)), None);
-        assert_eq!(
-            keybind_action(true, false, &m, Some(Keysym::Return)),
-            Some(Action::SpawnTerminal)
-        );
+    fn binds() -> Keybinds {
+        Keybinds::new(&KeybindsConfig::default())
     }
 
     #[test]
-    fn shift_binds() {
-        let shift = mods(true, false, false, true);
-        assert_eq!(keybind_action(true, false, &shift, Some(Keysym::q)), Some(Action::CloseWindow));
-        assert_eq!(keybind_action(true, false, &shift, Some(Keysym::e)), Some(Action::Quit));
+    fn binds_need_the_mod_key() {
+        let b = binds();
+        assert_eq!(route_key(D3, WIN, &b, NONE, Some(Keysym::Return)), KeyRoute::Forward);
         assert_eq!(
-            keybind_action(true, false, &mods(false, false, false, true), Some(Keysym::q)),
-            None
-        );
-        assert_eq!(
-            keybind_action(true, false, &mods(true, true, false, true), Some(Keysym::q)),
-            None
+            route_key(D3, WIN, &b, MOD, Some(Keysym::Return)),
+            KeyRoute::Bind(Action::SpawnTerminal)
         );
     }
 
     #[test]
     fn escape_always_wins_in_3d() {
-        let m = mods(false, false, false, true);
+        let b = binds();
         // From inside a window, and even with other modifiers held.
-        assert_eq!(
-            route_key(D3, WIN, true, false, &m, Some(Keysym::Escape)),
-            KeyRoute::EscapeToWalk
-        );
-        let all = mods(true, true, true, true);
-        assert_eq!(
-            route_key(D3, WIN, true, false, &all, Some(Keysym::Escape)),
-            KeyRoute::EscapeToWalk
-        );
-        // Nested: Alt is the mod key.
-        let alt = mods(false, false, true, false);
-        assert_eq!(
-            route_key(D3, WIN, true, true, &alt, Some(Keysym::Escape)),
-            KeyRoute::EscapeToWalk
-        );
+        assert_eq!(route_key(D3, WIN, &b, MOD, Some(Keysym::Escape)), KeyRoute::EscapeToWalk);
+        let all = Mods { mod_: true, shift: true, ctrl: true, alt: true, super_: true };
+        assert_eq!(route_key(D3, WIN, &b, all, Some(Keysym::Escape)), KeyRoute::EscapeToWalk);
+        // Even with every keybind removed by the config.
+        let empty = Keybinds::default();
+        assert_eq!(route_key(D3, WIN, &empty, MOD, Some(Keysym::Escape)), KeyRoute::EscapeToWalk);
         // Plain Escape goes to the window (vim users!).
-        let none = mods(false, false, false, false);
+        assert_eq!(route_key(D3, WIN, &b, NONE, Some(Keysym::Escape)), KeyRoute::Forward);
+    }
+
+    #[test]
+    fn walk_mode_can_be_rebound() {
+        let config = KeybindsConfig {
+            walk_mode: crate::config::keys::Binding(vec!["Mod+W".into()]),
+            ..Default::default()
+        };
+        let b = Keybinds::new(&config);
+        assert_eq!(route_key(D3, WIN, &b, MOD, Some(Keysym::w)), KeyRoute::EscapeToWalk);
+        // In 2D there is no walking: the combo is not eaten either.
         assert_eq!(
-            route_key(D3, WIN, false, false, &none, Some(Keysym::Escape)),
+            route_key(RenderMode::Flat2D, InputMode::Walk, &b, MOD, Some(Keysym::w)),
             KeyRoute::Forward
         );
     }
 
     #[test]
     fn walk_mode_keeps_keys_away_from_clients() {
-        let none = mods(false, false, false, false);
+        let b = binds();
         let walk = InputMode::Walk;
-        assert_eq!(route_key(D3, walk, false, false, &none, Some(Keysym::w)), KeyRoute::Camera);
-        assert_eq!(route_key(D3, walk, false, false, &none, Some(Keysym::x)), KeyRoute::Swallow);
+        assert_eq!(route_key(D3, walk, &b, NONE, Some(Keysym::w)), KeyRoute::Camera);
+        assert_eq!(route_key(D3, walk, &b, NONE, Some(Keysym::x)), KeyRoute::Swallow);
         // Plain Escape in Walk mode does nothing special and isn't forwarded.
-        assert_eq!(
-            route_key(D3, walk, false, false, &none, Some(Keysym::Escape)),
-            KeyRoute::Swallow
-        );
+        assert_eq!(route_key(D3, walk, &b, NONE, Some(Keysym::Escape)), KeyRoute::Swallow);
         // Binds still work while walking.
-        let m = mods(false, false, false, true);
         assert_eq!(
-            route_key(D3, walk, true, false, &m, Some(Keysym::Return)),
+            route_key(D3, walk, &b, MOD, Some(Keysym::Return)),
             KeyRoute::Bind(Action::SpawnTerminal)
         );
     }
 
     #[test]
     fn window_mode_forwards_everything_but_binds() {
-        let none = mods(false, false, false, false);
-        assert_eq!(route_key(D3, WIN, false, false, &none, Some(Keysym::w)), KeyRoute::Forward);
-        let m = mods(true, false, false, true);
+        let b = binds();
+        assert_eq!(route_key(D3, WIN, &b, NONE, Some(Keysym::w)), KeyRoute::Forward);
+        let shift = Mods { shift: true, ..MOD };
         assert_eq!(
-            route_key(D3, WIN, true, false, &m, Some(Keysym::q)),
+            route_key(D3, WIN, &b, shift, Some(Keysym::q)),
             KeyRoute::Bind(Action::CloseWindow)
         );
     }
 
     #[test]
     fn two_d_mode_has_no_escape_route() {
-        let m = mods(false, false, false, true);
         assert_eq!(
-            route_key(RenderMode::Flat2D, InputMode::Walk, true, false, &m, Some(Keysym::Escape)),
+            route_key(RenderMode::Flat2D, InputMode::Walk, &binds(), MOD, Some(Keysym::Escape)),
             KeyRoute::Forward
         );
     }
 
     #[test]
     fn nested_pointer_release() {
-        let ca = mods(false, true, true, false);
-        assert_eq!(keybind_action(false, true, &ca, Some(Keysym::g)), Some(Action::ReleasePointer));
-        assert_eq!(keybind_action(false, false, &ca, Some(Keysym::g)), None, "only when nested");
+        let ca = ModifiersState { ctrl: true, alt: true, ..Default::default() };
+        assert!(is_release_pointer(true, &ca, Some(Keysym::g)));
+        assert!(!is_release_pointer(false, &ca, Some(Keysym::g)), "only when nested");
     }
 }
