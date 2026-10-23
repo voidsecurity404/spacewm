@@ -310,7 +310,9 @@ pub fn capture_elements(
     let mut tracker = OutputDamageTracker::new(size, scale, smithay::utils::Transform::Normal);
     let pending = {
         let mut fb = renderer.bind(&mut texture).map_err(|e| e.to_string())?;
-        tracker.render_output(renderer, &mut fb, 0, elements, clear).map_err(|e| format!("{e:?}"))?;
+        tracker
+            .render_output(renderer, &mut fb, 0, elements, clear)
+            .map_err(|e| format!("{e:?}"))?;
         screenshot::start_capture(renderer, &fb, size, smithay::utils::Transform::Normal)?
     };
     screenshot::finish_capture(renderer, pending)

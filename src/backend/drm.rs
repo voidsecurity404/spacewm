@@ -77,7 +77,8 @@ use crate::{
 };
 
 /// Scan-out formats, in order of preference.
-const FORMATS: &[Fourcc] = &[Fourcc::Argb8888, Fourcc::Xrgb8888, Fourcc::Abgr8888, Fourcc::Xbgr8888];
+const FORMATS: &[Fourcc] =
+    &[Fourcc::Argb8888, Fourcc::Xrgb8888, Fourcc::Abgr8888, Fourcc::Xbgr8888];
 /// A requested frame that never reaches the screen this long means the GPU/driver hung.
 const WATCHDOG: Duration = Duration::from_secs(10);
 /// Above this DPI an output gets scale 2.
@@ -200,6 +201,8 @@ impl DrmBackend {
                 on_input(state, event)
             })
             .map_err(|e| backend_err("libinput source", &e.error))?;
+        // The devices found by udev_assign_seat are already queued; see drain_device_events.
+        loop_handle.insert_idle(drain_device_events);
 
         // 5. VT switches.
         loop_handle
@@ -331,10 +334,12 @@ fn open_gpu(
 
     // `true`: start from a known state with all outputs off (the previous user of the VT
     // may have left anything configured).
-    let (drm, notifier) = DrmDevice::new(fd.clone(), true).map_err(|e| backend_err("drm device", &e))?;
+    let (drm, notifier) =
+        DrmDevice::new(fd.clone(), true).map_err(|e| backend_err("drm device", &e))?;
     let gbm = GbmDevice::new(fd.clone()).map_err(|e| backend_err("gbm", &e))?;
     // SAFETY: the GBM device lives as long as the display.
-    let display = unsafe { EGLDisplay::new(gbm.clone()) }.map_err(|e| backend_err("EGL display", &e))?;
+    let display =
+        unsafe { EGLDisplay::new(gbm.clone()) }.map_err(|e| backend_err("EGL display", &e))?;
     let context = EGLContext::new(&display).map_err(|e| backend_err("EGL context", &e))?;
     // SAFETY: fresh context used only by this renderer.
     let mut renderer =
@@ -439,22 +444,23 @@ fn connector_connected(
     output.set_preferred(wl_mode);
     let global = output.create_global::<SpaceState>(dh);
 
-    let drm_output = match gpu.manager.lock().initialize_output::<_, SpaceRenderElement<GlowRenderer>>(
-        crtc,
-        mode,
-        &[connector.handle()],
-        &output,
-        None,
-        &mut gpu.renderer,
-        &DrmOutputRenderElements::default(),
-    ) {
-        Ok(o) => o,
-        Err(e) => {
-            tracing::warn!(name, "cannot drive output: {e}");
-            dh.remove_global::<SpaceState>(global);
-            return None;
-        }
-    };
+    let drm_output =
+        match gpu.manager.lock().initialize_output::<_, SpaceRenderElement<GlowRenderer>>(
+            crtc,
+            mode,
+            &[connector.handle()],
+            &output,
+            None,
+            &mut gpu.renderer,
+            &DrmOutputRenderElements::default(),
+        ) {
+            Ok(o) => o,
+            Err(e) => {
+                tracing::warn!(name, "cannot drive output: {e}");
+                dh.remove_global::<SpaceState>(global);
+                return None;
+            }
+        };
     let frame_duration = Duration::from_secs_f64(1000.0 / wl_mode.refresh.max(1) as f64);
     Some(OutputSurface {
         output,
@@ -543,6 +549,35 @@ fn on_input(state: &mut SpaceState, mut event: InputEvent<LibinputInputBackend>)
     crate::input::process_input_event(state, event);
 }
 
+/// Handle device added/removed events that libinput queued by itself.
+///
+/// `udev_assign_seat`, `suspend` and `resume` put these events into libinput's internal
+/// queue without making its fd readable, and the calloop source only looks at the queue
+/// when the fd wakes it. Without this, devices would only be configured (tap-to-click,
+/// flat acceleration, LEDs) on the first key press or mouse move, seconds later.
+fn drain_device_events(state: &mut SpaceState) {
+    let Backend::Drm(b) = &mut state.backend else { return };
+    // A clone is another handle to the same libinput context, so `state` stays usable.
+    let mut libinput = b.libinput.clone();
+    if let Err(e) = libinput.dispatch() {
+        tracing::warn!("libinput dispatch failed: {e}");
+    }
+    for event in &mut libinput {
+        match event {
+            libinput::Event::Device(libinput::event::DeviceEvent::Added(e)) => {
+                let device = libinput::event::EventTrait::device(&e);
+                on_input(state, InputEvent::DeviceAdded { device });
+            }
+            libinput::Event::Device(libinput::event::DeviceEvent::Removed(e)) => {
+                let device = libinput::event::EventTrait::device(&e);
+                on_input(state, InputEvent::DeviceRemoved { device });
+            }
+            // Only device events are queued at these moments; anything else is stale.
+            other => tracing::debug!("dropping queued libinput event {other:?}"),
+        }
+    }
+}
+
 /// Per-device settings: touchpads tap and scroll naturally, mice get a flat acceleration
 /// profile (the same hand movement always turns the camera by the same angle — what you
 /// want for aiming).
@@ -583,6 +618,8 @@ fn on_session(state: &mut SpaceState, event: SessionEvent) {
             tracing::info!("session paused (VT switched away)");
             b.active = false;
             b.libinput.suspend();
+            drain_device_events(state);
+            let Backend::Drm(b) = &mut state.backend else { return };
             b.gpu.manager.pause();
             for surface in b.gpu.surfaces.values_mut() {
                 if let RedrawState::WaitingForEstimatedVBlank { token, .. } = surface.redraw {
@@ -597,6 +634,8 @@ fn on_session(state: &mut SpaceState, event: SessionEvent) {
             if let Err(e) = b.libinput.resume() {
                 tracing::error!("libinput resume failed: {e:?}");
             }
+            drain_device_events(state);
+            let Backend::Drm(b) = &mut state.backend else { return };
             // After another VT used the GPU the hardware state is unknown: reset it (full
             // modeset) and redraw every output from scratch.
             if let Err(e) = b.gpu.manager.lock().activate(true) {
@@ -623,7 +662,10 @@ fn watchdog(state: &mut SpaceState) {
         matches!(s.redraw, RedrawState::WaitingForVBlank { since, .. } if since.elapsed() > WATCHDOG)
     });
     if let Some(surface) = hung {
-        tracing::error!(output = surface.output.name(), "no vblank 10 s after a page flip; quitting");
+        tracing::error!(
+            output = surface.output.name(),
+            "no vblank 10 s after a page flip; quitting"
+        );
         state.quit();
     }
 }
@@ -632,7 +674,9 @@ fn render(state: &mut SpaceState, crtc: crtc::Handle) {
     let frame_start = Instant::now();
     {
         let Backend::Drm(b) = &mut state.backend else { return };
-        if !b.active || !matches!(b.gpu.surfaces.get(&crtc).map(|s| &s.redraw), Some(RedrawState::Queued)) {
+        if !b.active
+            || !matches!(b.gpu.surfaces.get(&crtc).map(|s| &s.redraw), Some(RedrawState::Queued))
+        {
             return;
         }
     }
@@ -677,17 +721,22 @@ fn render(state: &mut SpaceState, crtc: crtc::Handle) {
         RenderMode::Flat2D => render::CLEAR_COLOR_2D,
     };
 
-    let rendered = match surface.drm_output.render_frame(renderer, &elements, clear, FrameFlags::DEFAULT) {
-        Ok(r) => !r.is_empty,
-        Err(e) => {
-            tracing::warn!("render_frame failed: {e:?}");
-            false
-        }
-    };
+    let rendered =
+        match surface.drm_output.render_frame(renderer, &elements, clear, FrameFlags::DEFAULT) {
+            Ok(r) => !r.is_empty,
+            Err(e) => {
+                tracing::warn!("render_frame failed: {e:?}");
+                false
+            }
+        };
 
     if !state.pending_screenshots.is_empty() {
         let captured = render::capture_elements(renderer, &elements, size, scale, clear);
-        crate::ipc::finish_screenshots(&mut state.pending_screenshots, captured, &state.screenshot_tx);
+        crate::ipc::finish_screenshots(
+            &mut state.pending_screenshots,
+            captured,
+            &state.screenshot_tx,
+        );
     }
 
     if rendered {
@@ -713,7 +762,13 @@ fn render(state: &mut SpaceState, crtc: crtc::Handle) {
             None => RedrawState::Idle,
         };
     }
-    render::send_frame_callbacks(&output, &state.space, &state.cursor_status, state.dnd_icon.as_ref(), time);
+    render::send_frame_callbacks(
+        &output,
+        &state.space,
+        &state.cursor_status,
+        state.dnd_icon.as_ref(),
+        time,
+    );
     super::headless::finish_frame(state, frame_start, prepared);
 }
 
@@ -748,7 +803,10 @@ fn estimated_vblank(state: &mut SpaceState, crtc: crtc::Handle) {
     let Backend::Drm(b) = &mut state.backend else { return };
     let Some(surface) = b.gpu.surfaces.get_mut(&crtc) else { return };
     let again = animating
-        || matches!(surface.redraw, RedrawState::WaitingForEstimatedVBlank { redraw_needed: true, .. });
+        || matches!(
+            surface.redraw,
+            RedrawState::WaitingForEstimatedVBlank { redraw_needed: true, .. }
+        );
     if again {
         surface.redraw = RedrawState::Queued;
         b.loop_handle.insert_idle(move |state| render(state, crtc));

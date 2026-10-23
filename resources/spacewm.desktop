@@ -1,0 +1,8 @@
+# Login manager entry (SDDM, GDM, greetd + tuigreet...). Install to
+# /usr/share/wayland-sessions/spacewm.desktop — see `just install`.
+[Desktop Entry]
+Name=spacewm
+Comment=A 3D Wayland compositor: windows as panels in a voxel world
+Exec=spacewm-session
+Type=Application
+DesktopNames=spacewm
