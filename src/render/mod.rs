@@ -3,8 +3,12 @@
 //! Stage 1: the flat 2D path (smithay's Space renderer) plus cursor, drag icon and
 //! screenshots. Stages 2-3 add the 3D scene and window panels.
 
+pub mod camera;
 pub mod cursor;
+pub mod gl;
+pub mod scene;
 pub mod screenshot;
+pub mod view;
 
 use std::time::Duration;
 
@@ -14,6 +18,7 @@ use smithay::{
         element::{
             memory::MemoryRenderBufferRenderElement,
             surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
+            texture::TextureRenderElement,
             Kind,
         },
         ImportAll, ImportMem, Renderer, Texture,
@@ -31,6 +36,7 @@ smithay::backend::renderer::element::render_elements! {
     pub SpaceRenderElement<R> where R: ImportAll + ImportMem;
     Surface = WaylandSurfaceRenderElement<R>,
     Memory = MemoryRenderBufferRenderElement<R>,
+    Texture = TextureRenderElement<R::TextureId>,
 }
 
 /// Dark grey background behind windows in 2D mode.
@@ -98,6 +104,23 @@ where
         damage_tracker,
         CLEAR_COLOR_2D,
     )
+}
+
+/// Render one output in 3D mode: the scene texture with `overlay` (cursor) on top.
+/// Windows are not drawn yet (Stage 3 puts them into the world).
+pub fn render_3d<'d, R>(
+    renderer: &mut R,
+    framebuffer: &mut R::Framebuffer<'_>,
+    age: usize,
+    elements: &[SpaceRenderElement<R>],
+    damage_tracker: &'d mut OutputDamageTracker,
+) -> Result<RenderOutputResult<'d>, DamageError<R::Error>>
+where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Texture + Clone + Send + 'static,
+{
+    let [r, g, b] = scene::SKY_COLOR;
+    damage_tracker.render_output(renderer, framebuffer, age, elements, [r, g, b, 1.0])
 }
 
 /// Tell clients they may draw their next frame. Without frame callbacks a client draws

@@ -45,6 +45,8 @@ rustix = { version = "1", features = ["net", "process", "fs"] }
 libc = "0.2"
 xcursor = "0.3"
 png = "0.18"
+# Safe casts of vertex structs to bytes for GL buffer uploads.
+bytemuck = { version = "1", features = ["derive"] }
 
 [[bin]]
 name = "spacewm"

@@ -49,13 +49,14 @@ use smithay::{
 
 use crate::{
     backend::Backend,
-    cli::Cli,
+    cli::{Cli, RenderMode},
     focus::PointerFocusTarget,
     input::InputState,
     ipc::IpcServer,
     render::{
         cursor::CursorThemeCache,
         screenshot::{ScreenshotDone, ScreenshotRequest},
+        view::View3D,
     },
 };
 
@@ -118,6 +119,12 @@ pub struct SpaceState {
     pub cursor_theme: CursorThemeCache,
     pub dnd_icon: Option<DndIcon>,
 
+    /// 2D (flat debug view) or 3D.
+    pub render_mode: RenderMode,
+    /// Camera, scene renderer and stats for the 3D view.
+    pub view: View3D,
+    pub debug_timer: Option<smithay::reexports::calloop::RegistrationToken>,
+
     /// Input bookkeeping: suppressed key releases, modifier choice, etc.
     pub input: InputState,
 
@@ -179,6 +186,9 @@ impl SpaceState {
             })
             .map_err(|e| anyhow::anyhow!("screenshot channel: {}", e.error))?;
 
+        let render_mode = cli.render;
+        let view = View3D::new(cli.shader_dir.clone());
+
         Ok(Self {
             backend,
             running: true,
@@ -204,6 +214,9 @@ impl SpaceState {
             cursor_status: CursorImageStatus::default_named(),
             cursor_theme: CursorThemeCache::load(),
             dnd_icon: None,
+            render_mode,
+            view,
+            debug_timer: None,
             input: InputState::default(),
             ipc: None,
             pending_screenshots: Vec::new(),

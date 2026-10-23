@@ -8,6 +8,7 @@
 //! Stage 2: temporary camera controls.
 //! Stage 4: Walk/Window input modes and raycast focus from the screen center.
 
+pub mod camera_controls;
 pub mod inject;
 
 use std::collections::HashSet;
@@ -25,7 +26,7 @@ use smithay::{
     utils::{Logical, Point, SERIAL_COUNTER},
 };
 
-use crate::{focus::KeyboardFocusTarget, state::SpaceState};
+use crate::{cli::RenderMode, focus::KeyboardFocusTarget, state::SpaceState};
 
 #[derive(Default)]
 pub struct InputState {
@@ -39,6 +40,10 @@ pub enum Action {
     SpawnTerminal,
     CloseWindow,
     Quit,
+    /// Log FPS / frame time / camera once per second.
+    ToggleDebug,
+    /// Recompile shaders from --shader-dir.
+    ReloadShaders,
 }
 
 /// Compositor keybinds. `modkey` is Super (or Alt when nested, because the host desktop
@@ -53,6 +58,8 @@ pub fn keybind_action(modkey: bool, mods: &ModifiersState, sym: Option<Keysym>) 
         (false, false, keysyms::KEY_Return) => Some(Action::SpawnTerminal),
         (true, false, keysyms::KEY_q) => Some(Action::CloseWindow),
         (true, false, keysyms::KEY_e) => Some(Action::Quit),
+        (false, false, keysyms::KEY_F3) => Some(Action::ToggleDebug),
+        (false, false, keysyms::KEY_F5) => Some(Action::ReloadShaders),
         _ => None,
     }
 }
@@ -128,19 +135,26 @@ pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState,
         time,
         |state, mods, handle| {
             if key_state == KeyState::Released {
-                if state.input.suppressed_keys.remove(&keycode) {
+                if state.input.suppressed_keys.remove(&keycode)
+                    || state.view.controls.release(keycode)
+                {
                     return FilterResult::Intercept(None);
                 }
                 return FilterResult::Forward;
             }
             let modkey = mods.logo || (nested && mods.alt);
-            match keybind_action(modkey, mods, handle.raw_latin_sym_or_raw_current_sym()) {
-                Some(action) => {
-                    state.input.suppressed_keys.insert(keycode);
-                    FilterResult::Intercept(Some(action))
-                }
-                None => FilterResult::Forward,
+            let sym = handle.raw_latin_sym_or_raw_current_sym();
+            if let Some(action) = keybind_action(modkey, mods, sym) {
+                state.input.suppressed_keys.insert(keycode);
+                return FilterResult::Intercept(Some(action));
             }
+            // While looking around (right mouse held), movement keys drive the camera.
+            if state.render_mode == RenderMode::Scene3D && state.view.controls.press(keycode, sym) {
+                state.view.dirty = true;
+                state.queue_redraw();
+                return FilterResult::Intercept(None);
+            }
+            FilterResult::Forward
         },
     );
     if let Some(Some(action)) = action {
@@ -164,6 +178,32 @@ pub fn run_action(state: &mut SpaceState, action: Action) {
             }
         }
         Action::Quit => state.quit(),
+        Action::ToggleDebug => toggle_debug(state),
+        Action::ReloadShaders => {
+            state.view.request_shader_reload();
+            state.queue_redraw();
+        }
+    }
+}
+
+fn toggle_debug(state: &mut SpaceState) {
+    use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
+    let stats = &mut state.view.stats;
+    stats.enabled = !stats.enabled;
+    tracing::info!(enabled = stats.enabled, "debug overlay");
+    if let Some(token) = state.debug_timer.take() {
+        state.loop_handle.remove(token);
+    }
+    if stats.enabled {
+        let second = std::time::Duration::from_secs(1);
+        state.debug_timer = state
+            .loop_handle
+            .insert_source(Timer::from_duration(second), move |_, _, state| {
+                let camera = state.view.camera;
+                state.view.stats.report(&camera);
+                TimeoutAction::ToDuration(second)
+            })
+            .ok();
     }
 }
 
@@ -202,6 +242,12 @@ pub fn handle_pointer_motion_absolute(
     pos: Point<f64, Logical>,
     time: InputTime,
 ) {
+    if state.view.controls.looking {
+        // Looking around: the motion turns the camera, the cursor stays put.
+        let delta = state.view.controls.absolute_delta(pos);
+        look(state, delta);
+        return;
+    }
     let pos = clamp_to_outputs(state, pos);
     state.pointer_location = pos;
     let Some(pointer) = state.seat.get_pointer() else {
@@ -231,6 +277,10 @@ pub fn handle_pointer_motion(
     delta_unaccel: Point<f64, Logical>,
     time: InputTime,
 ) {
+    if state.view.controls.looking {
+        look(state, delta);
+        return;
+    }
     let pos = clamp_to_outputs(state, state.pointer_location + delta);
     state.pointer_location = pos;
     let Some(pointer) = state.seat.get_pointer() else {
@@ -260,12 +310,36 @@ pub fn handle_pointer_motion(
     state.queue_redraw();
 }
 
+fn look(state: &mut SpaceState, delta: Point<f64, Logical>) {
+    if delta.x == 0.0 && delta.y == 0.0 {
+        return;
+    }
+    state.view.camera.rotate(
+        delta.x as f32,
+        delta.y as f32,
+        camera_controls::MOUSE_SENSITIVITY,
+    );
+    state.view.dirty = true;
+    state.queue_redraw();
+}
+
+/// Linux evdev code of the right mouse button.
+const BTN_RIGHT: u32 = 0x111;
+
 pub fn handle_pointer_button(
     state: &mut SpaceState,
     button: u32,
     button_state: ButtonState,
     time: InputTime,
 ) {
+    // 3D mode: the right button is ours (hold to look around), never sent to clients.
+    if state.render_mode == RenderMode::Scene3D && button == BTN_RIGHT {
+        match button_state {
+            ButtonState::Pressed => state.view.controls.start_looking(state.pointer_location),
+            ButtonState::Released => state.view.controls.stop_looking(),
+        }
+        return;
+    }
     let Some(pointer) = state.seat.get_pointer() else {
         return;
     };

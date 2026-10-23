@@ -25,4 +25,17 @@ K input type 'echo after-screenshot'; K input key Return; sleep 0.5
 rm -f "$OUT/winit2.png"; K screenshot "$OUT/winit2.png"
 K quit; wait $KP
 if grep -E "ERROR|WARN.*submit|panicked" "$OUT/winit.log"; then echo "FAIL: errors in winit log"; exit 1; fi
-echo "ok - winit nested backend renders, screenshots, exits cleanly"
+echo "ok - winit nested backend (2D) renders, screenshots, exits cleanly"
+
+# 3D through the winit surface (Flipped180 output transform): sky must be on top.
+WAYLAND_DISPLAY="$HOST" "$ROOT/target/debug/spacewm" --backend winit --render 3d \
+    --allow-input-injection --ipc-socket "$SOCK" >"$OUT/winit3d.log" 2>&1 &
+KP=$!
+for _ in $(seq 50); do K version >/dev/null 2>&1 && break; sleep 0.1; done
+sleep 0.5
+rm -f "$OUT/winit3d.png"; K screenshot "$OUT/winit3d.png" >/dev/null
+K quit; wait $KP
+PX="python3 $(dirname "$0")/pixel.py"
+$PX near "$OUT/winit3d.png" 640 20 135 191 242 30 >/dev/null || { echo "FAIL: winit 3D: no sky on top"; exit 1; }
+if grep -E "ERROR|panicked" "$OUT/winit3d.log"; then echo "FAIL: errors in winit 3D log"; exit 1; fi
+echo "ok - winit nested backend (3D) renders upright"

@@ -916,6 +916,7 @@ name = "spacewm"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "bytemuck",
  "calloop",
  "clap",
  "directories",

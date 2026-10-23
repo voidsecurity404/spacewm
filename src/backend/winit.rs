@@ -4,7 +4,7 @@
 //! render our whole desktop into it, and the host forwards keyboard/mouse events. It is
 //! the safe way to develop — a hang only freezes one window.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use smithay::{
     backend::{
@@ -26,6 +26,7 @@ use smithay::{
 };
 
 use super::Backend;
+use crate::cli::RenderMode;
 use crate::{
     error::SpaceError,
     render::{self, screenshot},
@@ -211,6 +212,12 @@ fn render(state: &mut SpaceState) {
         .unwrap_or_default();
     let pointer = state.pointer_location - output_origin;
 
+    let frame_start = Instant::now();
+    // 3D: advance the camera and re-render the scene texture first. The scene pass uses
+    // our own framebuffers, so it must run before the output framebuffer is bound.
+    let mut prepared = (state.render_mode == RenderMode::Scene3D)
+        .then(|| state.view.prepare(b.graphics.renderer(), size));
+
     let (renderer, mut framebuffer) = match b.graphics.bind() {
         Ok(bound) => bound,
         Err(err) => {
@@ -227,15 +234,31 @@ fn render(state: &mut SpaceState) {
         scale,
         time,
     );
-    let damage = match render::render_2d(
-        renderer,
-        &mut framebuffer,
-        age,
-        &output,
-        &state.space,
-        &overlay,
-        &mut b.damage_tracker,
-    ) {
+    let result = match prepared.as_mut() {
+        Some(prepared) => {
+            let mut elements = overlay;
+            if let Some(scene) = prepared.element.take() {
+                elements.push(render::SpaceRenderElement::Texture(scene));
+            }
+            render::render_3d(
+                renderer,
+                &mut framebuffer,
+                age,
+                &elements,
+                &mut b.damage_tracker,
+            )
+        }
+        None => render::render_2d(
+            renderer,
+            &mut framebuffer,
+            age,
+            &output,
+            &state.space,
+            &overlay,
+            &mut b.damage_tracker,
+        ),
+    };
+    let damage = match result {
         Ok(result) => result.damage.cloned(),
         Err(err) => {
             tracing::error!("rendering failed: {err:?}");
@@ -299,4 +322,5 @@ fn render(state: &mut SpaceState) {
             b.frame_callback_timer = token;
         }
     }
+    super::headless::finish_frame(state, frame_start, prepared);
 }

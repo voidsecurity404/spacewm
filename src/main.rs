@@ -122,6 +122,10 @@ fn main() -> anyhow::Result<()> {
         state.refresh_and_flush();
     }
 
+    // GL objects can only be freed while the context exists, i.e. before the backend drops.
+    if let Some(scene) = state.view.scene.take() {
+        scene.destroy(state.backend.renderer());
+    }
     if let Some(mut ipc) = state.ipc.take() {
         ipc.shutdown(&loop_handle);
     }

@@ -6,6 +6,7 @@
 
 use std::{
     fs::{self, File},
+    io::IsTerminal,
     path::PathBuf,
     sync::Mutex,
 };
@@ -45,7 +46,13 @@ pub fn init(level: &str) -> anyhow::Result<PathBuf> {
 
     tracing_subscriber::registry()
         .with(filter)
-        .with(fmt::layer().with_writer(std::io::stderr).with_target(true))
+        // Colors only on a real terminal; piped/redirected logs stay plain text.
+        .with(
+            fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_ansi(std::io::stderr().is_terminal())
+                .with_target(true),
+        )
         // A Mutex<File> is a valid writer: each event locks, writes a line, unlocks.
         .with(
             fmt::layer()

@@ -48,6 +48,11 @@ pub struct Cli {
     #[arg(long)]
     pub config: Option<PathBuf>,
 
+    /// Load GLSL shaders from this directory instead of the built-in copies, and reload
+    /// them with Mod+F5. For editing shaders without recompiling.
+    #[arg(long)]
+    pub shader_dir: Option<PathBuf>,
+
     /// Headless backend: output size as WIDTHxHEIGHT.
     #[arg(long, default_value = "1280x720", value_parser = parse_size)]
     pub headless_size: (i32, i32),

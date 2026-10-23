@@ -35,6 +35,7 @@ use smithay::{
 };
 
 use super::Backend;
+use crate::cli::RenderMode;
 use crate::{
     cli::Cli,
     error::SpaceError,
@@ -173,6 +174,7 @@ fn render(state: &mut SpaceState) {
     b.last_frame = Some(Instant::now());
 
     let output = b.output.clone();
+    let size = b.size;
     let scale = output.current_scale().fractional_scale().into();
     let time = state.start_time.elapsed();
     let age = if b.rendered_once && state.pending_screenshots.is_empty() {
@@ -187,6 +189,12 @@ fn render(state: &mut SpaceState) {
             .output_geometry(&output)
             .map(|g| g.loc.to_f64())
             .unwrap_or_default();
+
+    let frame_start = Instant::now();
+    // 3D: advance the camera and re-render the scene texture first. The scene pass uses
+    // our own framebuffers, so it must run before the output framebuffer is bound.
+    let mut prepared = (state.render_mode == RenderMode::Scene3D)
+        .then(|| state.view.prepare(&mut b.renderer, size));
 
     let mut framebuffer = match b.renderer.bind(&mut b.target) {
         Ok(fb) => fb,
@@ -204,15 +212,31 @@ fn render(state: &mut SpaceState) {
         scale,
         time,
     );
-    if let Err(err) = render::render_2d(
-        &mut b.renderer,
-        &mut framebuffer,
-        age,
-        &output,
-        &state.space,
-        &overlay,
-        &mut b.damage_tracker,
-    ) {
+    let result = match prepared.as_mut() {
+        Some(prepared) => {
+            let mut elements = overlay;
+            if let Some(scene) = prepared.element.take() {
+                elements.push(render::SpaceRenderElement::Texture(scene));
+            }
+            render::render_3d(
+                &mut b.renderer,
+                &mut framebuffer,
+                age,
+                &elements,
+                &mut b.damage_tracker,
+            )
+        }
+        None => render::render_2d(
+            &mut b.renderer,
+            &mut framebuffer,
+            age,
+            &output,
+            &state.space,
+            &overlay,
+            &mut b.damage_tracker,
+        ),
+    };
+    if let Err(err) = result {
         tracing::error!("rendering failed: {err:?}");
     }
     b.rendered_once = true;
@@ -242,4 +266,25 @@ fn render(state: &mut SpaceState) {
         state.dnd_icon.as_ref(),
         time,
     );
+
+    finish_frame(state, frame_start, prepared);
+}
+
+/// Bookkeeping shared by all backends after a frame: stats, and keep rendering while
+/// something animates.
+pub fn finish_frame(
+    state: &mut SpaceState,
+    frame_start: Instant,
+    prepared: Option<render::view::Prepared>,
+) {
+    let scene_rendered = prepared.as_ref().is_some_and(|p| p.scene_rendered);
+    if state.view.stats.enabled {
+        state
+            .view
+            .stats
+            .record(frame_start.elapsed(), scene_rendered);
+    }
+    if prepared.is_some_and(|p| p.continuous) {
+        state.queue_redraw();
+    }
 }
