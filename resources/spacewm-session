@@ -17,12 +17,8 @@ export QT_QPA_PLATFORM="wayland;xcb"
 export SDL_VIDEODRIVER=wayland
 export _JAVA_AWT_WM_NONREPARENTING=1
 
-# Keyboard layouts until the config file exists (Stage 7.2). Example for two layouts
-# switched with Alt+Shift:
-#   export XKB_DEFAULT_LAYOUT=us,ru
-#   export XKB_DEFAULT_OPTIONS=grp:alt_shift_toggle
-: "${XKB_DEFAULT_LAYOUT:=us}"
-export XKB_DEFAULT_LAYOUT
+# Keyboard layouts are set in ~/.config/spacewm/config.toml ([input] keyboard_layout);
+# when that is empty, xkb falls back to XKB_DEFAULT_LAYOUT and then "us".
 
 # SPACEWM_BIN: run a development build instead of the installed one, e.g.
 #   SPACEWM_BIN=~/spacewm/target/release/spacewm spacewm-session

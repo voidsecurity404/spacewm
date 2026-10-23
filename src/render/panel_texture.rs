@@ -89,6 +89,12 @@ impl PanelTextureCache {
         Self { targets: HashMap::new(), max_size, anisotropy, mipmaps: true, updates: 0 }
     }
 
+    /// Switch mipmapped textures on/off; textures are recreated on the next update.
+    pub fn set_mipmaps(&mut self, on: bool) {
+        self.mipmaps = on;
+        self.targets.clear();
+    }
+
     pub fn get(&self, id: PanelId) -> Option<&PanelTarget> {
         self.targets.get(&id)
     }

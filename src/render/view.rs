@@ -77,6 +77,7 @@ pub struct View3D {
     pub controls: CameraControls,
     pub scene: Option<SceneRenderer>,
     pub panel_textures: Option<PanelTextureCache>,
+    pub settings: RenderSettings,
     /// The cursor drawn on the focused panel in Window mode.
     cursor_target: Option<CursorTarget>,
     /// The scene must be re-rendered (camera moved, resized, shaders reloaded, ...).
@@ -126,6 +127,44 @@ const FOCUS_BORDER_PX: f32 = 6.0;
 /// Window mode: the other panels fade a little so the focused one stands out.
 const UNFOCUSED_OPACITY: f32 = 0.85;
 
+/// Render settings from the config (live-reloadable).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RenderSettings {
+    /// Chunks drawn in each direction.
+    pub render_distance: i32,
+    /// Fog start/end in metres.
+    pub fog: (f32, f32),
+    pub dim_unfocused: bool,
+    pub mipmaps: bool,
+}
+
+impl Default for RenderSettings {
+    fn default() -> Self {
+        Self {
+            render_distance: RENDER_DISTANCE,
+            fog: super::scene::DEFAULT_FOG,
+            dim_unfocused: true,
+            mipmaps: true,
+        }
+    }
+}
+
+impl RenderSettings {
+    pub fn from_config(config: &crate::config::Config) -> Self {
+        let distance = config.render.render_distance_chunks;
+        // Fog ends just inside the last drawn chunks, so blocks fade out instead of popping;
+        // with fog off it starts beyond anything drawn.
+        let end = (distance * crate::world::chunk::CHUNK) as f32 - 8.0;
+        let fog = if config.render.fog { (end / 3.0, end) } else { (1.0e5, 1.0e6) };
+        Self {
+            render_distance: distance,
+            fog,
+            dim_unfocused: config.panels.dim_unfocused,
+            mipmaps: config.render.panel_mipmaps,
+        }
+    }
+}
+
 /// Cursor images are rendered into a square texture with the hotspot at its center.
 const CURSOR_TEX: i32 = 128;
 
@@ -142,6 +181,7 @@ impl View3D {
             controls: CameraControls::default(),
             scene: None,
             panel_textures: None,
+            settings: RenderSettings::default(),
             cursor_target: None,
             dirty: true,
             shader_dir,
@@ -190,7 +230,12 @@ impl View3D {
         }
 
         // New window content → new panel textures → the scene must be redrawn.
-        let textures = self.panel_textures.get_or_insert_with(|| PanelTextureCache::new(renderer));
+        let mipmaps = self.settings.mipmaps;
+        let textures = self.panel_textures.get_or_insert_with(|| {
+            let mut cache = PanelTextureCache::new(renderer);
+            cache.mipmaps = mipmaps;
+            cache
+        });
         textures.updates = 0;
         if textures.update(renderer, world) {
             self.dirty = true;
@@ -229,10 +274,12 @@ impl View3D {
 
         let mut scene_rendered = false;
         if self.dirty {
-            let mut draws = panel_draws(world, textures, &self.camera, highlight);
+            let mut draws =
+                panel_draws(world, textures, &self.camera, highlight, self.settings.dim_unfocused);
             draws.extend(cursor_draw);
-            let voxel_frame = scene.voxels.visible(&self.camera, RENDER_DISTANCE, outline);
-            match scene.render(renderer, &self.camera, size, &draws, &voxel_frame) {
+            let settings = self.settings;
+            let voxel_frame = scene.voxels.visible(&self.camera, settings.render_distance, outline);
+            match scene.render(renderer, &self.camera, size, &draws, &voxel_frame, settings.fog) {
                 Ok(()) => scene_rendered = true,
                 Err(err) => tracing::error!("scene render failed: {err}"),
             }
@@ -350,6 +397,7 @@ fn panel_draws(
     textures: &PanelTextureCache,
     camera: &Camera,
     highlight: Highlight,
+    dim_unfocused: bool,
 ) -> Vec<PanelDraw> {
     let mut draws: Vec<(PanelDraw, f32)> = world
         .panels()
@@ -374,7 +422,7 @@ fn panel_draws(
             } else {
                 (0.0, Vec4::ZERO)
             };
-            let dimmed = highlight.focused.is_some_and(|f| f != p.id);
+            let dimmed = dim_unfocused && highlight.focused.is_some_and(|f| f != p.id);
             let opacity = p.opacity * if dimmed { UNFOCUSED_OPACITY } else { 1.0 };
             let draw = PanelDraw {
                 texture,

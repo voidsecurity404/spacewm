@@ -127,7 +127,11 @@ pub struct DrmBackend {
     session: LibSeatSession,
     libinput: Libinput,
     gpu: GpuDevice,
-    keyboards: Vec<libinput::Device>,
+    /// Every connected input device (settings are re-applied on config reload; keyboards
+    /// also get the Caps/Num Lock LEDs).
+    devices: Vec<libinput::Device>,
+    /// `[[output]]` sections: mode and scale per connector.
+    outputs_config: Vec<crate::config::OutputConfig>,
     loop_handle: LoopHandle<'static, SpaceState>,
     pub dmabuf_state: DmabufState,
     _dmabuf_global: DmabufGlobal,
@@ -150,6 +154,7 @@ fn backend_err(what: &str, e: &dyn std::fmt::Display) -> SpaceError {
 impl DrmBackend {
     pub fn init(
         cli: &Cli,
+        config: &crate::config::Config,
         dh: &DisplayHandle,
         loop_handle: &LoopHandle<'static, SpaceState>,
     ) -> Result<Self, SpaceError> {
@@ -223,7 +228,9 @@ impl DrmBackend {
         let mut x = 0;
         for event in scan {
             if let DrmScanEvent::Connected { connector, crtc: Some(crtc) } = event {
-                if let Some(surface) = connector_connected(&mut gpu, dh, connector, crtc, x) {
+                if let Some(surface) =
+                    connector_connected(&mut gpu, dh, &config.outputs, connector, crtc, x)
+                {
                     x += surface.output.current_mode().map(|m| m.size.w).unwrap_or(0);
                     gpu.surfaces.insert(crtc, surface);
                 }
@@ -245,7 +252,8 @@ impl DrmBackend {
             session,
             libinput,
             gpu,
-            keyboards: Vec::new(),
+            devices: Vec::new(),
+            outputs_config: config.outputs.clone(),
             loop_handle: loop_handle.clone(),
             dmabuf_state,
             _dmabuf_global: dmabuf_global,
@@ -291,8 +299,16 @@ impl DrmBackend {
     }
 
     pub fn update_led_state(&mut self, led_state: LedState) {
-        for keyboard in &mut self.keyboards {
-            keyboard.led_update(led_state.into());
+        for device in
+            self.devices.iter_mut().filter(|d| d.has_capability(DeviceCapability::Keyboard))
+        {
+            device.led_update(led_state.into());
+        }
+    }
+
+    pub fn apply_input_settings(&mut self, settings: &crate::input::mode::InputSettings) {
+        for device in &mut self.devices {
+            apply_device_settings(device, settings);
         }
     }
 
@@ -387,15 +403,47 @@ fn pick_mode(connector: &connector::Info) -> Option<smithay::reexports::drm::con
         .copied()
 }
 
+/// The mode the config asks for (size, and the refresh rate nearest to the requested
+/// one, else the highest), or the connector's preferred mode.
+fn choose_mode(
+    connector: &connector::Info,
+    name: &str,
+    request: Option<crate::config::ModeRequest>,
+) -> Option<smithay::reexports::drm::control::Mode> {
+    if let Some(req) = request {
+        let fitting = connector.modes().iter().filter(|m| m.size() == (req.width, req.height));
+        let best = match req.refresh {
+            Some(hz) => fitting.min_by(|a, b| {
+                let da = (a.vrefresh() as f64 - hz).abs();
+                let db = (b.vrefresh() as f64 - hz).abs();
+                da.total_cmp(&db)
+            }),
+            None => fitting.max_by_key(|m| m.vrefresh()),
+        };
+        match best {
+            Some(m) => return Some(*m),
+            None => tracing::warn!(
+                name,
+                wanted = format!("{}x{}", req.width, req.height),
+                "configured mode not offered by the monitor, using its preferred one"
+            ),
+        }
+    }
+    pick_mode(connector)
+}
+
 fn connector_connected(
     gpu: &mut GpuDevice,
     dh: &DisplayHandle,
+    outputs_config: &[crate::config::OutputConfig],
     connector: connector::Info,
     crtc: crtc::Handle,
     x: i32,
 ) -> Option<OutputSurface> {
     let name = format!("{}-{}", connector.interface().as_str(), connector.interface_id());
-    let Some(mode) = pick_mode(&connector) else {
+    let configured = outputs_config.iter().find(|o| o.name == name);
+    let Some(mode) = choose_mode(&connector, &name, configured.and_then(|o| o.mode_request()))
+    else {
         tracing::warn!(name, "connector has no modes");
         return None;
     };
@@ -408,7 +456,8 @@ fn connector_connected(
 
     // Scale from the physical size: 2 on high-density screens so text stays readable.
     let dpi = if mm_w > 0 { w as f64 / (mm_w as f64 / 25.4) } else { 0.0 };
-    let scale = if dpi > HIDPI { 2 } else { 1 };
+    let auto_scale = if dpi > HIDPI { 2.0 } else { 1.0 };
+    let scale = configured.and_then(|o| o.scale).unwrap_or(auto_scale);
     tracing::info!(
         name,
         make,
@@ -438,7 +487,12 @@ fn connector_connected(
     output.change_current_state(
         Some(wl_mode),
         Some(Transform::Normal),
-        Some(Scale::Integer(scale)),
+        // Whole numbers stay integer scales (crisper: no resampling of client buffers).
+        Some(if scale.fract() == 0.0 {
+            Scale::Integer(scale as i32)
+        } else {
+            Scale::Fractional(scale)
+        }),
         Some((x, 0).into()),
     );
     output.set_preferred(wl_mode);
@@ -512,7 +566,9 @@ fn rescan_connectors(state: &mut SpaceState) {
                     .filter_map(|s| s.output.current_mode())
                     .map(|m| m.size.w)
                     .sum();
-                if let Some(surface) = connector_connected(&mut b.gpu, &dh, connector, crtc, x) {
+                if let Some(surface) =
+                    connector_connected(&mut b.gpu, &dh, &b.outputs_config, connector, crtc, x)
+                {
                     let output = surface.output.clone();
                     b.gpu.surfaces.insert(crtc, surface);
                     state.space.map_output(&output, (x, 0));
@@ -541,7 +597,7 @@ fn on_input(state: &mut SpaceState, mut event: InputEvent<LibinputInputBackend>)
         InputEvent::DeviceRemoved { device } => {
             tracing::info!(name = %device.name(), "input device removed");
             if let Backend::Drm(b) = &mut state.backend {
-                b.keyboards.retain(|k| k != device);
+                b.devices.retain(|k| k != device);
             }
         }
         _ => {}
@@ -595,19 +651,31 @@ fn configure_device(state: &mut SpaceState, device: &mut libinput::Device) {
     .collect();
     tracing::info!(name = %device.name(), caps = caps.join(","), "input device added");
 
-    if device.config_tap_finger_count() > 0 {
-        let _ = device.config_tap_set_enabled(settings.touchpad_tap);
-        let _ = device.config_scroll_set_natural_scroll_enabled(settings.touchpad_natural_scroll);
-    } else if device.has_capability(DeviceCapability::Pointer) && settings.mouse_accel_flat {
-        let _ = device.config_accel_set_profile(libinput::AccelProfile::Flat);
-    }
+    apply_device_settings(device, &settings);
     if device.has_capability(DeviceCapability::Keyboard) {
         if let Some(led) = state.seat.get_keyboard().map(|k| k.led_state()) {
             device.led_update(led.into());
         }
-        if let Backend::Drm(b) = &mut state.backend {
-            b.keyboards.push(device.clone());
-        }
+    }
+    if let Backend::Drm(b) = &mut state.backend {
+        b.devices.push(device.clone());
+    }
+}
+
+fn apply_device_settings(
+    device: &mut libinput::Device,
+    settings: &crate::input::mode::InputSettings,
+) {
+    if device.config_tap_finger_count() > 0 {
+        let _ = device.config_tap_set_enabled(settings.touchpad_tap);
+        let _ = device.config_scroll_set_natural_scroll_enabled(settings.touchpad_natural_scroll);
+    } else if device.has_capability(DeviceCapability::Pointer) {
+        let profile = if settings.mouse_accel_flat {
+            libinput::AccelProfile::Flat
+        } else {
+            libinput::AccelProfile::Adaptive
+        };
+        let _ = device.config_accel_set_profile(profile);
     }
 }
 

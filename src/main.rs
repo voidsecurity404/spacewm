@@ -38,6 +38,9 @@ use crate::{backend::Backend, cli::Cli, state::SpaceState};
 fn main() -> anyhow::Result<()> {
     block_shutdown_signals();
     let mut cli = Cli::parse();
+    if cli.check_config {
+        return check_config(cli.config.as_deref());
+    }
     if cli.drm_probe {
         // Read-only listing; needs no session, logging setup or event loop.
         return backend::drm::probe();
@@ -68,17 +71,40 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn run(cli: Cli) -> anyhow::Result<()> {
+    let config_path = match &cli.config {
+        Some(path) => path.clone(),
+        None => config::default_path()?,
+    };
+    // A broken config doesn't stop spacewm: it starts with defaults and shows the error.
+    let (config, config_error) = config::load_or_create(&config_path);
+    match &config_error {
+        Some(e) => tracing::error!("config not loaded, using defaults:\n{e}"),
+        None => tracing::info!(path = %config_path.display(), "config loaded"),
+    }
+
     let mut event_loop: EventLoop<SpaceState> =
         EventLoop::try_new().context("failed to create event loop")?;
     let loop_handle = event_loop.handle();
     let mut display: Display<SpaceState> = Display::new().context("failed to create display")?;
 
-    let backend = Backend::init(cli.backend, &cli, &display.handle(), &loop_handle)
+    let backend = Backend::init(cli.backend, &cli, &config, &display.handle(), &loop_handle)
         .with_context(|| format!("failed to start {:?} backend", cli.backend))?;
     tracing::info!(backend = backend.name(), "backend ready");
 
-    let mut state =
-        SpaceState::new(&mut display, loop_handle.clone(), event_loop.get_signal(), cli, backend)?;
+    let mut state = SpaceState::new(
+        &mut display,
+        loop_handle.clone(),
+        event_loop.get_signal(),
+        cli,
+        backend,
+        config.clone(),
+        config_path.clone(),
+    )?;
+    state.apply_config(config, true);
+    match config::watch::watch(&config_path, &loop_handle) {
+        Ok(watcher) => state.config_watcher = Some(watcher),
+        Err(err) => tracing::warn!("config changes won't be picked up live: {err:#}"),
+    }
 
     // Tell clients which shm pixel formats our renderer can import.
     let shm_formats = state.backend.renderer().shm_formats();
@@ -150,7 +176,12 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         spawn::update_activation_environment();
     }
 
-    for command in state.cli.spawn.clone() {
+    if let Some(e) = config_error {
+        state.show_error(e.short());
+    }
+
+    let autostart = state.config.general.autostart.clone();
+    for command in state.cli.spawn.clone().into_iter().chain(autostart) {
         if let Err(err) = spawn::spawn(&command, &state.socket_name) {
             tracing::warn!("{err}");
         }
@@ -194,5 +225,27 @@ fn block_shutdown_signals() {
         libc::sigaddset(&mut set, libc::SIGINT);
         libc::sigaddset(&mut set, libc::SIGTERM);
         libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut());
+    }
+}
+
+/// `spacewm --check-config`: validate and report, exit code 0 or 1.
+fn check_config(path: Option<&std::path::Path>) -> anyhow::Result<()> {
+    let path = match path {
+        Some(p) => p.to_path_buf(),
+        None => config::default_path()?,
+    };
+    match config::load(&path) {
+        Ok(_) => {
+            println!("{}: OK", path.display());
+            Ok(())
+        }
+        Err(e) => {
+            let text = e.to_string();
+            eprint!("{text}");
+            if !text.ends_with('\n') {
+                eprintln!();
+            }
+            std::process::exit(1);
+        }
     }
 }

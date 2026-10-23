@@ -25,11 +25,13 @@ const MIN_SPAWN_SEPARATION: f32 = 0.3;
 
 pub struct World<W = Window> {
     panels: Vec<Panel<W>>,
+    /// Scale of new panels (config `panels.default_pixels_per_unit`).
+    pub default_ppu: f32,
 }
 
 impl<W> Default for World<W> {
     fn default() -> Self {
-        Self { panels: Vec::new() }
+        Self { panels: Vec::new(), default_ppu: DEFAULT_PIXELS_PER_UNIT }
     }
 }
 
@@ -77,7 +79,7 @@ impl<W: PartialEq> World<W> {
         distance: f32,
     ) -> PanelId {
         let mut panel = Panel::new(id, window, size_px);
-        panel.pixels_per_unit = DEFAULT_PIXELS_PER_UNIT;
+        panel.pixels_per_unit = self.default_ppu;
 
         let right = camera.forward_flat().cross(Vec3::Y);
         let mut pos = camera.position + camera.forward() * distance;

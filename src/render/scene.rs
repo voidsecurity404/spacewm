@@ -40,10 +40,11 @@ use super::{
 };
 use crate::{error::SpaceError, world::mesh::ChunkMeshData};
 
+/// Fog start/end (metres) without a config: matches render distance 8.
+pub const DEFAULT_FOG: (f32, f32) = (40.0, 120.0);
+
 /// Sky blue, also the fog color so the horizon fades into the sky.
 pub const SKY_COLOR: [f32; 3] = [0.53, 0.75, 0.95];
-const FOG_START: f32 = 40.0;
-const FOG_END: f32 = 120.0;
 
 struct ShaderSource {
     name: &'static str,
@@ -315,6 +316,7 @@ impl SceneRenderer {
         size: Size<i32, Physical>,
         panels: &[PanelDraw],
         voxel_frame: &VoxelFrame,
+        (fog_start, fog_end): (f32, f32),
     ) -> Result<(), SpaceError> {
         self.ensure_targets(renderer, size)?;
         let Some(targets) = self.targets.as_mut() else {
@@ -325,7 +327,7 @@ impl SceneRenderer {
         let voxel_program = &mut self.voxel;
         let voxels = &self.voxels;
         let quad = &self.quad;
-        let fog = (Vec3::from(SKY_COLOR), FOG_START, FOG_END);
+        let fog = (Vec3::from(SKY_COLOR), fog_start, fog_end);
         let (w, h) = (size.w, size.h);
         // Flip Y (see module docs) so the texture comes out top-row-first.
         let proj = Mat4::from_scale(Vec3::new(1.0, -1.0, 1.0)) * camera.projection_matrix();
@@ -359,8 +361,8 @@ impl SceneRenderer {
                 basic.set_mat4(gl, "u_model", &Mat4::IDENTITY);
                 basic.set_vec3(gl, "u_camera_pos", camera.position);
                 basic.set_vec3(gl, "u_fog_color", Vec3::from(SKY_COLOR));
-                basic.set_f32(gl, "u_fog_start", FOG_START);
-                basic.set_f32(gl, "u_fog_end", FOG_END);
+                basic.set_f32(gl, "u_fog_start", fog_start);
+                basic.set_f32(gl, "u_fog_end", fog_end);
                 // Draw order matters for transparency:
                 // 1. opaque blocks (and alpha-tested leaves), 2. the aimed-at block's outline,
                 // 3. opaque panels, 4. glass/water far to near, 5. translucent panels and the
@@ -377,7 +379,17 @@ impl SceneRenderer {
                 if let Some(block) = voxel_frame.outline {
                     voxels.draw_outline(gl, basic, block);
                 }
-                draw_panels(gl, panel_program, quad, panels, true, &view, &proj, camera.position);
+                draw_panels(
+                    gl,
+                    panel_program,
+                    quad,
+                    panels,
+                    true,
+                    &view,
+                    &proj,
+                    camera.position,
+                    fog,
+                );
                 voxels.draw_translucent(
                     gl,
                     voxel_program,
@@ -387,7 +399,17 @@ impl SceneRenderer {
                     camera.position,
                     fog,
                 );
-                draw_panels(gl, panel_program, quad, panels, false, &view, &proj, camera.position);
+                draw_panels(
+                    gl,
+                    panel_program,
+                    quad,
+                    panels,
+                    false,
+                    &view,
+                    &proj,
+                    camera.position,
+                    fog,
+                );
 
                 if let Some((msaa_fbo, _, _)) = msaa {
                     // Resolve: average the samples of each pixel into the texture.
@@ -493,6 +515,7 @@ fn draw_panels(
     view: &Mat4,
     proj: &Mat4,
     camera_pos: Vec3,
+    fog: (Vec3, f32, f32),
 ) {
     if !panels.iter().any(|p| p.opaque == opaque_pass) {
         return;
@@ -507,9 +530,9 @@ fn draw_panels(
     program.set_mat4(gl, "u_view", view);
     program.set_mat4(gl, "u_proj", proj);
     program.set_vec3(gl, "u_camera_pos", camera_pos);
-    program.set_vec3(gl, "u_fog_color", Vec3::from(SKY_COLOR));
-    program.set_f32(gl, "u_fog_start", FOG_START);
-    program.set_f32(gl, "u_fog_end", FOG_END);
+    program.set_vec3(gl, "u_fog_color", fog.0);
+    program.set_f32(gl, "u_fog_start", fog.1);
+    program.set_f32(gl, "u_fog_end", fog.2);
     program.set_i32(gl, "u_tex", 0);
     for p in panels.iter().filter(|p| p.opaque == opaque_pass) {
         unsafe {

@@ -2,7 +2,8 @@
 """Tiny PNG reader for test assertions (8-bit RGB/RGBA, no dependencies).
 
   pixel.py FILE X Y            -> "R G B"
-  pixel.py diff A B            -> fraction of pixels that differ (0.0 .. 1.0)
+  pixel.py diff A B [X0 Y0 X1 Y1] -> fraction of pixels that differ (0.0 .. 1.0),
+                                  optionally only inside a rectangle
   pixel.py near FILE X Y R G B [TOL]  -> exit 0 if the pixel is within TOL (default 40)
   pixel.py find FILE R G B [TOL]      -> "X Y N": centroid and count of matching pixels
 """
@@ -65,9 +66,10 @@ def main():
         if a[:2] != b[:2]:
             print(1.0)
             return
-        w, h = a[0], a[1]
-        changed = sum(1 for y in range(0, h, 2) for x in range(0, w, 2) if pixel(a, x, y) != pixel(b, x, y))
-        print(changed / ((w // 2) * (h // 2)))
+        x0, y0, x1, y1 = map(int, args[3:7]) if len(args) >= 7 else (0, 0, a[0], a[1])
+        xs, ys = range(x0, x1, 2), range(y0, y1, 2)
+        changed = sum(1 for y in ys for x in xs if pixel(a, x, y) != pixel(b, x, y))
+        print(changed / max(1, len(xs) * len(ys)))
     elif args[0] == "near":
         img = read_png(args[1])
         x, y, r, g, b = map(int, args[2:7])

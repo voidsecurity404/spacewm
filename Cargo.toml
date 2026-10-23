@@ -5,6 +5,8 @@ edition = "2021"
 rust-version = "1.99"
 description = "A 3D Wayland compositor: windows as panels in a voxel world"
 license = "MIT"
+# `cargo run` starts the compositor (spacectl: `cargo run --bin spacectl`).
+default-run = "spacewm"
 
 [dependencies]
 # smithay from git main: the crates.io release lags behind and most examples
@@ -51,6 +53,8 @@ wayland-egl = "0.32"
 png = "0.18"
 # Safe casts of vertex structs to bytes for GL buffer uploads.
 bytemuck = { version = "1", features = ["derive"] }
+notify = { version = "8", default-features = false }
+fontdue = "0.9"
 
 [[bin]]
 name = "spacewm"

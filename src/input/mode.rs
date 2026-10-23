@@ -52,11 +52,13 @@ pub struct Highlight {
     pub focused: Option<PanelId>,
 }
 
-/// Tunables (loaded from the config file in Stage 7).
+/// Input tunables, from the `[input]` config section.
 #[derive(Debug, Clone, Copy)]
 pub struct InputSettings {
     /// Radians per pixel of mouse motion.
     pub mouse_sensitivity: f32,
+    /// Mouse forward looks down.
+    pub invert_y: bool,
     /// Metres per second.
     pub walk_speed: f32,
     /// Panels farther than this can't be entered by clicking.
@@ -74,12 +76,28 @@ impl Default for InputSettings {
     fn default() -> Self {
         Self {
             mouse_sensitivity: 0.0025,
+            invert_y: false,
             walk_speed: crate::world::player::WALK_SPEED,
             reach_distance: 6.0,
             window_cursor_speed: 1.0,
             touchpad_tap: true,
             touchpad_natural_scroll: true,
             mouse_accel_flat: true,
+        }
+    }
+}
+
+impl InputSettings {
+    pub fn from_config(c: &crate::config::Input) -> Self {
+        Self {
+            mouse_sensitivity: c.mouse_sensitivity,
+            invert_y: c.invert_y,
+            walk_speed: c.walk_speed,
+            reach_distance: c.reach_distance,
+            window_cursor_speed: c.window_cursor_speed,
+            touchpad_tap: c.touchpad_tap,
+            touchpad_natural_scroll: c.touchpad_natural_scroll,
+            mouse_accel_flat: c.mouse_accel == crate::config::MouseAccel::Flat,
         }
     }
 }

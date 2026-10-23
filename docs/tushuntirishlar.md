@@ -212,3 +212,15 @@ ota-panel teksturasiga chiziladi va sichqoncha ular ustida bo'lsa input ularga b
 **Topilgan xatolar:** (1) signalfd faqat signal *hamma* thread'da bloklansa ishlaydi —
 mesher thread'i bloklamagani uchun SIGTERM spacewm'ni tozalamasdan o'ldirar edi; endi
 main() boshida bloklanadi. (2) smithay X clipboard egasini o'zgartirgach flush qilmaydi.
+
+## 7.2-bosqich: config fayl
+
+`~/.config/spacewm/config.toml` birinchi ishga tushishda barcha kalitlar va izohlar bilan
+yoziladi (unit test u `Config::default()` bilan bir xil ekanini tekshiradi). serde
+`deny_unknown_fields` har noma'lum kalitni xato qiladi; xabarda qator:ustun, kalit va eng
+yaqin to'g'ri nom bor (Levenshtein masofasi). Qiymatlar alohida tekshiriladi (fov 30-120,
+NaN rad etiladi, xkb layout haqiqatan kompilyatsiya qilib ko'riladi). Fayl inotify bilan
+kuzatiladi — fayl emas, PAPKA, chunki muharrirlar yangi fayl yozib rename qiladi. O'zgarish
+150 ms kutib (bir saqlash bir necha hodisa beradi) jonli qo'llanadi; xato bo'lsa eski
+sozlamalar qoladi va ekranda qizil panel chiqadi. Mod+Escape config'dan qat'i nazar doim
+ishlaydi — xato tahrir sizni oyna ichida qamab qo'ymasligi uchun.

@@ -19,7 +19,7 @@ systemd-run --quiet --unit=spacewm-drmtest \
   -p StandardOutput=journal -p StandardError=journal -p TTYReset=yes -p TTYVHangup=yes \
   -p WorkingDirectory=/home/sar1k \
   /home/sar1k/spacewm/target/debug/spacewm --backend drm --no-session-env \
-    --ipc-socket $SOCK --layout $OUT/layout.json --spawn foot ${EXTRA:-}
+    --ipc-socket $SOCK --layout $OUT/layout.json --config $OUT/config.toml --spawn foot ${EXTRA:-}
 
 start=$(date +%s%N)
 for i in $(seq 1 40); do [ -S $SOCK ] && break; sleep 0.25; done

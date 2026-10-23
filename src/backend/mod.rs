@@ -35,6 +35,7 @@ impl Backend {
     pub fn init(
         kind: BackendKind,
         cli: &crate::cli::Cli,
+        config: &crate::config::Config,
         dh: &DisplayHandle,
         loop_handle: &LoopHandle<'static, SpaceState>,
     ) -> Result<Self, SpaceError> {
@@ -43,7 +44,7 @@ impl Backend {
             BackendKind::Headless => {
                 Self::Headless(headless::HeadlessBackend::init(cli, dh, loop_handle)?)
             }
-            BackendKind::Drm => Self::Drm(drm::DrmBackend::init(cli, dh, loop_handle)?),
+            BackendKind::Drm => Self::Drm(drm::DrmBackend::init(cli, config, dh, loop_handle)?),
         })
     }
 
@@ -90,6 +91,13 @@ impl Backend {
             Self::Winit(b) => b.schedule_redraw(),
             Self::Headless(b) => b.schedule_redraw(),
             Self::Drm(b) => b.schedule_redraw(),
+        }
+    }
+
+    /// Re-apply touchpad/mouse settings to connected input devices (config reload).
+    pub fn apply_input_settings(&mut self, settings: &crate::input::mode::InputSettings) {
+        if let Self::Drm(b) = self {
+            b.apply_input_settings(settings);
         }
     }
 

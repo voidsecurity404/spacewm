@@ -44,9 +44,13 @@ pub struct Cli {
     #[arg(long, value_enum, default_value_t = RenderMode::Scene3D)]
     pub render: RenderMode,
 
-    /// Path to a config file (used from Stage 7).
+    /// Config file (default: $XDG_CONFIG_HOME/spacewm/config.toml; created if missing).
     #[arg(long)]
     pub config: Option<PathBuf>,
+
+    /// Check the config file, print any errors, exit with 0 (valid) or 1.
+    #[arg(long)]
+    pub check_config: bool,
 
     /// Load GLSL shaders from this directory instead of the built-in copies, and reload
     /// them with Mod+F5. For editing shaders without recompiling.
@@ -58,9 +62,10 @@ pub struct Cli {
     #[arg(long)]
     pub layout: Option<PathBuf>,
 
-    /// World generation seed (the same seed always gives the same island).
-    #[arg(long, default_value_t = crate::world::terrain::DEFAULT_SEED)]
-    pub world_seed: u64,
+    /// World generation seed (the same seed always gives the same island). Overrides
+    /// `general.world_seed` from the config.
+    #[arg(long)]
+    pub world_seed: Option<u64>,
 
     /// DRM backend: GPU to use (default: the boot GPU of the seat), e.g. /dev/dri/card1.
     #[arg(long)]
