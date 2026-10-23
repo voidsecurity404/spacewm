@@ -22,7 +22,7 @@
 use std::{
     collections::HashMap,
     os::fd::AsRawFd,
-    path::{Path, PathBuf},
+    path::Path,
     time::{Duration, Instant},
 };
 
@@ -52,7 +52,10 @@ use smithay::{
             timer::{TimeoutAction, Timer},
             LoopHandle, RegistrationToken,
         },
-        drm::control::{connector, crtc, Device as ControlDevice, ModeTypeFlags},
+        drm::{
+            control::{connector, crtc, Device as ControlDevice, ModeTypeFlags},
+            Device as _,
+        },
         input::{self as libinput, DeviceCapability, Libinput},
         rustix::fs::OFlags,
         wayland_server::{backend::GlobalId, DisplayHandle},
@@ -530,7 +533,7 @@ fn on_input(state: &mut SpaceState, mut event: InputEvent<LibinputInputBackend>)
     match &mut event {
         InputEvent::DeviceAdded { device } => configure_device(state, device),
         InputEvent::DeviceRemoved { device } => {
-            tracing::info!(name = device.name(), "input device removed");
+            tracing::info!(name = %device.name(), "input device removed");
             if let Backend::Drm(b) = &mut state.backend {
                 b.keyboards.retain(|k| k != device);
             }
@@ -555,7 +558,7 @@ fn configure_device(state: &mut SpaceState, device: &mut libinput::Device) {
     .filter(|(c, _)| device.has_capability(*c))
     .map(|(_, n)| *n)
     .collect();
-    tracing::info!(name = device.name(), caps = caps.join(","), "input device added");
+    tracing::info!(name = %device.name(), caps = caps.join(","), "input device added");
 
     if device.config_tap_finger_count() > 0 {
         let _ = device.config_tap_set_enabled(settings.touchpad_tap);

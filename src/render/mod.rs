@@ -258,3 +258,60 @@ pub fn send_frame_callbacks(
         });
     }
 }
+
+/// 2D windows of one output as render elements, front-most first (for backends that
+/// render element lists themselves, like DRM).
+pub fn space_elements<R>(
+    renderer: &mut R,
+    space: &Space<Window>,
+    output: &Output,
+    scale: Scale<f64>,
+) -> Vec<SpaceRenderElement<R>>
+where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Texture + Clone + Send + 'static,
+{
+    use smithay::backend::renderer::element::AsRenderElements;
+    let origin = space.output_geometry(output).map(|g| g.loc).unwrap_or_default();
+    let windows: Vec<Window> = space.elements().rev().cloned().collect();
+    windows
+        .iter()
+        .flat_map(|w| {
+            // The buffer origin: window position minus its geometry offset (CSD shadows).
+            let loc = space.element_location(w).unwrap_or_default() - w.geometry().loc - origin;
+            AsRenderElements::<R>::render_elements::<WaylandSurfaceRenderElement<R>>(
+                w,
+                renderer,
+                loc.to_physical_precise_round(scale),
+                scale,
+                1.0,
+            )
+        })
+        .map(SpaceRenderElement::Surface)
+        .collect()
+}
+
+/// Render `elements` into a fresh offscreen texture and read it back. Used for
+/// screenshots on DRM, where the scan-out buffer is not ours to read after queueing.
+pub fn capture_elements(
+    renderer: &mut smithay::backend::renderer::glow::GlowRenderer,
+    elements: &[SpaceRenderElement<smithay::backend::renderer::glow::GlowRenderer>],
+    size: smithay::utils::Size<i32, smithay::utils::Physical>,
+    scale: Scale<f64>,
+    clear: [f32; 4],
+) -> Result<screenshot::CapturedImage, String> {
+    use smithay::backend::{
+        allocator::Fourcc,
+        renderer::{gles::GlesTexture, Bind, Offscreen},
+    };
+    let mut texture: GlesTexture = renderer
+        .create_buffer(Fourcc::Abgr8888, (size.w, size.h).into())
+        .map_err(|e| e.to_string())?;
+    let mut tracker = OutputDamageTracker::new(size, scale, smithay::utils::Transform::Normal);
+    let pending = {
+        let mut fb = renderer.bind(&mut texture).map_err(|e| e.to_string())?;
+        tracker.render_output(renderer, &mut fb, 0, elements, clear).map_err(|e| format!("{e:?}"))?;
+        screenshot::start_capture(renderer, &fb, size, smithay::utils::Transform::Normal)?
+    };
+    screenshot::finish_capture(renderer, pending)
+}

@@ -76,6 +76,11 @@ pub struct Cli {
     #[arg(long)]
     pub drm_probe: bool,
 
+    /// DRM backend: don't export WAYLAND_DISPLAY to D-Bus/systemd --user. For test runs
+    /// next to another desktop of the same user, whose services must keep using it.
+    #[arg(long, hide = true)]
+    pub no_session_env: bool,
+
     /// DRM backend without input devices (testing on a virtual display).
     #[arg(long, hide = true)]
     pub drm_no_input: bool,

@@ -320,6 +320,11 @@ fn toggle_debug(state: &mut SpaceState) {
             .insert_source(Timer::from_duration(second), move |_, _, state| {
                 let camera = state.view.camera;
                 state.view.stats.report(&camera);
+                if let crate::backend::Backend::Drm(drm) = &mut state.backend {
+                    for (output, flips, missed, hz) in drm.take_stats() {
+                        tracing::info!(output, flips, missed, hz = format!("{hz:.2}"), "drm");
+                    }
+                }
                 TimeoutAction::ToDuration(second)
             })
             .ok();

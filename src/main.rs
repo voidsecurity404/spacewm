@@ -25,6 +25,7 @@ use smithay::{
     reexports::{
         calloop::{
             signals::{Signal, Signals},
+            timer::{TimeoutAction, Timer},
             EventLoop,
         },
         wayland_server::Display,
@@ -34,7 +35,16 @@ use smithay::{
 use crate::{backend::Backend, cli::Cli, state::SpaceState};
 
 fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
+    if cli.drm_probe {
+        // Read-only listing; needs no session, logging setup or event loop.
+        return backend::drm::probe();
+    }
+    if cli.drm_test {
+        // A smoke test of GPU + monitor: the bare world, no clients, quit after 10 s.
+        cli.backend = cli::BackendKind::Drm;
+        cli.spawn.clear();
+    }
     let log_path = logging::init(&cli.log_level).context("failed to init logging")?;
 
     tracing::info!(
@@ -98,6 +108,24 @@ fn main() -> anyhow::Result<()> {
             state.quit();
         })
         .map_err(|e| anyhow!("failed to register signal source: {}", e.error))?;
+
+    if state.cli.drm_test {
+        let after = std::time::Duration::from_secs(10);
+        loop_handle
+            .insert_source(Timer::from_duration(after), |_, _, state: &mut SpaceState| {
+                tracing::info!("--drm-test: 10 s passed, exiting");
+                state.quit();
+                TimeoutAction::Drop
+            })
+            .map_err(|e| anyhow!("failed to register test timer: {}", e.error))?;
+    }
+
+    if state.cli.backend == cli::BackendKind::Drm && !state.cli.no_session_env {
+        // On a real session we are the first program: tell D-Bus activated services
+        // (portals, notification daemons) and systemd user units where our Wayland socket
+        // is, or they would start without WAYLAND_DISPLAY and fail.
+        spawn::update_activation_environment();
+    }
 
     for command in state.cli.spawn.clone() {
         if let Err(err) = spawn::spawn(&command, &state.socket_name) {

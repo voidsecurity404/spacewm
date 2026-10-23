@@ -244,6 +244,16 @@ impl View3D {
     }
 }
 
+impl View3D {
+    /// The last rendered scene, stretched to an output of `size` (logical px).
+    pub fn scene_element_sized(
+        &self,
+        size: Size<i32, Logical>,
+    ) -> Option<TextureRenderElement<GlesTexture>> {
+        self.scene.as_ref()?.element_sized(Some(size))
+    }
+}
+
 /// Render the current cursor image into a small texture, hotspot at the center.
 /// Returns true if its content changed.
 fn update_cursor_texture(
