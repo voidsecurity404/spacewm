@@ -1,0 +1,52 @@
+[package]
+name = "spacewm"
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.99"
+description = "A 3D Wayland compositor: windows as panels in a voxel world"
+license = "MIT"
+
+[dependencies]
+# smithay from git main: the crates.io release lags behind and most examples
+# (smallvil, anvil, niri) track main.
+smithay = { git = "https://github.com/Smithay/smithay", default-features = false, features = [
+    "backend_winit",
+    "backend_drm",
+    "backend_gbm",
+    "backend_egl",
+    "backend_libinput",
+    "backend_session_libseat",
+    "backend_udev",
+    "renderer_gl",
+    "renderer_glow",
+    "wayland_frontend",
+    "desktop",
+    "xwayland",
+] }
+# We never `use calloop::` directly — code goes through `smithay::reexports::calloop`
+# so the versions can't drift apart. This line exists only to switch on the
+# `signals` feature (SIGINT/SIGTERM as an event source). Cargo merges features of
+# the same crate version, so smithay's calloop gets it too.
+calloop = { version = "0.14", features = ["signals"] }
+glam = "0.30"
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.9"
+directories = "6"
+
+[profile.dev]
+# 3D math and voxel meshing are painfully slow at opt-level 0.
+opt-level = 1
+
+[profile.dev.package."*"]
+# Dependencies are compiled once, so optimize them fully even in dev builds.
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+# Keep line tables so crash backtraces from a DRM session are readable.
+debug = 1
