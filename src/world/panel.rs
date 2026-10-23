@@ -40,6 +40,8 @@ pub struct Panel<W = Window> {
     pub content_dirty: bool,
     /// We don't know the app yet (no app_id): a saved placement may still be applied.
     pub placement_pending: bool,
+    /// X11 menus/tooltips (override-redirect windows) drawn into this panel's texture.
+    pub x11_children: Vec<crate::xwayland::X11Child>,
 }
 
 impl<W> Panel<W> {
@@ -56,6 +58,7 @@ impl<W> Panel<W> {
             visible: true,
             content_dirty: true,
             placement_pending: true,
+            x11_children: Vec::new(),
         }
     }
 

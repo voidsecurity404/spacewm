@@ -6,6 +6,7 @@
 //! embedded widgets); together they form a window's surface tree.
 
 use smithay::wayland::seat::WaylandFocus;
+use smithay::xwayland::XWaylandClientData;
 use smithay::{
     backend::renderer::utils::on_commit_buffer_handler,
     reexports::wayland_server::{
@@ -29,12 +30,16 @@ impl CompositorHandler for SpaceState {
     }
 
     fn client_compositor_state<'a>(&self, client: &'a Client) -> &'a CompositorClientState {
-        match client.get_data::<ClientState>() {
-            Some(data) => &data.compositor_state,
-            // Every client is inserted with a ClientState (socket.rs), so this cannot
-            // happen; a panic here would point at a bug in client insertion.
-            None => unreachable!("client without ClientState"),
+        if let Some(data) = client.get_data::<ClientState>() {
+            return &data.compositor_state;
         }
+        // The Xwayland server is inserted by smithay with its own client data.
+        if let Some(data) = client.get_data::<XWaylandClientData>() {
+            return &data.compositor_state;
+        }
+        // Every other client is inserted with a ClientState (socket.rs), so this cannot
+        // happen; a panic here would point at a bug in client insertion.
+        unreachable!("client without ClientState")
     }
 
     /// Runs every time a client commits a surface — i.e. finished a frame.

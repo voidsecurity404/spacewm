@@ -26,11 +26,15 @@ pub fn state_dir() -> anyhow::Result<PathBuf> {
 
 pub fn init(level: &str) -> anyhow::Result<PathBuf> {
     // RUST_LOG wins if present; otherwise our level for spacewm and only warnings
-    // from smithay (it is very chatty at info/debug).
+    // from smithay (it is very chatty at info/debug). Two smithay modules log an ERROR
+    // every time an Xwayland server ends, including when we stop an idle one on purpose;
+    // spacewm logs real Xwayland crashes itself ("Xwayland connection lost").
     let filter = match EnvFilter::try_from_default_env() {
         Ok(filter) => filter,
-        Err(_) => EnvFilter::try_new(format!("spacewm={level},smithay=warn"))
-            .with_context(|| format!("invalid log level '{level}'"))?,
+        Err(_) => EnvFilter::try_new(format!(
+            "spacewm={level},smithay=warn,smithay::utils::x11rb=off,smithay::xwayland::xserver=off"
+        ))
+        .with_context(|| format!("invalid log level '{level}'"))?,
     };
 
     let dir = state_dir()?;

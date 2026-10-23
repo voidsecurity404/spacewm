@@ -67,6 +67,14 @@ impl CursorThemeCache {
         }
     }
 
+    /// The default arrow as RGBA pixels, (width, height) and hotspot: the X11 root
+    /// window cursor.
+    pub fn default_image(&self) -> (Vec<u8>, (u32, u32), (u32, u32)) {
+        let index = frame_index(&self.fallback.images, self.size, 0);
+        let image = &self.fallback.images[index];
+        (image.pixels_rgba.clone(), (image.width, image.height), (image.xhot, image.yhot))
+    }
+
     /// The buffer and hotspot (in buffer pixels) to show for `icon` at `scale`.
     fn frame(
         &mut self,

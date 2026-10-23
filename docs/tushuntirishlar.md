@@ -191,3 +191,24 @@ rasm, oynalar va input qaytdi, Ctrl+Alt+F1, Mod+Enter va Ctrl+Alt+Backspace ishl
 2D rejim ham. Topilgan xato: libinput qurilmalarni ichki navbatga qo'yib fd'ni
 uyg'otmasdi — qurilmalar 3.5 s kechikib sozlanardi; endi navbatni darhol o'qiymiz.
 Sinalmaganlar: ikkinchi monitorni ulash (sizda yo'q edi), Firefox dmabuf, SDDM orqali kirish.
+
+## 7.1-bosqich: XWayland
+
+**XWayland nima.** Haqiqiy X server, lekin o'zi Wayland mijozi: har bir X11 oynasini
+o'zining wl_surface'iga chizadi. Bizning X11 oyna menejerimiz (smithay `X11Wm`, oddiy X
+ulanishi) qaysi X oynasi qaysi surface ekanini aytadi — shunda X11 oynalar ham oddiy
+`Window` va panelga aylanadi. Kechiktirilgan ishga tushirish: spacewm `/tmp/.X11-unix/X1`
+soketini o'zi ochadi; birinchi X dastur ulanganda Xwayland'ni shu soketlar bilan
+(`-listenfd`) ishga tushiradi, kutib turgan ulanish yo'qolmaydi. 30 s davomida birorta X
+oynasi qolmasa, server to'xtatiladi (~30 MB qaytadi); crash ham xuddi shu yo'l.
+
+**Nega override-redirect oynalar alohida.** X11'da menyu, tooltip, combo ro'yxati WM'dan
+ruxsat so'ramaydi: o'zi *root* (global) koordinatada paydo bo'ladi va sichqonchani ushlaydi.
+Ilova bu joyni "mening oynam qayerda" degan bilimidan hisoblaydi. 3D'da "ekrandagi joy"
+yo'q, shuning uchun har X oynasiga 2D'da qat'iy joy beramiz va aynan shunga configure
+qilamiz: menyu joyi − oyna joyi = menyuning panel ichidagi joyi. Ular alohida panel emas,
+ota-panel teksturasiga chiziladi va sichqoncha ular ustida bo'lsa input ularga boradi.
+
+**Topilgan xatolar:** (1) signalfd faqat signal *hamma* thread'da bloklansa ishlaydi —
+mesher thread'i bloklamagani uchun SIGTERM spacewm'ni tozalamasdan o'ldirar edi; endi
+main() boshida bloklanadi. (2) smithay X clipboard egasini o'zgartirgach flush qilmaydi.

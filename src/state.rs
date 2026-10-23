@@ -44,6 +44,7 @@ use smithay::{
         },
         shell::xdg::XdgShellState,
         shm::ShmState,
+        xwayland_shell::XWaylandShellState,
     },
 };
 
@@ -103,6 +104,11 @@ pub struct SpaceState {
     /// zwlr_data_control: lets clipboard tools (wl-copy, wl-paste, clipboard managers)
     /// read and set the clipboard without having a focused window.
     pub data_control_state: DataControlState,
+    /// xwayland_shell_v1: how Xwayland tells us which wl_surface shows which X11 window.
+    /// Only the Xwayland client can see this global.
+    pub xwayland_shell_state: XWaylandShellState,
+    /// Our X11 display and, while X apps run, the Xwayland server (None: X11 disabled).
+    pub xwayland: Option<crate::xwayland::Xwayland>,
 
     /// Menus and tooltips. Popups belong to a parent surface, not to the window list.
     pub popups: PopupManager,
@@ -178,6 +184,7 @@ impl SpaceState {
         let compositor_state = CompositorState::new::<Self>(&dh);
         tracing::debug!("global: wl_compositor, wl_subcompositor");
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
+        let xwayland_shell_state = XWaylandShellState::new::<Self>(&dh);
         tracing::debug!("global: xdg_wm_base");
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         tracing::debug!("global: wl_shm");
@@ -243,6 +250,8 @@ impl SpaceState {
             socket_name: OsString::new(),
             compositor_state,
             xdg_shell_state,
+            xwayland_shell_state,
+            xwayland: None,
             shm_state,
             output_manager_state,
             seat_state,
