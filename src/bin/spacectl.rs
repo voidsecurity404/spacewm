@@ -51,6 +51,21 @@ enum Command {
     },
     /// Quit spacewm.
     Quit,
+    /// Move the camera to X Y Z (metres).
+    Teleport {
+        #[arg(allow_hyphen_values = true)]
+        x: f32,
+        #[arg(allow_hyphen_values = true)]
+        y: f32,
+        #[arg(allow_hyphen_values = true)]
+        z: f32,
+        /// Look direction around Y in degrees (0 = toward -Z, 90 = toward +X).
+        #[arg(long, allow_hyphen_values = true)]
+        yaw: Option<f32>,
+        /// Up/down in degrees (-89..89).
+        #[arg(long, allow_hyphen_values = true)]
+        pitch: Option<f32>,
+    },
     /// Print events as they happen.
     Watch,
     /// Synthetic input (needs spacewm --allow-input-injection).
@@ -164,6 +179,17 @@ fn to_request(command: Command) -> Request {
             }
         }
         Command::Quit => Request::Quit,
+        Command::Teleport {
+            x,
+            y,
+            z,
+            yaw,
+            pitch,
+        } => Request::Teleport {
+            position: [x, y, z],
+            yaw_deg: yaw,
+            pitch_deg: pitch,
+        },
         Command::Watch => Request::Subscribe {
             events: vec![
                 EventKind::PanelOpened,
@@ -209,17 +235,21 @@ fn print_human(response: &Response) {
         } => println!("{path} ({width}x{height})"),
         Response::Panels { panels } => {
             println!(
-                "{:>4}  {:<5}  {:<3}  {:<22}  {:<11}  TITLE",
-                "ID", "KIND", "FOC", "APP_ID", "SIZE"
+                "{:>4}  {:<7}  {:<3}  {:<22}  {:<11}  {:<20}  TITLE",
+                "ID", "KIND", "FOC", "APP_ID", "SIZE", "POSITION"
             );
             for p in panels {
                 println!(
-                    "{:>4}  {:<5}  {:<3}  {:<22}  {:<11}  {}",
+                    "{:>4}  {:<7}  {:<3}  {:<22}  {:<11}  {:<20}  {}",
                     p.id,
                     p.kind,
                     if p.focused { "*" } else { "" },
                     p.app_id.as_deref().unwrap_or("-"),
                     format!("{}x{}", p.size_px[0], p.size_px[1]),
+                    format!(
+                        "{:.2} {:.2} {:.2}",
+                        p.position[0], p.position[1], p.position[2]
+                    ),
                     p.title.as_deref().unwrap_or("")
                 );
             }

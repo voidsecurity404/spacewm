@@ -6,6 +6,7 @@
 pub mod camera;
 pub mod cursor;
 pub mod gl;
+pub mod panel_texture;
 pub mod scene;
 pub mod screenshot;
 pub mod view;

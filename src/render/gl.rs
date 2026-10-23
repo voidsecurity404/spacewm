@@ -153,7 +153,6 @@ impl Program {
         let loc = self.uniform_location(gl, name);
         unsafe { gl.uniform_3_f32(loc.as_ref(), v.x, v.y, v.z) };
     }
-    #[allow(dead_code)] // first used by the panel shader (Stage 3)
     pub fn set_vec4(&mut self, gl: &Gl, name: &str, v: Vec4) {
         let loc = self.uniform_location(gl, name);
         unsafe { gl.uniform_4_f32(loc.as_ref(), v.x, v.y, v.z, v.w) };
@@ -162,7 +161,6 @@ impl Program {
         let loc = self.uniform_location(gl, name);
         unsafe { gl.uniform_1_f32(loc.as_ref(), v) };
     }
-    #[allow(dead_code)] // first used by the panel shader (Stage 3)
     pub fn set_i32(&mut self, gl: &Gl, name: &str, v: i32) {
         let loc = self.uniform_location(gl, name);
         unsafe { gl.uniform_1_i32(loc.as_ref(), v) };

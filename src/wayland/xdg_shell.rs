@@ -18,7 +18,7 @@ use smithay::{
         wayland_protocols::xdg::shell::server::xdg_toplevel,
         wayland_server::protocol::{wl_output::WlOutput, wl_seat, wl_surface::WlSurface},
     },
-    utils::{Logical, Point, Serial, SERIAL_COUNTER},
+    utils::{Logical, Point, Rectangle, Serial, SERIAL_COUNTER},
     wayland::{
         compositor::with_states,
         shell::xdg::{
@@ -28,7 +28,10 @@ use smithay::{
     },
 };
 
-use crate::{focus::KeyboardFocusTarget, ipc::proto::Event, state::SpaceState};
+use crate::{cli::RenderMode, focus::KeyboardFocusTarget, ipc::proto::Event, state::SpaceState};
+
+/// 3D mode: popups may extend this far (px) beyond their window before being moved back.
+const POPUP_MARGIN_3D: i32 = 400;
 
 /// Size every new window is offered before its first configure.
 pub const DEFAULT_WINDOW_SIZE: (i32, i32) = (1000, 700);
@@ -50,10 +53,28 @@ impl XdgShellHandler for SpaceState {
         self.space.map_element(window.clone(), position, false);
         let id = crate::state::window_id(&window);
         tracing::info!(id, x = position.x, y = position.y, "new toplevel");
+        // In 3D the window becomes a panel in front of the camera.
+        let distance = self.spawn_distance(DEFAULT_WINDOW_SIZE);
+        self.world.add_window(
+            id,
+            window.clone(),
+            DEFAULT_WINDOW_SIZE,
+            &self.view.camera,
+            distance,
+        );
+        self.view.dirty = true;
         crate::ipc::broadcast(self, Event::PanelOpened { id, app_id: None });
 
         // New windows get keyboard focus, like on any desktop.
         self.focus_window(Some(&window), SERIAL_COUNTER.next_serial());
+    }
+
+    fn popup_destroyed(&mut self, surface: PopupSurface) {
+        // The menu disappears from its parent's panel texture.
+        if let Some(parent) = surface.get_parent_surface() {
+            self.mark_surface_dirty(&parent);
+        }
+        self.queue_redraw();
     }
 
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
@@ -190,6 +211,8 @@ impl XdgShellHandler for SpaceState {
         let destroyed = self.window_for_surface(surface.wl_surface());
         if let Some(window) = &destroyed {
             self.space.unmap_elem(window);
+            self.world.remove_window(window);
+            self.view.dirty = true;
             let id = crate::state::window_id(window);
             crate::ipc::broadcast(self, Event::PanelClosed { id });
         }
@@ -263,16 +286,33 @@ impl SpaceState {
         let Some(window) = self.window_for_surface(&root) else {
             return;
         };
-        let Some(output_geo) = self.primary_output_geometry() else {
-            return;
+        let toplevel_coords = get_popup_toplevel_coords(&PopupKind::Xdg(popup.clone()));
+        // The target is the area the popup must stay inside, relative to the popup's parent.
+        let mut target = if self.render_mode == RenderMode::Scene3D {
+            // In 3D there is no screen edge to respect: the popup is drawn into its
+            // window's panel, which grows to include it. Keep it near the window (a
+            // generous margin around the window geometry) so menus don't flip for no reason.
+            let geo = window.geometry();
+            Rectangle::new(
+                (-POPUP_MARGIN_3D, -POPUP_MARGIN_3D).into(),
+                (
+                    geo.size.w + 2 * POPUP_MARGIN_3D,
+                    geo.size.h + 2 * POPUP_MARGIN_3D,
+                )
+                    .into(),
+            )
+        } else {
+            let Some(output_geo) = self.primary_output_geometry() else {
+                return;
+            };
+            let Some(window_geo) = self.space.element_geometry(&window) else {
+                return;
+            };
+            let mut t = output_geo;
+            t.loc -= window_geo.loc;
+            t
         };
-        let Some(window_geo) = self.space.element_geometry(&window) else {
-            return;
-        };
-        // The target rectangle is relative to the popup's parent window geometry.
-        let mut target = output_geo;
-        target.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(popup.clone()));
-        target.loc -= window_geo.loc;
+        target.loc -= toplevel_coords;
         popup.with_pending_state(|state| {
             state.geometry = state.positioner.get_unconstrained_geometry(target);
         });

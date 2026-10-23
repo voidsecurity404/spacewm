@@ -19,7 +19,7 @@
 
 use std::{borrow::Borrow, path::PathBuf};
 
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Vec2, Vec3, Vec4};
 use smithay::{
     backend::renderer::{
         element::{
@@ -35,7 +35,7 @@ use smithay::{
 
 use super::{
     camera::Camera,
-    gl::{build_program, gl_check, ColorVertex, Gl, Mesh, Program},
+    gl::{build_program, gl_check, Attrib, ColorVertex, Gl, Mesh, Program, Vertex},
 };
 use crate::error::SpaceError;
 
@@ -59,6 +59,46 @@ const BASIC: ShaderSource = ShaderSource {
     frag: include_str!("shaders/basic.frag"),
 };
 
+const PANEL: ShaderSource = ShaderSource {
+    name: "panel",
+    vert: include_str!("shaders/panel.vert"),
+    frag: include_str!("shaders/panel.frag"),
+};
+
+/// Vertex of the unit panel quad.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct PanelVertex {
+    pos: [f32; 2],
+}
+
+impl Vertex for PanelVertex {
+    fn attribs() -> &'static [Attrib] {
+        &[Attrib {
+            location: 0,
+            components: 2,
+            ty: glow::FLOAT,
+            normalized: false,
+            offset: 0,
+        }]
+    }
+}
+
+/// Everything needed to draw one panel this frame.
+pub struct PanelDraw {
+    pub texture: glow::Texture,
+    /// Unit quad → the window bbox in the world.
+    pub model: Mat4,
+    pub tex_size: Vec2,
+    /// Window geometry inside the texture, x0 y0 x1 y1 in px.
+    pub geo_rect: Vec4,
+    pub opacity: f32,
+    pub border_px: f32,
+    pub border_color: Vec4,
+    /// Opaque panels write depth; translucent ones (drawn last, far to near) don't.
+    pub opaque: bool,
+}
+
 /// Offscreen targets, recreated when the output size changes.
 struct SceneTargets {
     size: Size<i32, Physical>,
@@ -74,8 +114,10 @@ struct SceneTargets {
 
 pub struct SceneRenderer {
     basic: Program,
+    panel: Program,
     floor: Mesh,
     axes: Mesh,
+    quad: Mesh,
     targets: Option<SceneTargets>,
     /// MSAA sample count (0 = off).
     samples: i32,
@@ -125,38 +167,60 @@ fn axes_mesh(gl: &Gl) -> Result<Mesh, SpaceError> {
     Mesh::new(gl, &vertices, &[0, 1, 2, 3, 4, 5], glow::LINES)
 }
 
+fn quad_mesh(gl: &Gl) -> Result<Mesh, SpaceError> {
+    let v = |x, y| PanelVertex { pos: [x, y] };
+    // Counter-clockwise seen from +Z: the panel's front face.
+    let vertices = [v(-0.5, -0.5), v(0.5, -0.5), v(0.5, 0.5), v(-0.5, 0.5)];
+    Mesh::new(gl, &vertices, &[0, 1, 2, 0, 2, 3], glow::TRIANGLES)
+}
+
 fn load_program(gl: &Gl, src: &ShaderSource, dir: Option<&PathBuf>) -> Result<Program, SpaceError> {
-    match dir {
-        Some(dir) => {
-            let read = |ext: &str| {
-                let path = dir.join(format!("{}.{ext}", src.name));
-                std::fs::read_to_string(&path)
-                    .map_err(|e| SpaceError::Render(format!("{}: {e}", path.display())))
-            };
-            build_program(gl, src.name, &read("vert")?, &read("frag")?)
+    let Some(dir) = dir else {
+        return build_program(gl, src.name, src.vert, src.frag);
+    };
+    // A file missing from --shader-dir falls back to the built-in copy, so you can put
+    // just the shader you are editing there.
+    let read = |ext: &str, builtin: &'static str| -> Result<String, SpaceError> {
+        let path = dir.join(format!("{}.{ext}", src.name));
+        match std::fs::read_to_string(&path) {
+            Ok(text) => Ok(text),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                tracing::debug!(path = %path.display(), "not in --shader-dir, using built-in");
+                Ok(builtin.to_string())
+            }
+            Err(e) => Err(SpaceError::Render(format!("{}: {e}", path.display()))),
         }
-        None => build_program(gl, src.name, src.vert, src.frag),
-    }
+    };
+    build_program(
+        gl,
+        src.name,
+        &read("vert", src.vert)?,
+        &read("frag", src.frag)?,
+    )
 }
 
 impl SceneRenderer {
     pub fn new(renderer: &mut GlowRenderer, shader_dir: Option<PathBuf>) -> Result<Self, SpaceError> {
         let gl_result = renderer.with_context(|gl| -> Result<_, SpaceError> {
             let basic = load_program(gl, &BASIC, shader_dir.as_ref())?;
+            let panel = load_program(gl, &PANEL, shader_dir.as_ref())?;
             let floor = floor_mesh(gl)?;
             let axes = axes_mesh(gl)?;
+            let quad = quad_mesh(gl)?;
             // How many samples the driver supports for MSAA renderbuffers.
             let max_samples = unsafe { gl.get_parameter_i32(glow::MAX_SAMPLES) };
-            Ok((basic, floor, axes, max_samples.min(4)))
+            Ok((basic, panel, floor, axes, quad, max_samples.min(4)))
         });
-        let (basic, floor, axes, samples) =
+        let (basic, panel, floor, axes, quad, samples) =
             gl_result.map_err(|e| SpaceError::Render(format!("GL context: {e}")))??;
         let samples = if samples >= 2 { samples } else { 0 };
         tracing::info!(msaa = samples, "3D scene renderer ready");
         Ok(Self {
             basic,
+            panel,
             floor,
             axes,
+            quad,
             targets: None,
             samples,
             shader_dir,
@@ -169,15 +233,18 @@ impl SceneRenderer {
             tracing::info!("shader reload needs --shader-dir");
             return;
         };
-        let result = renderer.with_context(|gl| load_program(gl, &BASIC, Some(&dir)));
-        match result {
-            Ok(Ok(program)) => {
-                let old = std::mem::replace(&mut self.basic, program);
-                let _ = renderer.with_context(|gl| old.destroy(gl));
-                tracing::info!(dir = %dir.display(), "shaders reloaded");
+        for (src, slot) in [(&BASIC, &mut self.basic), (&PANEL, &mut self.panel)] {
+            match renderer.with_context(|gl| load_program(gl, src, Some(&dir))) {
+                Ok(Ok(program)) => {
+                    let old = std::mem::replace(slot, program);
+                    let _ = renderer.with_context(|gl| old.destroy(gl));
+                    tracing::info!(dir = %dir.display(), shader = src.name, "shaders reloaded");
+                }
+                Ok(Err(err)) => {
+                    tracing::error!("shader reload failed, keeping old program: {err}")
+                }
+                Err(err) => tracing::error!("shader reload: {err}"),
             }
-            Ok(Err(err)) => tracing::error!("shader reload failed, keeping old program: {err}"),
-            Err(err) => tracing::error!("shader reload: {err}"),
         }
     }
 
@@ -317,13 +384,15 @@ impl SceneRenderer {
         renderer: &mut GlowRenderer,
         camera: &Camera,
         size: Size<i32, Physical>,
+        panels: &[PanelDraw],
     ) -> Result<(), SpaceError> {
         self.ensure_targets(renderer, size)?;
         let Some(targets) = self.targets.as_mut() else {
             return Ok(());
         };
         let basic = &mut self.basic;
-        let (floor, axes) = (&self.floor, &self.axes);
+        let panel_program = &mut self.panel;
+        let (floor, axes, quad) = (&self.floor, &self.axes, &self.quad);
         let (w, h) = (size.w, size.h);
         // Flip Y (see module docs) so the texture comes out top-row-first.
         let proj = Mat4::from_scale(Vec3::new(1.0, -1.0, 1.0)) * camera.projection_matrix();
@@ -361,6 +430,16 @@ impl SceneRenderer {
                 basic.set_f32(gl, "u_fog_end", FOG_END);
                 floor.draw(gl);
                 axes.draw(gl);
+
+                draw_panels(
+                    gl,
+                    panel_program,
+                    quad,
+                    panels,
+                    &view,
+                    &proj,
+                    camera.position,
+                );
 
                 if let Some((msaa_fbo, _, _)) = msaa {
                     // Resolve: average the samples of each pixel into the texture.
@@ -414,10 +493,63 @@ impl SceneRenderer {
         self.destroy_targets(renderer);
         let _ = renderer.with_context(|gl| {
             self.basic.destroy(gl);
+            self.panel.destroy(gl);
             self.floor.destroy(gl);
             self.axes.destroy(gl);
+            self.quad.destroy(gl);
         });
     }
+}
+
+/// Panels are flat and visible from both sides: no face culling (the shader darkens
+/// the back). Premultiplied alpha blending: out = src + dst·(1 − src.a).
+fn draw_panels(
+    gl: &Gl,
+    program: &mut Program,
+    quad: &Mesh,
+    panels: &[PanelDraw],
+    view: &Mat4,
+    proj: &Mat4,
+    camera_pos: Vec3,
+) {
+    if panels.is_empty() {
+        return;
+    }
+    unsafe {
+        gl.disable(glow::CULL_FACE);
+        gl.enable(glow::BLEND);
+        gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
+        gl.active_texture(glow::TEXTURE0);
+    }
+    program.bind(gl);
+    program.set_mat4(gl, "u_view", view);
+    program.set_mat4(gl, "u_proj", proj);
+    program.set_vec3(gl, "u_camera_pos", camera_pos);
+    program.set_vec3(gl, "u_fog_color", Vec3::from(SKY_COLOR));
+    program.set_f32(gl, "u_fog_start", FOG_START);
+    program.set_f32(gl, "u_fog_end", FOG_END);
+    program.set_i32(gl, "u_tex", 0);
+    for p in panels {
+        unsafe {
+            gl.depth_mask(p.opaque);
+            gl.bind_texture(glow::TEXTURE_2D, Some(p.texture));
+        }
+        program.set_mat4(gl, "u_model", &p.model);
+        program.set_f32(gl, "u_opacity", p.opacity);
+        unsafe {
+            let loc = program.uniform_location(gl, "u_tex_size");
+            gl.uniform_2_f32(loc.as_ref(), p.tex_size.x, p.tex_size.y);
+        }
+        program.set_vec4(gl, "u_geo_rect", p.geo_rect);
+        program.set_f32(gl, "u_border_px", p.border_px);
+        program.set_vec4(gl, "u_border_color", p.border_color);
+        quad.draw(gl);
+    }
+    unsafe {
+        gl.depth_mask(true);
+        gl.bind_texture(glow::TEXTURE_2D, None);
+    }
+    gl_check(gl, "panels");
 }
 
 fn check_complete(gl: &Gl, label: &str) -> Result<(), SpaceError> {

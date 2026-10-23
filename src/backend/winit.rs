@@ -215,8 +215,11 @@ fn render(state: &mut SpaceState) {
     let frame_start = Instant::now();
     // 3D: advance the camera and re-render the scene texture first. The scene pass uses
     // our own framebuffers, so it must run before the output framebuffer is bound.
-    let mut prepared = (state.render_mode == RenderMode::Scene3D)
-        .then(|| state.view.prepare(b.graphics.renderer(), size));
+    let mut prepared = (state.render_mode == RenderMode::Scene3D).then(|| {
+        state
+            .view
+            .prepare(b.graphics.renderer(), size, &mut state.world)
+    });
 
     let (renderer, mut framebuffer) = match b.graphics.bind() {
         Ok(bound) => bound,

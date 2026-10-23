@@ -123,6 +123,8 @@ pub struct SpaceState {
     pub render_mode: RenderMode,
     /// Camera, scene renderer and stats for the 3D view.
     pub view: View3D,
+    /// Windows as panels in 3D space.
+    pub world: crate::world::World,
     pub debug_timer: Option<smithay::reexports::calloop::RegistrationToken>,
 
     /// Input bookkeeping: suppressed key releases, modifier choice, etc.
@@ -216,6 +218,7 @@ impl SpaceState {
             dnd_icon: None,
             render_mode,
             view,
+            world: crate::world::World::default(),
             debug_timer: None,
             input: InputState::default(),
             ipc: None,
@@ -246,6 +249,34 @@ impl SpaceState {
             .elements()
             .find(|w| w.wl_surface().as_deref() == Some(&root))
             .cloned()
+    }
+
+    /// A client committed `surface`: flag the panel showing it so its texture is redrawn.
+    /// Works for subsurfaces (walk up to the toplevel) and popups (walk to their parent).
+    pub fn mark_surface_dirty(&mut self, surface: &WlSurface) {
+        let mut root = surface.clone();
+        while let Some(parent) = get_parent(&root) {
+            root = parent;
+        }
+        if let Some(popup) = self.popups.find_popup(&root) {
+            if let Ok(toplevel) = smithay::desktop::find_popup_root_surface(&popup) {
+                root = toplevel;
+            }
+        }
+        if let Some(panel) = self.world.panel_for_surface_mut(&root) {
+            panel.content_dirty = true;
+        }
+    }
+
+    /// How far in front of the camera a new window of `size_px` appears.
+    pub fn spawn_distance(&self, size_px: (i32, i32)) -> f32 {
+        let output = self
+            .primary_output_geometry()
+            .map(|g| (g.size.w, g.size.h))
+            .unwrap_or((1920, 1080));
+        let ppu = crate::world::panel::DEFAULT_PIXELS_PER_UNIT;
+        let size_m = glam::Vec2::new(size_px.0 as f32, size_px.1 as f32) / ppu;
+        crate::world::spawn_distance(size_m, output, ppu, self.view.camera.fov_y_deg)
     }
 
     pub fn window_by_id(&self, id: u64) -> Option<Window> {

@@ -61,6 +61,7 @@ impl CompositorHandler for SpaceState {
         }
 
         crate::wayland::xdg_shell::handle_commit(self, surface);
+        self.mark_surface_dirty(surface);
         self.queue_redraw();
     }
 }

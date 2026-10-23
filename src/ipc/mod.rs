@@ -429,6 +429,29 @@ fn handle_request(state: &mut SpaceState, id: ConnectionId, request: Request) ->
             state.quit();
             Response::Ok
         }
+        Request::Teleport {
+            position,
+            yaw_deg,
+            pitch_deg,
+        } => {
+            let mut values: Vec<f64> = position.iter().map(|&v| v as f64).collect();
+            values.extend(yaw_deg.map(|v| v as f64));
+            values.extend(pitch_deg.map(|v| v as f64));
+            if let Err(e) = finite(&values) {
+                return Some(e);
+            }
+            let camera = &mut state.view.camera;
+            camera.position = glam::Vec3::from(position);
+            if let Some(yaw) = yaw_deg {
+                camera.yaw = yaw.to_radians().rem_euclid(std::f32::consts::TAU);
+            }
+            if let Some(pitch) = pitch_deg {
+                camera.pitch = pitch.clamp(-89.0, 89.0).to_radians();
+            }
+            state.view.dirty = true;
+            state.queue_redraw();
+            Response::Ok
+        }
         Request::Subscribe { events } => {
             if let Some(conn) = state
                 .ipc
@@ -513,13 +536,28 @@ fn list_panels(state: &SpaceState) -> Vec<PanelInfo> {
                 ),
                 _ => (None, None),
             };
-            let loc = state.space.element_location(window).unwrap_or_default();
             let size = window.geometry().size;
+            // 3D position of the panel (metres); 2D-only windows fall back to their place
+            // in the 2D space.
+            let (position, yaw_deg) = match state.world.panel_for_window(window) {
+                Some(p) => {
+                    let n = p.normal();
+                    (
+                        [p.position.x as f64, p.position.y as f64, p.position.z as f64],
+                        (n.x as f64).atan2(n.z as f64).to_degrees(),
+                    )
+                }
+                None => {
+                    let loc = state.space.element_location(window).unwrap_or_default();
+                    ([loc.x as f64, loc.y as f64, 0.0], 0.0)
+                }
+            };
             PanelInfo {
                 id: crate::state::window_id(window),
                 app_id,
                 title,
-                position: [loc.x as f64, loc.y as f64, 0.0],
+                position,
+                yaw_deg,
                 size_px: [size.w, size.h],
                 focused: matches!(&focused, Some(crate::focus::KeyboardFocusTarget::Window(w)) if w == window),
                 kind: if window.x11_surface().is_some() { "x11" } else { "wayland" }.into(),

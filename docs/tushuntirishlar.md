@@ -66,3 +66,32 @@ depth) chiziladi, keyin smithay uni oddiy textura sifatida kursor bilan birga ek
 chiqaradi. Shuning uchun depth buffer har backend'da bor, winit'ning ag'darilgan surface'i
 va kelajakdagi aylantirilgan monitorlarni smithay o'zi to'g'rilaydi, damage tracking ishlaydi:
 kamera qimirlamasa sahna umuman qayta chizilmaydi.
+
+## 3-bosqich
+
+**shm va dmabuf bufferlar qanday qilib GlesTexture bo'ladi?**
+`shm`: klient CPU xotirasida chizadi va memfd'ni ulashadi. smithay surface'ni birinchi
+chizishda piksellarni `glTexImage2D`/`glTexSubImage2D` bilan GPU texturasiga yuklaydi,
+keyingi commit'larda faqat damage qilingan qismlarni yuklaydi. `dmabuf`: klient allaqachon
+GPU xotirasida chizgan. smithay uni EGLImage sifatida "o'raydi" va textura shu xotiraning
+o'ziga qaraydi, nusxa ko'chirilmaydi. Ikkala holatda textura surface'ning
+`RendererSurfaceState`ida keshlanadi.
+
+**Nega har oyna uchun alohida offscreen textura?** Oyna bitta surface emas, daraxt:
+toplevel + subsurface'lar (video, embed qilingan EGL) + popuplar. Ularning har birida o'z
+texturasi, siljishi, viewporter crop/scale va buffer transform bor. smithay'ning oddiy 2D
+renderer'i bularning hammasini biladi, shuning uchun biz daraxtni bitta panel texturasiga
+shu renderer bilan chizdiramiz, 3D shader esa faqat shu bitta texturani namuna qiladi.
+Qo'shimcha foyda: mipmap'lar (uzoqdagi matn "jimirlamaydi") va popuplar bbox ichida
+kesilmaydi.
+
+**Damage tracking bu yerda nimani tejaydi?** Har panelning o'z damage tracker'i bor va
+textura avvalgi tarkibini saqlaydi (age = 1). Klient commit qilmasa, panel umuman qayta
+chizilmaydi. Commit qilsa, faqat o'zgargan to'rtburchaklar qayta chiziladi. Bo'sh terminal
+sekundiga 0 marta qayta chiziladi (test buni tekshiradi). Sahna ham faqat biror panel
+texturasi yoki kamera o'zgarganda qayta chiziladi.
+
+**Spec'dan ongli farq:** yangi panel 2 m emas, "1:1 piksel" masofasida paydo bo'ladi:
+`d = H / (2·800·tan(37.5°))`, 1080p'da ≈0.88 m. Agar panel ekranning 85 foizidan
+kattaroq bo'lib qolsa, biroz uzoqroqqa qo'yiladi. 2 m'da 1000 px'lik oyna 1080p ekranda
+~440 px bo'lib, matn o'qib bo'lmas edi, bu esa "matn aniq ko'rinsin" talabiga zid.

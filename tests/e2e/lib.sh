@@ -63,3 +63,22 @@ fail() { echo "FAIL: $*" >&2; space_stop || true; exit 1; }
 pass() { echo "ok - $*"; }
 
 trap 'space_stop >/dev/null 2>&1 || true' EXIT
+
+# Put the camera DIST metres in front of panel ID (matched by id or app_id substring),
+# looking straight at it.
+face_panel() {
+    local sel=$1 dist=${2:-0.9}
+    local args
+    args=$(kc --json list | python3 -c "
+import json, math, sys
+sel, dist = sys.argv[1], float(sys.argv[2])
+ps = json.load(sys.stdin)['panels']
+p = [p for p in ps if str(p['id']) == sel or sel in (p['app_id'] or '')][0]
+y = math.radians(p['yaw_deg'])
+x, py, z = p['position']
+# Front normal is (sin yaw, 0, cos yaw); the camera looks back along -normal: camera yaw = -panel yaw.
+print(x + math.sin(y) * dist, py, z + math.cos(y) * dist, -p['yaw_deg'])
+" "$sel" "$dist")
+    read -r cx cy cz cyaw <<<"$args"
+    kc teleport "$cx" "$cy" "$cz" --yaw "$cyaw" --pitch 0
+}

@@ -28,6 +28,14 @@ pub enum Request {
         force: bool,
     },
     Quit,
+    /// Move the camera (metres); optionally set where it looks (degrees).
+    Teleport {
+        position: [f32; 3],
+        #[serde(default)]
+        yaw_deg: Option<f32>,
+        #[serde(default)]
+        pitch_deg: Option<f32>,
+    },
     /// Turn this connection into an event stream.
     Subscribe {
         events: Vec<EventKind>,
@@ -128,6 +136,9 @@ pub struct PanelInfo {
     pub title: Option<String>,
     /// World position in metres (2D mode: output pixels, z = 0).
     pub position: [f64; 3],
+    /// Panel rotation around Y in degrees; its front faces (sin yaw, 0, cos yaw).
+    #[serde(default)]
+    pub yaw_deg: f64,
     pub size_px: [i32; 2],
     pub focused: bool,
     /// "wayland" or "x11".
