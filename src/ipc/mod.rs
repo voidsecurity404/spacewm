@@ -547,6 +547,11 @@ fn list_panels(state: &SpaceState) -> Vec<PanelInfo> {
     state
         .space
         .elements()
+        // X11 menus/tooltips live inside their parent's panel, they are not windows.
+        .filter(|w| {
+            state.world.panel_for_window(w).is_some()
+                || !w.x11_surface().is_some_and(|x| x.is_override_redirect())
+        })
         .map(|window| {
             let surface = window.wl_surface();
             let (app_id, title) = match (window.x11_surface(), surface.as_deref()) {

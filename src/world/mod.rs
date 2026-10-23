@@ -121,7 +121,10 @@ impl<W: PartialEq> World<W> {
 impl World<Window> {
     /// The panel whose window's surface tree contains `root` (a toplevel surface).
     pub fn panel_for_surface_mut(&mut self, root: &WlSurface) -> Option<&mut Panel> {
-        self.panels.iter_mut().find(|p| p.window.wl_surface().as_deref() == Some(root))
+        self.panels.iter_mut().find(|p| {
+            p.window.wl_surface().as_deref() == Some(root)
+                || p.x11_children.iter().any(|c| c.surface.wl_surface().as_ref() == Some(root))
+        })
     }
 }
 

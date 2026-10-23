@@ -4,9 +4,26 @@ use std::{
     ffi::OsStr,
     os::unix::process::CommandExt,
     process::{Command, Stdio},
+    sync::atomic::{AtomicU32, Ordering},
 };
 
 use crate::state::SpaceState;
+
+/// Our X11 display number + 1 (0: no X11). Process-wide like an environment variable,
+/// but without the unsafety of changing our own environment once threads exist.
+static X_DISPLAY: AtomicU32 = AtomicU32::new(0);
+
+/// Children started from now on get DISPLAY=:n (our lazy XWayland display).
+pub fn set_x_display(display: Option<u32>) {
+    X_DISPLAY.store(display.map_or(0, |d| d + 1), Ordering::Relaxed);
+}
+
+fn x_display() -> Option<String> {
+    match X_DISPLAY.load(Ordering::Relaxed) {
+        0 => None,
+        n => Some(format!(":{}", n - 1)),
+    }
+}
 
 /// Run `cmd` (split like a shell would, but without a shell) as a client of our socket.
 /// Errors are logged, never fatal.
@@ -17,11 +34,14 @@ pub fn spawn(cmd: &str, socket: &OsStr) -> Result<u32, String> {
     command
         .args(rest)
         .env("WAYLAND_DISPLAY", socket)
-        // No X11 until XWayland exists (Stage 7.1): don't let apps reach the host X server.
-        .env_remove("DISPLAY")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    // X11 apps reach OUR XWayland; without it they must not reach a host X server.
+    match x_display() {
+        Some(display) => command.env("DISPLAY", display),
+        None => command.env_remove("DISPLAY"),
+    };
     // SAFETY: only async-signal-safe libc calls between fork and exec.
     unsafe {
         command.pre_exec(|| {
@@ -79,6 +99,9 @@ pub fn update_activation_environment() {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    if let Some(display) = x_display() {
+        command.arg("DISPLAY").env("DISPLAY", display);
+    }
     // Set for the child only: changing our own environment is unsafe once threads exist.
     if std::env::var_os("XDG_CURRENT_DESKTOP").is_none() {
         command.env("XDG_CURRENT_DESKTOP", "spacewm");

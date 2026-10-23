@@ -285,10 +285,10 @@ pub fn send_window_pointer(state: &mut SpaceState, time: InputTime) {
     let InputMode::Window { panel } = state.mode else {
         return;
     };
-    let Some(window) = panel_window(state, panel) else {
+    let Some(p) = state.world.panels().iter().find(|p| p.id == panel) else {
         return;
     };
-    let under = window_surface_under(&window, state.virtual_cursor);
+    let under = window_surface_under(&p.window, &p.x11_children, state.virtual_cursor);
     let Some(pointer) = state.seat.get_pointer() else {
         return;
     };
@@ -301,13 +301,22 @@ pub fn send_window_pointer(state: &mut SpaceState, time: InputTime) {
     pointer.frame(state);
 }
 
-/// The surface (toplevel, subsurface or popup) at `point` in window-geometry coordinates,
-/// and that surface's origin in the same coordinates.
+/// The surface (toplevel, subsurface, popup or X11 menu) at `point` in window-geometry
+/// coordinates, and that surface's origin in the same coordinates.
 pub fn window_surface_under(
     window: &Window,
+    x11_children: &[crate::xwayland::X11Child],
     point: Point<f64, Logical>,
 ) -> Option<(PointerFocusTarget, Point<f64, Logical>)> {
     let geo_loc = window.geometry().loc.to_f64();
+    // X11 menus are on top of their window; the newest one is front-most. Their rects are
+    // in buffer coordinates, `point` is in geometry coordinates.
+    for child in x11_children.iter().rev() {
+        if child.rect().to_f64().contains(point + geo_loc) {
+            let origin = child.offset.to_f64() - geo_loc;
+            return Some((PointerFocusTarget::X11(child.surface.clone()), origin));
+        }
+    }
     // surface_under works relative to the buffer origin, which is geo.loc before geometry.
     let (surface, surface_loc) = window.surface_under(point + geo_loc, WindowSurfaceType::ALL)?;
     let target = match window.x11_surface() {

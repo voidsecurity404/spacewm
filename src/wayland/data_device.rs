@@ -6,6 +6,8 @@
 //! "select to copy, middle-click to paste". Data control lets clipboard tools like
 //! wl-copy work without a focused window.
 
+use std::os::fd::OwnedFd;
+
 use smithay::{
     input::{
         dnd::{DnDGrab, DndGrabHandler, DndTarget, GrabType, Source},
@@ -18,7 +20,7 @@ use smithay::{
         data_device::{DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler},
         primary_selection::{PrimarySelectionHandler, PrimarySelectionState},
         wlr_data_control::{DataControlHandler, DataControlState},
-        SelectionHandler,
+        SelectionHandler, SelectionSource, SelectionTarget,
     },
 };
 
@@ -26,6 +28,40 @@ use crate::state::{DndIcon, SpaceState};
 
 impl SelectionHandler for SpaceState {
     type SelectionUserData = ();
+
+    /// A Wayland app copied something: offer it to X11 apps too.
+    fn new_selection(
+        &mut self,
+        ty: SelectionTarget,
+        source: Option<SelectionSource>,
+        _seat: Seat<Self>,
+    ) {
+        if let Some(wm) = self.xwayland.as_mut().and_then(|x| x.wm.as_mut()) {
+            if let Err(e) = wm.new_selection(ty, source.map(|s| s.mime_types())) {
+                tracing::warn!(?ty, "cannot offer the selection to X11: {e}");
+            }
+            // smithay queues the SetSelectionOwner request but doesn't flush it, so an X11
+            // app pasting right away would still see the old owner. Any request that waits
+            // for a reply flushes the queue; this one is cheap and has no side effects.
+            let _ = wm.get_randr_primary_output();
+        }
+    }
+
+    /// A Wayland app pastes what an X11 app copied: X11 writes it into `fd`.
+    fn send_selection(
+        &mut self,
+        ty: SelectionTarget,
+        mime_type: String,
+        fd: OwnedFd,
+        _seat: Seat<Self>,
+        _user_data: &(),
+    ) {
+        if let Some(wm) = self.xwayland.as_mut().and_then(|x| x.wm.as_mut()) {
+            if let Err(e) = wm.send_selection(ty, mime_type, fd) {
+                tracing::warn!(?ty, "cannot read the X11 selection: {e}");
+            }
+        }
+    }
 }
 
 impl DataDeviceHandler for SpaceState {

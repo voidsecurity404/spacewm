@@ -103,7 +103,11 @@ impl PanelTextureCache {
         for panel in world.panels_mut().iter_mut().filter(|p| p.content_dirty) {
             panel.content_dirty = false;
             let geo = panel.window.geometry();
-            let bbox = panel.window.bbox_with_popups();
+            // X11 menus hang off the window like popups: the texture grows to hold them.
+            let bbox = panel
+                .x11_children
+                .iter()
+                .fold(panel.window.bbox_with_popups(), |b, c| b.merge(c.rect()));
             if bbox.size.w <= 0 || bbox.size.h <= 0 {
                 continue; // no buffer attached yet
             }
@@ -119,7 +123,7 @@ impl PanelTextureCache {
                 panel.bbox_px = bbox_rel;
                 changed = true;
             }
-            match self.render_panel(renderer, panel.id, &panel.window, bbox) {
+            match self.render_panel(renderer, panel.id, &panel.window, &panel.x11_children, bbox) {
                 Ok(true) => {
                     self.updates += 1;
                     changed = true;
@@ -137,6 +141,7 @@ impl PanelTextureCache {
         renderer: &mut GlowRenderer,
         id: PanelId,
         window: &Window,
+        children: &[crate::xwayland::X11Child],
         bbox: Rectangle<i32, smithay::utils::Logical>,
     ) -> Result<bool, String> {
         // Very large windows are scaled down to the GPU's texture size limit.
@@ -155,10 +160,17 @@ impl PanelTextureCache {
         // Draw the window so its bbox origin lands at texture (0, 0).
         let origin: Point<i32, smithay::utils::Logical> = Point::from((-bbox.loc.x, -bbox.loc.y));
         let location: Point<i32, Physical> = origin.to_f64().to_physical(scale).to_i32_round();
-        let elements: Vec<WaylandSurfaceRenderElement<GlowRenderer>> =
-            AsRenderElements::<GlowRenderer>::render_elements(
-                window, renderer, location, scale, 1.0,
-            );
+        // Front-most first: X11 menus (newest on top), then the window with its popups.
+        let mut elements: Vec<WaylandSurfaceRenderElement<GlowRenderer>> = Vec::new();
+        for child in children.iter().rev() {
+            let at = (origin + child.offset).to_f64().to_physical(scale).to_i32_round();
+            elements.extend(AsRenderElements::<GlowRenderer>::render_elements::<
+                WaylandSurfaceRenderElement<GlowRenderer>,
+            >(&child.surface, renderer, at, scale, 1.0));
+        }
+        elements.extend(AsRenderElements::<GlowRenderer>::render_elements::<
+            WaylandSurfaceRenderElement<GlowRenderer>,
+        >(window, renderer, location, scale, 1.0));
         // The texture keeps its previous contents, so after the first frame its "age" is 1.
         let age = if target.rendered_once { 1 } else { 0 };
         let damaged = {

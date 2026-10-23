@@ -206,42 +206,9 @@ impl XdgShellHandler for SpaceState {
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
         tracing::info!(app_id = ?toplevel_app_id(surface.wl_surface()), "toplevel destroyed");
-        let destroyed = self.window_for_surface(surface.wl_surface());
-        if let Some(window) = &destroyed {
-            self.space.unmap_elem(window);
-            // Remember where it was, so it comes back to the same spot next time.
-            if let Some(saved) =
-                self.world.panel_for_window(window).and_then(crate::state::saved_panel)
-            {
-                self.layout.remember(saved);
-                self.layout_changed();
-            }
-            if self.grab.is_some_and(|g| {
-                self.world.panel_for_window(window).is_some_and(|p| p.id == g.panel)
-            }) {
-                self.grab = None;
-            }
-            self.world.remove_window(window);
-            self.view.dirty = true;
-            let id = crate::state::window_id(window);
-            crate::input::mode::on_panel_removed(self, id);
-            crate::ipc::broadcast(self, Event::PanelClosed { id });
+        if let Some(window) = self.window_for_surface(surface.wl_surface()) {
+            self.remove_window(&window);
         }
-        // If the focused window went away, focus the top-most remaining one.
-        let keyboard_lost = self
-            .seat
-            .get_keyboard()
-            .map(|k| match k.current_focus() {
-                Some(KeyboardFocusTarget::Window(w)) => Some(&w) == destroyed.as_ref(),
-                None => true,
-                _ => false,
-            })
-            .unwrap_or(false);
-        if keyboard_lost && self.render_mode == RenderMode::Flat2D {
-            let top = self.space.elements().last().cloned();
-            self.focus_window(top.as_ref(), SERIAL_COUNTER.next_serial());
-        }
-        self.queue_redraw();
     }
 
     fn app_id_changed(&mut self, surface: ToplevelSurface) {
@@ -257,7 +224,51 @@ impl XdgShellHandler for SpaceState {
 }
 
 impl SpaceState {
-    fn next_cascade_position(&mut self) -> Point<i32, Logical> {
+    /// A window (Wayland or X11) is gone: drop its panel, remember where it was, and fix
+    /// up focus, mode and grabs that pointed at it.
+    pub fn remove_window(&mut self, window: &Window) {
+        self.space.unmap_elem(window);
+        // Remember where it was, so it comes back to the same spot next time.
+        if let Some(saved) = self.world.panel_for_window(window).and_then(crate::state::saved_panel)
+        {
+            self.layout.remember(saved);
+            self.layout_changed();
+        }
+        if self
+            .grab
+            .is_some_and(|g| self.world.panel_for_window(window).is_some_and(|p| p.id == g.panel))
+        {
+            self.grab = None;
+        }
+        self.world.remove_window(window);
+        self.view.dirty = true;
+        let id = crate::state::window_id(window);
+        crate::input::mode::on_panel_removed(self, id);
+        crate::ipc::broadcast(self, Event::PanelClosed { id });
+
+        // If the focused window went away, focus the top-most remaining one (2D).
+        let keyboard_lost = self
+            .seat
+            .get_keyboard()
+            .map(|k| match k.current_focus() {
+                Some(KeyboardFocusTarget::Window(w)) => &w == window,
+                None => true,
+                _ => false,
+            })
+            .unwrap_or(false);
+        if keyboard_lost && self.render_mode == RenderMode::Flat2D {
+            let top = self
+                .space
+                .elements()
+                .rev()
+                .find(|w| !w.x11_surface().is_some_and(|x| x.is_override_redirect()))
+                .cloned();
+            self.focus_window(top.as_ref(), SERIAL_COUNTER.next_serial());
+        }
+        self.queue_redraw();
+    }
+
+    pub fn next_cascade_position(&mut self) -> Point<i32, Logical> {
         let origin = self.primary_output_geometry().map(|g| g.loc).unwrap_or_default();
         let i = self.cascade_index;
         self.cascade_index = (self.cascade_index + 1) % CASCADE_WRAP;

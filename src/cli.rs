@@ -93,6 +93,10 @@ pub struct Cli {
     #[arg(long)]
     pub headless_device: Option<PathBuf>,
 
+    /// Don't offer X11 (no DISPLAY, Xwayland never starts).
+    #[arg(long)]
+    pub no_xwayland: bool,
+
     /// IPC socket path (default: $XDG_RUNTIME_DIR/spacewm-$WAYLAND_DISPLAY.sock).
     #[arg(long)]
     pub ipc_socket: Option<PathBuf>,

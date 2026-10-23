@@ -14,6 +14,7 @@ mod spawn;
 mod state;
 mod wayland;
 mod world;
+mod xwayland;
 
 use anyhow::{anyhow, Context};
 use clap::Parser;
@@ -35,6 +36,7 @@ use smithay::{
 use crate::{backend::Backend, cli::Cli, state::SpaceState};
 
 fn main() -> anyhow::Result<()> {
+    block_shutdown_signals();
     let mut cli = Cli::parse();
     if cli.drm_probe {
         // Read-only listing; needs no session, logging setup or event loop.
@@ -99,6 +101,16 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     tracing::info!(socket = ?socket_name, "spacewm listening on {}", socket_name.to_string_lossy());
     state.socket_name = socket_name.clone();
 
+    if !state.cli.no_xwayland {
+        match xwayland::Xwayland::init(&loop_handle) {
+            Ok(xw) => {
+                spawn::set_x_display(Some(xw.display));
+                state.xwayland = Some(xw);
+            }
+            Err(err) => tracing::warn!("X11 apps disabled: {err:#}"),
+        }
+    }
+
     let ipc_path = state.cli.ipc_socket.clone().or_else(|| ipc::default_socket_path(&socket_name));
     match ipc_path {
         Some(path) => {
@@ -158,6 +170,29 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     if let Some(mut ipc) = state.ipc.take() {
         ipc.shutdown(&loop_handle);
     }
+    if let Some(mut xw) = state.xwayland.take() {
+        xw.shutdown(&loop_handle);
+    }
     tracing::info!(uptime_s = state.start_time.elapsed().as_secs_f32(), "spacewm exited cleanly");
     Ok(())
+}
+
+/// Block SIGINT/SIGTERM in this thread before any other thread exists.
+///
+/// We receive these signals through a signalfd (calloop `Signals`), which only works if
+/// the signal is blocked in EVERY thread: otherwise the kernel delivers a process-wide
+/// signal to some thread that doesn't block it (our mesher, a Mesa worker) and its
+/// default action kills spacewm on the spot — no layout save, no clean DRM teardown. New
+/// threads inherit the creating thread's mask, so blocking here, first, covers them all.
+/// (Children get a clean mask again in spawn.rs.)
+fn block_shutdown_signals() {
+    // SAFETY: plain libc signal-set manipulation on a local set; pthread_sigmask only
+    // changes this thread's mask.
+    unsafe {
+        let mut set: libc::sigset_t = std::mem::zeroed();
+        libc::sigemptyset(&mut set);
+        libc::sigaddset(&mut set, libc::SIGINT);
+        libc::sigaddset(&mut set, libc::SIGTERM);
+        libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut());
+    }
 }
