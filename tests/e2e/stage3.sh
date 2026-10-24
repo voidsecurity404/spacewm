@@ -5,7 +5,8 @@ PX="python3 $(dirname "$0")/pixel.py"
 pos() { kc --json list | python3 -c "import json,sys; d=json.load(sys.stdin); print(*[p['position'] for p in d['panels'] if p['id']==$1][0])"; }
 
 space_start --render 3d
-kc spawn foot >/dev/null
+# Client-side decorations on purpose: its title bar shows which way is up.
+kc spawn foot -o csd.preferred=client >/dev/null
 wait_windows 1
 sleep 0.6
 # Look straight at the panel so its layout on screen is predictable.

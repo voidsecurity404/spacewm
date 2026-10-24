@@ -122,6 +122,46 @@ pub struct SpaceState {
     pub xwayland: Option<crate::xwayland::Xwayland>,
     /// zwlr_layer_shell_v1: bars, launchers, notifications (wayland/layer_shell.rs).
     pub layer_shell_state: WlrLayerShellState,
+    /// zxdg_decoration_manager_v1: we ask apps not to draw title bars.
+    /// Never read: holding it keeps the global alive.
+    #[allow(dead_code)]
+    pub decoration_state: smithay::wayland::shell::xdg::decoration::XdgDecorationState,
+    /// ext-image-capture-source + ext-image-copy-capture: screen capture (screencopy.rs).
+    #[allow(dead_code)]
+    pub image_capture_source_state: smithay::wayland::image_capture_source::ImageCaptureSourceState,
+    pub output_capture_source_state:
+        smithay::wayland::image_capture_source::OutputCaptureSourceState,
+    pub image_copy_capture_state: smithay::wayland::image_copy_capture::ImageCopyCaptureState,
+    pub screencopy: crate::wayland::screencopy::Screencopy,
+    /// ext-session-lock (wayland/session_lock.rs).
+    pub session_lock_state: smithay::wayland::session_lock::SessionLockManagerState,
+    pub lock: crate::wayland::session_lock::LockState,
+    /// ext-idle-notify (swayidle) and the surfaces holding idle inhibitors (wayland/idle.rs).
+    pub idle_notifier_state: smithay::wayland::idle_notify::IdleNotifierState<SpaceState>,
+    #[allow(dead_code)]
+    pub idle_inhibit_state: smithay::wayland::idle_inhibit::IdleInhibitManagerState,
+    pub idle_inhibitors: Vec<WlSurface>,
+    /// wp_viewporter: a client shows a crop of its buffer scaled to any size (video
+    /// players, browsers). smithay's renderer applies it; holding the state keeps the global.
+    #[allow(dead_code)]
+    pub viewporter_state: smithay::wayland::viewporter::ViewporterState,
+    /// Globals whose state smithay keeps internally; held so they stay alive.
+    #[allow(dead_code)]
+    pub fractional_scale_state: smithay::wayland::fractional_scale::FractionalScaleManagerState,
+    #[allow(dead_code)]
+    pub relative_pointer_state: smithay::wayland::relative_pointer::RelativePointerManagerState,
+    #[allow(dead_code)]
+    pub pointer_constraints_state: smithay::wayland::pointer_constraints::PointerConstraintsState,
+    #[allow(dead_code)]
+    pub cursor_shape_state: smithay::wayland::cursor_shape::CursorShapeManagerState,
+    /// xdg-activation tokens (wayland/activation.rs).
+    pub activation_state: smithay::wayland::xdg_activation::XdgActivationState,
+    /// wp_presentation: when exactly a frame reached the screen (video players sync to it).
+    #[allow(dead_code)]
+    pub presentation_state: smithay::wayland::presentation::PresentationState,
+    /// zwlr_screencopy_manager_v1 (wf-recorder). Never read: keeps the global.
+    #[allow(dead_code)]
+    pub wlr_screencopy_global: smithay::reexports::wayland_server::backend::GlobalId,
     /// Something on top of the view that has the keyboard.
     pub overlay: Overlay,
     /// The built-in launcher, while open (it then gets every key).
@@ -220,6 +260,36 @@ impl SpaceState {
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
         let xwayland_shell_state = XWaylandShellState::new::<Self>(&dh);
         let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
+        let decoration_state =
+            smithay::wayland::shell::xdg::decoration::XdgDecorationState::new::<Self>(&dh);
+        let image_capture_source_state =
+            smithay::wayland::image_capture_source::ImageCaptureSourceState::new();
+        let output_capture_source_state =
+            smithay::wayland::image_capture_source::OutputCaptureSourceState::new::<Self>(&dh);
+        let image_copy_capture_state =
+            smithay::wayland::image_copy_capture::ImageCopyCaptureState::new::<Self>(&dh);
+        let wlr_screencopy_global = crate::wayland::screencopy::create_wlr_global(&dh);
+        let idle_notifier_state =
+            smithay::wayland::idle_notify::IdleNotifierState::new(&dh, loop_handle.clone());
+        let idle_inhibit_state =
+            smithay::wayland::idle_inhibit::IdleInhibitManagerState::new::<Self>(&dh);
+        let viewporter_state = smithay::wayland::viewporter::ViewporterState::new::<Self>(&dh);
+        let fractional_scale_state =
+            smithay::wayland::fractional_scale::FractionalScaleManagerState::new::<Self>(&dh);
+        let relative_pointer_state =
+            smithay::wayland::relative_pointer::RelativePointerManagerState::new::<Self>(&dh);
+        let pointer_constraints_state =
+            smithay::wayland::pointer_constraints::PointerConstraintsState::new::<Self>(&dh);
+        let cursor_shape_state =
+            smithay::wayland::cursor_shape::CursorShapeManagerState::new::<Self>(&dh);
+        let activation_state =
+            smithay::wayland::xdg_activation::XdgActivationState::new::<Self>(&dh);
+        let presentation_state = smithay::wayland::presentation::PresentationState::new::<Self>(
+            &dh,
+            rustix::time::ClockId::Monotonic as u32,
+        );
+        let session_lock_state =
+            smithay::wayland::session_lock::SessionLockManagerState::new::<Self, _>(&dh, |_| true);
         tracing::debug!("global: zwlr_layer_shell_v1");
         tracing::debug!("global: xdg_wm_base");
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
@@ -291,6 +361,24 @@ impl SpaceState {
             xwayland_shell_state,
             xwayland: None,
             layer_shell_state,
+            decoration_state,
+            image_capture_source_state,
+            output_capture_source_state,
+            image_copy_capture_state,
+            screencopy: Default::default(),
+            session_lock_state,
+            lock: Default::default(),
+            idle_notifier_state,
+            idle_inhibit_state,
+            idle_inhibitors: Vec::new(),
+            viewporter_state,
+            fractional_scale_state,
+            relative_pointer_state,
+            pointer_constraints_state,
+            cursor_shape_state,
+            activation_state,
+            presentation_state,
+            wlr_screencopy_global,
             overlay: Overlay::None,
             launcher: None,
             hud: Default::default(),
@@ -350,10 +438,13 @@ impl SpaceState {
 
     /// Something moves on its own (held keys, falling): keep rendering frames.
     pub fn animating(&self) -> bool {
+        let now = Instant::now();
         self.render_mode == crate::cli::RenderMode::Scene3D
             && (self.view.controls.is_moving()
                 || (!self.player.on_ground && !self.player.flying)
-                || self.player.vel.length_squared() > 1e-6)
+                || self.player.vel.length_squared() > 1e-6
+                // A pulsing border (xdg-activation) is an animation too.
+                || self.world.panels().iter().any(|p| p.attention_until.is_some_and(|t| t > now)))
     }
 
     /// Ask the backend for a new frame (something on screen changed).
@@ -497,6 +588,21 @@ impl SpaceState {
         &self,
         pos: Point<f64, Logical>,
     ) -> Option<(PointerFocusTarget, Point<f64, Logical>)> {
+        // Locked: only the lock surface of the output under the pointer.
+        if self.lock.is_locked() {
+            let output = self.space.outputs().find(|o| {
+                self.space.output_geometry(o).is_some_and(|g| g.to_f64().contains(pos))
+            })?;
+            let origin = self.space.output_geometry(output)?.loc;
+            let surface = self.lock.surface_for(output)?.wl_surface().clone();
+            let (s, at) = smithay::desktop::utils::under_from_surface_tree(
+                &surface,
+                pos - origin.to_f64(),
+                (0, 0),
+                WindowSurfaceType::ALL,
+            )?;
+            return Some((PointerFocusTarget::Surface(s), (at + origin).to_f64()));
+        }
         // Layer surfaces on top of windows first, then windows (only in 2D: in 3D they
         // are panels, reached through raycasts), then layers below them.
         use smithay::wayland::shell::wlr_layer::Layer;

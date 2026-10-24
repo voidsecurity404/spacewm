@@ -250,3 +250,24 @@ chizib qotib qolardi. O'rnatilgan launcher .desktop fayllarni har ochilganda qay
 (field code'lar olib tashlanadi, NoDisplay/Hidden/TryExec hisobga olinadi) va fuzzy
 qidiradi: harflar tartib bilan kelishi kerak, so'z boshi va ketma-ket harflar ko'proq ball
 oladi ("ffx" → Firefox, "gc" → GNOME Calculator).
+
+## 7.5-bosqich: desktop protokollari
+
+- **xdg-decoration**: doim server-side so'raymiz — sarlavha chizilmaydi, panel ramkasi
+  bezak vazifasini bajaradi; client-side'ni talab qilgan ilovaga ruxsat (testda shunday).
+- **Ekran tasviri**: ext-image-copy-capture (grim, portal-wlr) va wlr-screencopy
+  (wf-recorder; smithay'da yo'q, o'zimiz yozdik). Tayyor kadr (3D + overlay) o'qib olinib,
+  mijozning shm buferiga yoziladi. `copy_with_damage` keyingi o'zgarishni kutadi — jim
+  ekran bir xil kadrlarni yozmaydi.
+- **Qulf (ext-session-lock)**: faqat locker surface chiziladi, hamma input unga; qulf
+  kadr chizilgandan keyingina tasdiqlanadi; swaylock o'ldirilsa ekran qizil "locked"
+  bo'lib qoladi va faqat yangi locker oladi — aks holda istalgan jarayoningiz
+  `pkill swaylock` bilan desktopni ochib qo'yardi. Fokus faqat `set_keyboard_focus` orqali
+  o'zgaradi va qulf paytida boshqa maqsadni rad etadi.
+- **Idle**: har input swayidle taymerini nolga qaytaradi; mpv video paytida inhibitor ushlaydi.
+- **Kichiklari**: viewporter (mpv'ga kerak edi), fractional-scale, pointer-constraints
+  (o'yin sichqonchani "qulflasa" panel kursori to'xtaydi), cursor-shape, xdg-activation
+  (fokusni o'g'irlamaydi — panel ramkasi 3 s sariq pulsatsiya qiladi), presentation-time
+  (DRM'da haqiqiy vblank vaqti), primary selection.
+- **Tekshirilmagan**: portal-wlr kadrni oladi, lekin portal orqali screenshot/Firefox
+  ekran ulashish headless'da oxirigacha tasdiqlanmadi (ScreenCast PipeWire talab qiladi).

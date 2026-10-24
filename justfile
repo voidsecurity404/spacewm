@@ -11,7 +11,7 @@ check:
 
 # End-to-end tests: headless spacewm driven through spacectl (needs a GPU render node).
 e2e:
-    cargo build
+    cargo build --bins --examples
     for t in tests/e2e/stage*.sh tests/e2e/winit_nested.sh; do echo "== $t"; "$t" || exit 1; done
 
 # Print (never run) the sudo commands that install spacewm as a login session.

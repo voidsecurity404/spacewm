@@ -624,7 +624,8 @@ fn render(state: &mut SpaceState) {
 
     // Buffer age = how many frames old the back buffer's contents are; the damage tracker
     // only repaints what changed since then. 0 forces a full repaint.
-    let age = if b.full_redraw > 0 || !state.pending_screenshots.is_empty() {
+    let capturing = !state.pending_screenshots.is_empty() || state.screencopy.wants(&output);
+    let age = if b.full_redraw > 0 || capturing {
         b.full_redraw = b.full_redraw.saturating_sub(1);
         0
     } else {
@@ -638,7 +639,8 @@ fn render(state: &mut SpaceState) {
     };
     // 3D: advance the camera and re-render the scene texture first. The scene pass uses
     // our own framebuffers, so it must run before the output framebuffer is bound.
-    let mut prepared = (state.render_mode == RenderMode::Scene3D)
+    let locked = state.lock.is_locked();
+    let mut prepared = (state.render_mode == RenderMode::Scene3D && !locked)
         .then(|| state.view.prepare(&mut b.renderer, size, crate::scene_inputs!(state, time)));
 
     if Some(size) != b.bind_size {
@@ -652,33 +654,46 @@ fn render(state: &mut SpaceState) {
             return;
         }
     };
-    let overlay = render::overlay_elements(
-        &mut b.renderer,
-        crate::overlay_inputs!(state, &output, scale, time),
-    );
-    let result = match prepared.as_mut() {
-        Some(prepared) => {
-            let mut elements = overlay;
-            if let Some(scene) = prepared.element.take() {
-                elements.push(render::SpaceRenderElement::Texture(scene));
-            }
-            render::render_3d(
-                &mut b.renderer,
-                &mut framebuffer,
-                age,
-                &elements,
-                &mut b.damage_tracker,
-            )
-        }
-        None => render::render_2d(
+    let result = if locked {
+        // Locked: the locker's surface and nothing else (see wayland/session_lock.rs).
+        let (elements, clear) = render::lock_elements(&mut b.renderer, &state.lock, &output, scale);
+        render::render_with_clear(
             &mut b.renderer,
             &mut framebuffer,
             age,
-            &output,
-            &state.space,
-            &overlay,
+            &elements,
             &mut b.damage_tracker,
-        ),
+            clear,
+        )
+    } else {
+        let overlay = render::overlay_elements(
+            &mut b.renderer,
+            crate::overlay_inputs!(state, &output, scale, time),
+        );
+        match prepared.as_mut() {
+            Some(prepared) => {
+                let mut elements = overlay;
+                if let Some(scene) = prepared.element.take() {
+                    elements.push(render::SpaceRenderElement::Texture(scene));
+                }
+                render::render_3d(
+                    &mut b.renderer,
+                    &mut framebuffer,
+                    age,
+                    &elements,
+                    &mut b.damage_tracker,
+                )
+            }
+            None => render::render_2d(
+                &mut b.renderer,
+                &mut framebuffer,
+                age,
+                &output,
+                &state.space,
+                &overlay,
+                &mut b.damage_tracker,
+            ),
+        }
     };
     let damage = match result {
         Ok(result) => result.damage.cloned(),
@@ -687,23 +702,46 @@ fn render(state: &mut SpaceState) {
             None
         }
     };
-    let capture = (!state.pending_screenshots.is_empty()).then(|| {
+    let capture = capturing.then(|| {
         screenshot::start_capture(&mut b.renderer, &framebuffer, size, output.current_transform())
     });
     drop(framebuffer);
 
     if let Some(damage) = &damage {
-        if let Err(e) = b.submit(damage) {
-            tracing::warn!("failed to submit frame: {e}");
+        match b.submit(damage) {
+            Ok(()) => {
+                // The host shows it with its next frame; close enough for clients.
+                let refresh = output
+                    .current_mode()
+                    .map(|m| std::time::Duration::from_secs_f64(1000.0 / m.refresh.max(1) as f64));
+                let mut feedback =
+                    render::take_presentation_feedback(&output, &state.space, &state.lock);
+                feedback.presented(
+                    render::monotonic_now(),
+                    refresh.map_or(smithay::wayland::presentation::Refresh::Unknown, |r| {
+                        smithay::wayland::presentation::Refresh::fixed(r)
+                    }),
+                    0,
+                    smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback::Kind::empty(),
+                );
+            }
+            Err(e) => tracing::warn!("failed to submit frame: {e}"),
         }
     }
     if let Some(capture) = capture {
         let captured = capture.and_then(|c| screenshot::finish_capture(&mut b.renderer, c));
-        crate::ipc::finish_screenshots(
-            &mut state.pending_screenshots,
-            captured,
-            &state.screenshot_tx,
+        crate::wayland::screencopy::deliver(
+            &mut state.screencopy,
+            &output,
+            captured.as_ref().map_err(|e| e.as_str()),
         );
+        if !state.pending_screenshots.is_empty() {
+            crate::ipc::finish_screenshots(
+                &mut state.pending_screenshots,
+                captured,
+                &state.screenshot_tx,
+            );
+        }
     }
     if damage.is_some() {
         render::send_frame_callbacks(
@@ -711,6 +749,7 @@ fn render(state: &mut SpaceState) {
             &state.space,
             &state.cursor_status,
             state.dnd_icon.as_ref(),
+            &state.lock,
             time,
         );
     } else if b.frame_callback_timer.is_none() {
@@ -729,6 +768,7 @@ fn render(state: &mut SpaceState) {
                         &state.space,
                         &state.cursor_status,
                         state.dnd_icon.as_ref(),
+                        &state.lock,
                         time,
                     );
                 }

@@ -100,6 +100,9 @@ impl XdgShellHandler for SpaceState {
     /// A popup asked for an explicit grab: clicks outside it must close it, and keyboard
     /// input goes to it (menus with arrow-key navigation).
     fn grab(&mut self, surface: PopupSurface, seat: wl_seat::WlSeat, serial: Serial) {
+        if self.lock.is_locked() {
+            return; // no menu grabs the input away from the lock screen
+        }
         let Some(seat) = Seat::<SpaceState>::from_resource(&seat) else {
             return;
         };
@@ -296,9 +299,8 @@ impl SpaceState {
                 toplevel.send_pending_configure();
             }
         }
-        if let Some(keyboard) = self.seat.get_keyboard() {
-            keyboard.set_focus(self, window.cloned().map(KeyboardFocusTarget::Window), serial);
-        }
+        let _ = serial;
+        self.set_keyboard_focus(window.cloned().map(KeyboardFocusTarget::Window));
     }
 
     /// Keep popups on screen: the positioner says where the client wants the popup;

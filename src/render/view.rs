@@ -399,6 +399,7 @@ fn panel_draws(
     highlight: Highlight,
     dim_unfocused: bool,
 ) -> Vec<PanelDraw> {
+    let now = std::time::Instant::now();
     let mut draws: Vec<(PanelDraw, f32)> = world
         .panels()
         .iter()
@@ -415,13 +416,23 @@ fn panel_draws(
             let y0 = -p.bbox_px.loc.y as f32 * sy;
             let geo_rect =
                 Vec4::new(x0, y0, x0 + p.size_px.0 as f32 * sx, y0 + p.size_px.1 as f32 * sy);
-            let (border_px, border_color) = if highlight.focused == Some(p.id) {
-                (FOCUS_BORDER_PX, FOCUS_COLOR)
-            } else if highlight.hovered == Some(p.id) {
-                (HOVER_BORDER_PX, HOVER_COLOR)
-            } else {
-                (0.0, Vec4::ZERO)
-            };
+            let attention = p.attention_until.and_then(|t| t.checked_duration_since(now));
+            let (border_px, border_color) =
+                if let Some(left) = attention.filter(|_| highlight.focused != Some(p.id)) {
+                    // Pulses 1.5 times per second: an opaque amber border that brightens and
+                    // widens (fading the alpha would just let the sky wash it out).
+                    let phase = left.as_secs_f32() * std::f32::consts::TAU * 1.5;
+                    let glow = 0.5 + 0.5 * phase.sin();
+                    let amber =
+                        Vec4::new(1.0, 0.78, 0.10, 1.0).lerp(Vec4::new(1.0, 0.95, 0.55, 1.0), glow);
+                    (FOCUS_BORDER_PX * (1.2 + 0.8 * glow), amber)
+                } else if highlight.focused == Some(p.id) {
+                    (FOCUS_BORDER_PX, FOCUS_COLOR)
+                } else if highlight.hovered == Some(p.id) {
+                    (HOVER_BORDER_PX, HOVER_COLOR)
+                } else {
+                    (0.0, Vec4::ZERO)
+                };
             let dimmed = dim_unfocused && highlight.focused.is_some_and(|f| f != p.id);
             let opacity = p.opacity * if dimmed { UNFOCUSED_OPACITY } else { 1.0 };
             let draw = PanelDraw {

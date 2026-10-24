@@ -155,22 +155,8 @@ where
     // Layer surfaces, front to back. In 2D the space renderer draws them itself.
     let map = smithay::desktop::layer_map_for_output(inputs.output);
     let zone = map.non_exclusive_zone();
-    let layer_elements = |renderer: &mut R, layer: Layer| -> Vec<SpaceRenderElement<R>> {
-        map.layers_on(layer)
-            .rev()
-            .filter_map(|l| Some((l, map.layer_geometry(l)?)))
-            .flat_map(|(l, g)| {
-                AsRenderElements::<R>::render_elements::<WaylandSurfaceRenderElement<R>>(
-                    l,
-                    renderer,
-                    g.loc.to_physical_precise_round(scale),
-                    scale,
-                    1.0,
-                )
-            })
-            .map(SpaceRenderElement::Surface)
-            .collect()
-    };
+    let layer_elements =
+        |renderer: &mut R, layer: Layer| layer_elements(renderer, &map, &[layer], scale);
     if three_d {
         if inputs.layer_focus {
             // A launcher-like layer is open: an ordinary 2D cursor clicks it.
@@ -341,6 +327,137 @@ where
     damage_tracker.render_output(renderer, framebuffer, age, elements, [r, g, b, 1.0])
 }
 
+/// Layer surfaces of the given layers (first = front-most), output-local positions.
+pub fn layer_elements<R>(
+    renderer: &mut R,
+    map: &smithay::desktop::LayerMap,
+    layers: &[Layer],
+    scale: Scale<f64>,
+) -> Vec<SpaceRenderElement<R>>
+where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Texture + Clone + Send + 'static,
+{
+    layers
+        .iter()
+        .flat_map(|&layer| map.layers_on(layer).rev())
+        .filter_map(|l| Some((l, map.layer_geometry(l)?)))
+        .flat_map(|(l, g)| {
+            AsRenderElements::<R>::render_elements::<WaylandSurfaceRenderElement<R>>(
+                l,
+                renderer,
+                g.loc.to_physical_precise_round(scale),
+                scale,
+                1.0,
+            )
+        })
+        .map(SpaceRenderElement::Surface)
+        .collect()
+}
+
+/// What a locked output shows: only the locker's surface, or — if the locker is gone or
+/// hasn't drawn yet — a "locked" message (red when the locker died). Also the clear color.
+pub fn lock_elements<R>(
+    renderer: &mut R,
+    lock: &crate::wayland::session_lock::LockState,
+    output: &Output,
+    scale: Scale<f64>,
+) -> (Vec<SpaceRenderElement<R>>, [f32; 4])
+where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Texture + Clone + Send + 'static,
+{
+    if let Some(surface) = lock.surface_for(output) {
+        let elements = render_elements_from_surface_tree(
+            renderer,
+            surface.wl_surface(),
+            (0, 0),
+            scale,
+            1.0,
+            Kind::Unspecified,
+        )
+        .into_iter()
+        .map(SpaceRenderElement::Surface)
+        .collect();
+        return (elements, [0.0, 0.0, 0.0, 1.0]);
+    }
+    let clear = if lock.is_abandoned() { [0.55, 0.0, 0.0, 1.0] } else { [0.0, 0.0, 0.0, 1.0] };
+    let mut elements = Vec::new();
+    if let (Some((buffer, size)), Some(mode)) = (&lock.message, output.current_mode()) {
+        let logical = mode.size.to_f64().to_logical(scale);
+        let at = Point::<f64, Logical>::from((
+            (logical.w - size.0 as f64) / 2.0,
+            (logical.h - size.1 as f64) / 2.0,
+        ));
+        if let Ok(e) = MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            at.to_physical(scale),
+            buffer,
+            None,
+            None,
+            None,
+            Kind::Unspecified,
+        ) {
+            elements.push(SpaceRenderElement::Memory(e));
+        }
+    }
+    (elements, clear)
+}
+
+/// Draw `elements` over `clear` (the locked screen).
+pub fn render_with_clear<'d, R>(
+    renderer: &mut R,
+    framebuffer: &mut R::Framebuffer<'_>,
+    age: usize,
+    elements: &[SpaceRenderElement<R>],
+    damage_tracker: &'d mut OutputDamageTracker,
+    clear: [f32; 4],
+) -> Result<RenderOutputResult<'d>, DamageError<R::Error>>
+where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Texture + Clone + Send + 'static,
+{
+    damage_tracker.render_output(renderer, framebuffer, age, elements, clear)
+}
+
+/// Collect presentation-time feedback from everything that was on `output` this frame
+/// (windows/panels, layer surfaces, the lock surface). The backend reports it as
+/// presented once the frame is really on screen (DRM: at the vblank).
+pub fn take_presentation_feedback(
+    output: &Output,
+    space: &Space<Window>,
+    lock: &crate::wayland::session_lock::LockState,
+) -> smithay::desktop::utils::OutputPresentationFeedback {
+    use smithay::{
+        desktop::utils::{take_presentation_feedback_surface_tree, OutputPresentationFeedback},
+        reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback::Kind,
+    };
+    let mut feedback = OutputPresentationFeedback::new(output);
+    let on_output = |_: &_, _: &_| Some(output.clone());
+    let flags = |_: &_, _: &_| Kind::empty();
+    if let Some(surface) = lock.surface_for(output) {
+        take_presentation_feedback_surface_tree(
+            surface.wl_surface(),
+            &mut feedback,
+            on_output,
+            flags,
+        );
+        return feedback; // nothing else is visible while locked
+    }
+    for window in space.elements() {
+        window.take_presentation_feedback(&mut feedback, on_output, flags);
+    }
+    for layer in smithay::desktop::layer_map_for_output(output).layers() {
+        layer.take_presentation_feedback(&mut feedback, on_output, flags);
+    }
+    feedback
+}
+
+/// "Now" on the monotonic clock presentation-time uses.
+pub fn monotonic_now() -> smithay::utils::Time<smithay::utils::Monotonic> {
+    smithay::utils::Clock::<smithay::utils::Monotonic>::new().now()
+}
+
 /// Tell clients they may draw their next frame. Without frame callbacks a client draws
 /// one frame and then waits forever — the classic "frozen window" beginner bug.
 pub fn send_frame_callbacks(
@@ -348,8 +465,14 @@ pub fn send_frame_callbacks(
     space: &Space<Window>,
     cursor_status: &CursorImageStatus,
     dnd_icon: Option<&DndIcon>,
+    lock: &crate::wayland::session_lock::LockState,
     time: Duration,
 ) {
+    if let Some(surface) = lock.surface_for(output) {
+        send_frames_surface_tree(surface.wl_surface(), output, time, None, |_, _| {
+            Some(output.clone())
+        });
+    }
     // Throttle: a surface that is not visible still gets a callback at most this often,
     // so hidden clients keep running slowly instead of freezing.
     let throttle = Some(Duration::from_secs(1));

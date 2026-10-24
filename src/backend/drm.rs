@@ -86,8 +86,10 @@ const HIDPI: f64 = 200.0;
 
 type Allocator = GbmAllocator<DrmDeviceFd>;
 type Exporter = GbmFramebufferExporter<DrmDeviceFd>;
-type SpaceDrmOutput = DrmOutput<Allocator, Exporter, (), DrmDeviceFd>;
-type SpaceDrmOutputManager = DrmOutputManager<Allocator, Exporter, (), DrmDeviceFd>;
+/// The user data of a queued frame: its presentation feedback, reported at the vblank.
+type FrameData = Option<smithay::desktop::utils::OutputPresentationFeedback>;
+type SpaceDrmOutput = DrmOutput<Allocator, Exporter, FrameData, DrmDeviceFd>;
+type SpaceDrmOutputManager = DrmOutputManager<Allocator, Exporter, FrameData, DrmDeviceFd>;
 
 /// Where one output is in its frame cycle.
 #[derive(Debug)]
@@ -379,8 +381,8 @@ fn open_gpu(
     );
 
     loop_handle
-        .insert_source(notifier, move |event, _metadata, state| match event {
-            DrmEvent::VBlank(crtc) => on_vblank(state, crtc),
+        .insert_source(notifier, move |event, metadata, state| match event {
+            DrmEvent::VBlank(crtc) => on_vblank(state, crtc, metadata.take()),
             DrmEvent::Error(e) => tracing::error!("DRM error: {e}"),
         })
         .map_err(|e| backend_err("drm event source", &e.error))?;
@@ -767,26 +769,51 @@ fn render(state: &mut SpaceState, crtc: crtc::Handle) {
     let time = state.start_time.elapsed();
     let renderer = &mut b.gpu.renderer;
 
-    let mut prepared = (state.render_mode == RenderMode::Scene3D)
+    let locked = state.lock.is_locked();
+    let mut prepared = (state.render_mode == RenderMode::Scene3D && !locked)
         .then(|| state.view.prepare(renderer, primary_size, crate::scene_inputs!(state, time)));
-    let mut elements =
-        render::overlay_elements(renderer, crate::overlay_inputs!(state, &output, scale, time));
-    match prepared.as_mut() {
-        Some(p) => {
-            // Stretch the shared scene to this output (same size on the primary one).
-            if let Some(scene) = state.view.scene_element_sized(size.to_logical(1)) {
-                elements.push(SpaceRenderElement::Texture(scene));
+    let (elements, clear) = if locked {
+        // Locked: the locker's surface and nothing else (see wayland/session_lock.rs).
+        render::lock_elements(renderer, &state.lock, &output, scale)
+    } else {
+        let mut elements =
+            render::overlay_elements(renderer, crate::overlay_inputs!(state, &output, scale, time));
+        match prepared.as_mut() {
+            Some(p) => {
+                // Stretch the shared scene to this output (same size on the primary one).
+                if let Some(scene) = state.view.scene_element_sized(size.to_logical(1)) {
+                    elements.push(SpaceRenderElement::Texture(scene));
+                }
+                p.element = None;
             }
-            p.element = None;
+            None => {
+                // 2D: bars above the windows, wallpapers below (smithay's space renderer
+                // does this for the other backends).
+                use smithay::wayland::shell::wlr_layer::Layer;
+                let map = smithay::desktop::layer_map_for_output(&output);
+                elements.extend(render::layer_elements(
+                    renderer,
+                    &map,
+                    &[Layer::Overlay, Layer::Top],
+                    scale,
+                ));
+                elements.extend(render::space_elements(renderer, &state.space, &output, scale));
+                elements.extend(render::layer_elements(
+                    renderer,
+                    &map,
+                    &[Layer::Bottom, Layer::Background],
+                    scale,
+                ));
+            }
         }
-        None => elements.extend(render::space_elements(renderer, &state.space, &output, scale)),
-    }
-    let clear = match state.render_mode {
-        RenderMode::Scene3D => {
-            let [r, g, bl] = render::scene::SKY_COLOR;
-            [r, g, bl, 1.0]
-        }
-        RenderMode::Flat2D => render::CLEAR_COLOR_2D,
+        let clear = match state.render_mode {
+            RenderMode::Scene3D => {
+                let [r, g, bl] = render::scene::SKY_COLOR;
+                [r, g, bl, 1.0]
+            }
+            RenderMode::Flat2D => render::CLEAR_COLOR_2D,
+        };
+        (elements, clear)
     };
 
     let rendered =
@@ -798,17 +825,25 @@ fn render(state: &mut SpaceState, crtc: crtc::Handle) {
             }
         };
 
-    if !state.pending_screenshots.is_empty() {
+    if !state.pending_screenshots.is_empty() || state.screencopy.wants(&output) {
         let captured = render::capture_elements(renderer, &elements, size, scale, clear);
-        crate::ipc::finish_screenshots(
-            &mut state.pending_screenshots,
-            captured,
-            &state.screenshot_tx,
+        crate::wayland::screencopy::deliver(
+            &mut state.screencopy,
+            &output,
+            captured.as_ref().map_err(|e| e.as_str()),
         );
+        if !state.pending_screenshots.is_empty() {
+            crate::ipc::finish_screenshots(
+                &mut state.pending_screenshots,
+                captured,
+                &state.screenshot_tx,
+            );
+        }
     }
 
     if rendered {
-        surface.redraw = match surface.drm_output.queue_frame(()) {
+        let feedback = render::take_presentation_feedback(&output, &state.space, &state.lock);
+        surface.redraw = match surface.drm_output.queue_frame(Some(feedback)) {
             Ok(()) => RedrawState::WaitingForVBlank { redraw_needed: false, since: Instant::now() },
             Err(e) => {
                 tracing::warn!("queue_frame failed: {e:?}");
@@ -835,17 +870,36 @@ fn render(state: &mut SpaceState, crtc: crtc::Handle) {
         &state.space,
         &state.cursor_status,
         state.dnd_icon.as_ref(),
+        &state.lock,
         time,
     );
     super::headless::finish_frame(state, frame_start, prepared);
 }
 
-fn on_vblank(state: &mut SpaceState, crtc: crtc::Handle) {
+fn on_vblank(
+    state: &mut SpaceState,
+    crtc: crtc::Handle,
+    metadata: Option<smithay::backend::drm::DrmEventMetadata>,
+) {
     let animating = state.animating();
     let Backend::Drm(b) = &mut state.backend else { return };
     let Some(surface) = b.gpu.surfaces.get_mut(&crtc) else { return };
-    if let Err(e) = surface.drm_output.frame_submitted() {
-        tracing::warn!("frame_submitted failed: {e:?}");
+    use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback::Kind;
+    match surface.drm_output.frame_submitted() {
+        Ok(Some(Some(mut feedback))) => {
+            // The kernel's vblank timestamp is the moment the frame went on screen.
+            let (time, seq, flags) = match metadata {
+                Some(smithay::backend::drm::DrmEventMetadata {
+                    time: smithay::backend::drm::DrmEventTime::Monotonic(t),
+                    sequence,
+                }) => (t.into(), sequence as u64, Kind::Vsync | Kind::HwClock | Kind::HwCompletion),
+                _ => (render::monotonic_now(), 0, Kind::Vsync),
+            };
+            let refresh = smithay::wayland::presentation::Refresh::fixed(surface.frame_duration);
+            feedback.presented(time, refresh, seq, flags);
+        }
+        Ok(_) => {}
+        Err(e) => tracing::warn!("frame_submitted failed: {e:?}"),
     }
     let now = Instant::now();
     surface.flips += 1;

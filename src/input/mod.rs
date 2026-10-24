@@ -190,6 +190,7 @@ enum KeyOutcome {
 }
 
 pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState, time: InputTime) {
+    state.input_activity();
     let Some(keyboard) = state.seat.get_keyboard() else {
         return;
     };
@@ -218,6 +219,11 @@ pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState,
             state.input.suppressed_keys.insert(keycode);
             let n = (vt - keysyms::KEY_XF86Switch_VT_1 + 1) as i32;
             return FilterResult::Intercept(Some(KeyOutcome::SwitchVt(n)));
+        }
+        // Locked: every key goes to the locker (keyboard focus can only be its surface).
+        // No keybinds — nothing may open, close or show anything behind the lock.
+        if state.lock.is_locked() {
+            return FilterResult::Forward;
         }
         if is_release_pointer(nested, mods, sym) {
             state.input.suppressed_keys.insert(keycode);
@@ -377,6 +383,11 @@ pub fn before_frame(state: &mut SpaceState) {
     if state.render_mode != RenderMode::Scene3D {
         return;
     }
+    // Pulsing borders (xdg-activation) change every frame.
+    let now = std::time::Instant::now();
+    if state.world.panels().iter().any(|p| p.attention_until.is_some_and(|t| t > now)) {
+        state.view.dirty = true;
+    }
     let eye = state.player.eye();
     state.voxels.dispatch_dirty(eye);
 
@@ -445,6 +456,7 @@ pub fn handle_pointer_motion_absolute(
     pos: Point<f64, Logical>,
     time: InputTime,
 ) {
+    state.input_activity();
     if pointer_is_3d(state) {
         match state.mode {
             InputMode::Walk => {
@@ -478,6 +490,7 @@ pub fn handle_pointer_motion(
     delta_unaccel: Point<f64, Logical>,
     time: InputTime,
 ) {
+    state.input_activity();
     if pointer_is_3d(state) {
         match state.mode {
             InputMode::Walk => look(state, delta),
@@ -515,6 +528,7 @@ pub fn handle_pointer_motion(
 fn pointer_is_3d(state: &SpaceState) -> bool {
     state.render_mode == RenderMode::Scene3D
         && !matches!(state.overlay, crate::state::Overlay::Layer(_))
+        && !state.lock.is_locked()
 }
 
 /// Linux evdev codes of the mouse buttons.
@@ -549,6 +563,7 @@ pub fn handle_pointer_button(
     button_state: ButtonState,
     time: InputTime,
 ) {
+    state.input_activity();
     if button_state == ButtonState::Released && state.input.suppressed_buttons.remove(&button) {
         return;
     }
@@ -568,6 +583,7 @@ pub fn handle_pointer_button(
     } else if button_state == ButtonState::Pressed
         && !pointer.is_grabbed()
         && state.render_mode == RenderMode::Flat2D
+        && !state.lock.is_locked()
     {
         // 2D click-to-focus. Not while a grab (popup menu, drag) is active: the grab decides.
         let window = state.space.element_under(pointer.current_location()).map(|(w, _)| w.clone());
@@ -579,6 +595,7 @@ pub fn handle_pointer_button(
 }
 
 pub fn handle_pointer_axis(state: &mut SpaceState, frame: AxisFrame) {
+    state.input_activity();
     if pointer_is_3d(state) && state.mode == InputMode::Walk {
         // Scrolling while carrying a panel moves it nearer/farther.
         let notches = frame.v120.map(|(_, v)| v as f64 / 120.0).unwrap_or(frame.axis.1 / 15.0);

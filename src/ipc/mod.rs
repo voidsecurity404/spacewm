@@ -479,6 +479,14 @@ fn handle_request(state: &mut SpaceState, id: ConnectionId, request: Request) ->
             Ok(()) => Response::Ok,
             Err(e) => Response::error(e),
         },
+        // Locked screens are not captured. Test mode (--allow-input-injection, which can
+        // type anything anyway) may, so tests can check what the lock screen shows.
+        Request::Screenshot { .. }
+            if state.lock.is_locked()
+                && !state.ipc.as_ref().is_some_and(|i| i.allow_input_injection) =>
+        {
+            Response::error("the screen is locked")
+        }
         Request::Screenshot { path, force } => match validate_screenshot_path(&path, force) {
             Ok(path) => {
                 state.pending_screenshots.push(ScreenshotRequest {

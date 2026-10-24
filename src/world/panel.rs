@@ -42,6 +42,8 @@ pub struct Panel<W = Window> {
     pub placement_pending: bool,
     /// X11 menus/tooltips (override-redirect windows) drawn into this panel's texture.
     pub x11_children: Vec<crate::xwayland::X11Child>,
+    /// The app asked for attention (xdg-activation): the border pulses until then.
+    pub attention_until: Option<std::time::Instant>,
 }
 
 impl<W> Panel<W> {
@@ -59,6 +61,7 @@ impl<W> Panel<W> {
             content_dirty: true,
             placement_pending: true,
             x11_children: Vec::new(),
+            attention_until: None,
         }
     }
 
