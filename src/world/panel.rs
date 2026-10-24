@@ -40,6 +40,9 @@ pub struct Panel<W = Window> {
     pub content_dirty: bool,
     /// We don't know the app yet (no app_id): a saved placement may still be applied.
     pub placement_pending: bool,
+    /// Last known app_id and title. Kept here because the toplevel's own copy is already
+    /// cleared when we hear it was destroyed, and that's when its spot is remembered.
+    pub names: (Option<String>, Option<String>),
     /// X11 menus/tooltips (override-redirect windows) drawn into this panel's texture.
     pub x11_children: Vec<crate::xwayland::X11Child>,
     /// The app asked for attention (xdg-activation): the border pulses until then.
@@ -60,6 +63,7 @@ impl<W> Panel<W> {
             visible: true,
             content_dirty: true,
             placement_pending: true,
+            names: (None, None),
             x11_children: Vec::new(),
             attention_until: None,
         }

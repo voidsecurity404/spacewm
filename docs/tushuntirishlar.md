@@ -312,3 +312,23 @@ marta" olishi kerak edi, lekin callback'lar faqat chizilgan kadrdan keyin yubori
 Sahna harakatsiz bo'lsa kadr bo'lmaydi, shuning uchun bunday ilovalar butunlay to'xtab
 qolardi (masalan, resize qilingan terminal yangi o'lchamni hech qachon chizmasdi). Endi
 sekundiga bir marta ishlaydigan timer bu callback'larni render qilmasdan yuboradi.
+
+### Alt+Enter'dan keyin "qotib qolish" (tuzatildi)
+
+Belgi: Alt+Enter bosilgach, ekran o'zgarmaydi, sichqoncha kamerani burmaydi, yurib
+bo'lmaydi. spacewm aslida ishlab turgan edi (Alt+Shift+E ishladi).
+
+Sabab: siz so'ragan oyna darhol Window rejimiga olinadi (tugmalar unga ketadi), lekin
+layout.json'dagi saqlangan joyga ham qo'yilardi. Bu joy esa orqangizda bo'lishi mumkin.
+Natijada ko'rinmaydigan terminalga yozardingiz va sichqoncha kamerani emas, o'sha
+terminaldagi kursorni surardi.
+
+Tuzatish: so'ralgan oyna saqlangan joyga faqat o'sha joy hozir ko'rinib turgan bo'lsa
+qo'yiladi. Buning uchun panel markazi kadrda, old tomoni sizga qaragan va 8 m dan yaqin
+bo'lishi kerak. Aks holda oyna ro'parangizda ochiladi, saqlangan joy esa keyingi safar
+uchun esda qoladi. Ishga tushganda o'zi ochiladigan oynalar (autostart) avvalgidek
+saqlangan joylariga qaytadi.
+
+Yo'l-yo'lakay topilgan xato: oyna yopilganda uning joyi esda qolmasdi, chunki
+`toplevel_destroyed` chaqirilganda app_id allaqachon tozalangan bo'ladi. Endi panel oxirgi
+app_id va sarlavhani o'zida saqlaydi (`Panel::names`).

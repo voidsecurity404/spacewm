@@ -229,6 +229,9 @@ impl XdgShellHandler for SpaceState {
 
     fn title_changed(&mut self, surface: ToplevelSurface) {
         tracing::debug!(title = ?toplevel_title(surface.wl_surface()), "title changed");
+        if let Some(window) = self.window_for_surface(surface.wl_surface()) {
+            self.remember_names(&window);
+        }
     }
 }
 

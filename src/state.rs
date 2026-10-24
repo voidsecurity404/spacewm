@@ -554,8 +554,22 @@ impl SpaceState {
         self.layout.save(open);
     }
 
+    /// Copy a window's current app_id/title to its panel (see `Panel::names`).
+    pub fn remember_names(&mut self, window: &Window) {
+        let (app_id, title) = window_names(window);
+        if let Some(panel) = self.world.panels_mut().iter_mut().find(|p| &p.window == window) {
+            if app_id.is_some() {
+                panel.names.0 = app_id;
+            }
+            if title.is_some() {
+                panel.names.1 = title;
+            }
+        }
+    }
+
     /// A panel's app is now known: put it where it was last time, if we remember.
     pub fn restore_placement(&mut self, window: &Window) {
+        self.remember_names(window);
         let Some(panel) = self.world.panel_for_window(window) else {
             return;
         };
@@ -566,7 +580,20 @@ impl SpaceState {
         let Some(app_id) = app_id else {
             return;
         };
-        let saved = self.layout.take_placement(&app_id, title.as_deref());
+        let panel_id = panel.id;
+        let mut saved = self.layout.take_placement(&app_id, title.as_deref());
+        // A window the user just asked for (a key, the launcher) is entered right away. If
+        // its saved spot is behind them or far off, they would type into a terminal they
+        // can't see, with the mouse no longer turning the view: it looks frozen. Such a
+        // window opens in front of them instead; the spot stays remembered.
+        let requested = self.mode == (crate::input::mode::InputMode::Window { panel: panel_id })
+            || self.expect_window_until.is_some_and(|until| std::time::Instant::now() < until);
+        if requested && saved.as_ref().is_some_and(|s| !self.placement_in_view(s)) {
+            tracing::info!(app_id, "saved placement out of view: opening in front instead");
+            if let Some(s) = saved.take() {
+                self.layout.remember(s);
+            }
+        }
         let Some(panel) = self.world.panels_mut().iter_mut().find(|p| &p.window == window) else {
             return;
         };
@@ -579,6 +606,31 @@ impl SpaceState {
             panel.visible = !saved.hidden;
             self.view.dirty = true;
         }
+    }
+
+    /// Would a panel at this saved spot be seen from where the camera is now: in the view,
+    /// front side towards us, close enough to read.
+    fn placement_in_view(&self, saved: &crate::world::layout::SavedPanel) -> bool {
+        /// Farther than this a fresh terminal is too small to read anyway.
+        const MAX_DISTANCE: f32 = 8.0;
+        let camera = &self.view.camera;
+        let pos = saved.position();
+        let to_camera = camera.position - pos;
+        let frustum = crate::render::frustum::Frustum::from_matrix(
+            camera.projection_matrix() * camera.view_matrix(),
+        );
+        tracing::debug!(
+            camera = ?camera.position,
+            ?pos,
+            normal = ?(saved.rotation() * glam::Vec3::Z),
+            in_frustum = frustum.sphere_visible(pos, 0.0),
+            "placement view check"
+        );
+        !saved.hidden
+            && to_camera.length() <= MAX_DISTANCE
+            && (saved.rotation() * glam::Vec3::Z).dot(to_camera) > 0.0
+            // Its middle, not just an edge, is on screen.
+            && frustum.sphere_visible(pos, 0.0)
     }
 
     pub fn window_by_id(&self, id: u64) -> Option<Window> {
@@ -721,6 +773,8 @@ pub fn window_names(window: &Window) -> (Option<String>, Option<String>) {
 /// match them again anyway).
 pub fn saved_panel(p: &crate::world::panel::Panel) -> Option<crate::world::layout::SavedPanel> {
     let (app_id, title) = window_names(&p.window);
+    let app_id = app_id.or_else(|| p.names.0.clone());
+    let title = title.or_else(|| p.names.1.clone());
     Some(crate::world::layout::SavedPanel {
         app_id: app_id?,
         title_hint: title,

@@ -80,17 +80,34 @@ pass "layout saved (panel placement + block edits)"
 
 # Restart: the terminal comes back on the wall, the blocks are still changed.
 space_stop || fail "unclean exit"
-space_start --render 3d --layout "$LAYOUT"
+space_start --render 3d --layout "$LAYOUT" --log-level debug
 sleep 1
 [ "$(kc get-block 0 "$TOP" 1)" = "glass" ] || fail "glass block lost after restart"
 [ "$(kc get-block 0 $((TOP + 2)) -4)" = "stone" ] || fail "wall lost after restart"
 pass "block edits survive a restart"
+# Facing the wall: a terminal asked for now goes back to its saved spot there.
+kc teleport 0.5 "$EYE" 0.5 --yaw 0 --pitch 0
 kc spawn foot >/dev/null
 wait_windows 1
 sleep 0.8
 read -r PZ2 < <(kc --json list | python3 -c "import json,sys; print(json.load(sys.stdin)['panels'][0]['position'][2])")
 python3 -c "exit(0 if abs($PZ2 - $PZ) < 0.001 else 1)" || fail "foot did not reopen on the wall (z=$PZ2, saved $PZ)"
 pass "reopened terminal comes back on the wall"
+
+# A terminal asked for while facing away from its saved spot opens in front, not behind
+# the user (who would then type into an invisible window: it looked frozen).
+kc close 1 >/dev/null
+for _ in $(seq 30); do [ "$(kc --json list | grep -c '"id":')" -eq 0 ] && break; sleep 0.1; done
+kc teleport 0.5 "$EYE" 0.5 --yaw 180 --pitch 0
+kc input key Super+Return
+wait_windows 1
+sleep 0.8
+read -r PZ3 < <(kc --json list | python3 -c "import json,sys; print(json.load(sys.stdin)['panels'][0]['position'][2])")
+python3 -c "exit(0 if $PZ3 > 1.0 else 1)" || fail "terminal opened behind the user (z=$PZ3, saved wall z=$PZ)"
+grep -q "saved placement out of view" "$OUT/spacewm.log" || fail "no out-of-view log line"
+pass "a terminal opened facing away from its saved spot appears in front (z=$PZ3)"
+kc input key Super+Escape
+kc close "$(kc --json list | python3 -c "import json,sys; print(json.load(sys.stdin)['panels'][0]['id'])")" >/dev/null
 
 # Performance: walking around at 60 fps with render distance 8.
 kc input key Super+Escape
