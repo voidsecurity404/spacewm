@@ -117,6 +117,9 @@ impl SpaceState {
     /// Exclusive keyboard interactivity on the top/overlay layer: that surface gets the
     /// keyboard (a launcher, a lock-like overlay) until it closes or gives it up.
     fn update_layer_focus(&mut self, layer: &LayerSurface) {
+        if self.lock.is_locked() {
+            return; // nothing but the locker gets the keyboard
+        }
         let wants = layer.cached_state().keyboard_interactivity == KeyboardInteractivity::Exclusive
             && matches!(layer.layer(), Layer::Top | Layer::Overlay)
             && layer.user_data().get::<Dismissed>().is_none();
@@ -154,12 +157,8 @@ impl SpaceState {
         if let Some(geo) = self.primary_output_geometry() {
             self.pointer_location = (geo.loc + geo.size.downscale(2).to_point()).to_f64();
         }
-        if let Some(keyboard) = self.seat.get_keyboard() {
-            keyboard.set_focus(
-                self,
-                Some(KeyboardFocusTarget::Layer(layer)),
-                SERIAL_COUNTER.next_serial(),
-            );
+        {
+            self.set_keyboard_focus(Some(KeyboardFocusTarget::Layer(layer)));
         }
         self.queue_redraw();
     }
@@ -194,8 +193,7 @@ impl SpaceState {
                 .cloned()
                 .map(KeyboardFocusTarget::Window),
         };
-        if let Some(keyboard) = self.seat.get_keyboard() {
-            keyboard.set_focus(self, target, serial);
-        }
+        let _ = serial;
+        self.set_keyboard_focus(target);
     }
 }

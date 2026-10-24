@@ -53,6 +53,59 @@ frames=$(ffprobe -v error -count_frames -select_streams v:0 -show_entries stream
 [ "${frames:-0}" -gt 20 ] || fail "wf-recorder recorded only ${frames:-0} frames"
 pass "wf-recorder records the screen ($frames frames, $size bytes)"
 
+# ---- ext-session-lock with a test locker: lock, unlock, focus comes back; a second
+# locker is refused while the first one holds the lock.
+has ext_session_lock_manager_v1
+LOCKER="$ROOT/target/debug/examples/test_locker"
+before=$(focused)
+[ "$before" != "[]" ] || fail "expected a focused panel before locking"
+WAYLAND_DISPLAY="$WL" "$LOCKER" 00ff00 2.5 >/dev/null &
+LPID=$!
+for _ in $(seq 50); do grep -q "lock confirmed" "$OUT/spacewm.log" && break; sleep 0.1; done
+grep -q "lock confirmed" "$OUT/spacewm.log" || fail "test locker did not lock"
+sleep 0.3
+$PX near "$(shot s7-test-locked)" 640 360 0 255 0 20 >/dev/null || fail "lock surface not shown"
+[ "$(focused)" = "[]" ] || fail "a window kept keyboard focus while locked: $(focused)"
+if WAYLAND_DISPLAY="$WL" "$LOCKER" ff0000 0.1 >/dev/null 2>&1; then
+    fail "a second locker was allowed while the session is locked"
+fi
+pass "lock: only the locker is shown and has the keyboard; a second locker is refused"
+wait "$LPID" || fail "test locker failed"
+sleep 0.3
+grep -q "session unlocked" "$OUT/spacewm.log" || fail "unlock not seen"
+[ "$(focused)" = "$before" ] || fail "focus not restored after unlock: $(focused) (was $before)"
+U=$(shot s7-unlocked)
+$PX near "$U" 640 360 0 255 0 20 >/dev/null && fail "lock surface still shown after unlock"
+pass "unlock: the desktop and the focused panel come back"
+
+# ---- swaylock hides everything; killing it keeps the screen locked.
+kc spawn swaylock -c ff00ff >/dev/null
+for _ in $(seq 50); do grep -q "lock confirmed" "$OUT/spacewm.log" && break; sleep 0.1; done
+grep -q "lock confirmed" "$OUT/spacewm.log" || fail "swaylock did not lock"
+sleep 0.5
+L=$(shot s7-locked)
+$PX near "$L" 640 600 255 0 255 30 >/dev/null || fail "lock screen is not swaylock's color: $($PX "$L" 640 600)"
+$PX near "$L" 300 100 255 0 255 30 >/dev/null || fail "something besides the lock is visible"
+pass "swaylock: only the lock surface is shown"
+WAYLAND_DISPLAY="$WL" timeout 5 grim "$OUT/grim-locked.png" 2>/dev/null && fail "grim captured the locked screen"
+pass "screen capture is refused while locked"
+kc input key "Super+Return"
+sleep 0.5
+grep -q 'spawned.*command="foot"' "$OUT/spacewm.log" && fail "keybind worked while locked"
+pass "keybinds are off while locked"
+pkill -P "$SPACE_PID" -x swaylock
+sleep 0.8
+R=$(shot s7-lock-crashed)
+$PX near "$R" 300 100 140 0 0 25 >/dev/null || fail "after killing swaylock the screen is not red: $($PX "$R" 300 100)"
+pass "pkill swaylock: the session stays locked (red screen)"
+kc spawn swaylock -c 00ffff >/dev/null
+for _ in $(seq 50); do grep -q "new locker replaces" "$OUT/spacewm.log" && break; sleep 0.1; done
+grep -q "new locker replaces" "$OUT/spacewm.log" || fail "a new locker was not accepted"
+sleep 0.5
+$PX near "$(shot s7-relocked)" 640 600 0 255 255 30 >/dev/null || fail "new locker not shown"
+pass "a new locker takes over the abandoned lock"
+pkill -P "$SPACE_PID" -x swaylock || true
+
 space_stop || fail "unclean exit"
 grep -E "panicked" "$OUT/spacewm.log" && fail "panic in log"
 pass "clean exit"

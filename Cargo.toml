@@ -76,3 +76,8 @@ opt-level = 3
 lto = "thin"
 # Keep line tables so crash backtraces from a DRM session are readable.
 debug = 1
+
+# Test clients (examples/): a minimal session locker for the e2e tests.
+[dev-dependencies]
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }

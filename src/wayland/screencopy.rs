@@ -95,6 +95,11 @@ impl ImageCopyCaptureHandler for SpaceState {
     }
 
     fn capture_constraints(&mut self, source: &ImageCaptureSource) -> Option<BufferConstraints> {
+        // The screen can't be captured while it is locked: a screenshot tool must never
+        // see what the lock hides (nor the lock screen, for that matter).
+        if self.lock.is_locked() {
+            return None;
+        }
         constraints(&source_output(source)?)
     }
 
@@ -110,6 +115,10 @@ impl ImageCopyCaptureHandler for SpaceState {
             frame.fail(FailureReason::Stopped);
             return;
         };
+        if self.lock.is_locked() {
+            frame.fail(FailureReason::Stopped);
+            return;
+        }
         self.screencopy.pending.push((Pending::Ext(frame), output));
         // A frame is due now, even if nothing on screen changed.
         self.view.dirty = true;
@@ -289,8 +298,8 @@ impl smithay::wayland::Dispatch2<ZwlrScreencopyManagerV1, SpaceState> for WlrMan
             }
             _ => None,
         };
-        let _ = &state;
-        let region = region.filter(|r| r.size.w > 0 && r.size.h > 0);
+        let locked = state.lock.is_locked();
+        let region = region.filter(|r| r.size.w > 0 && r.size.h > 0 && !locked);
         let frame = data_init.init(
             frame,
             WlrFrame {
@@ -338,7 +347,7 @@ impl smithay::wayland::Dispatch2<ZwlrScreencopyFrameV1, SpaceState> for WlrFrame
             }
             *used = true;
         }
-        let Some(output) = self.output.clone() else {
+        let Some(output) = self.output.clone().filter(|_| !state.lock.is_locked()) else {
             resource.failed();
             return;
         };

@@ -219,6 +219,11 @@ pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState,
             let n = (vt - keysyms::KEY_XF86Switch_VT_1 + 1) as i32;
             return FilterResult::Intercept(Some(KeyOutcome::SwitchVt(n)));
         }
+        // Locked: every key goes to the locker (keyboard focus can only be its surface).
+        // No keybinds — nothing may open, close or show anything behind the lock.
+        if state.lock.is_locked() {
+            return FilterResult::Forward;
+        }
         if is_release_pointer(nested, mods, sym) {
             state.input.suppressed_keys.insert(keycode);
             return FilterResult::Intercept(Some(KeyOutcome::Action(Action::ReleasePointer)));
@@ -515,6 +520,7 @@ pub fn handle_pointer_motion(
 fn pointer_is_3d(state: &SpaceState) -> bool {
     state.render_mode == RenderMode::Scene3D
         && !matches!(state.overlay, crate::state::Overlay::Layer(_))
+        && !state.lock.is_locked()
 }
 
 /// Linux evdev codes of the mouse buttons.
@@ -568,6 +574,7 @@ pub fn handle_pointer_button(
     } else if button_state == ButtonState::Pressed
         && !pointer.is_grabbed()
         && state.render_mode == RenderMode::Flat2D
+        && !state.lock.is_locked()
     {
         // 2D click-to-focus. Not while a grab (popup menu, drag) is active: the grab decides.
         let window = state.space.element_under(pointer.current_location()).map(|(w, _)| w.clone());

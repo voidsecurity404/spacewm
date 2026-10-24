@@ -767,26 +767,51 @@ fn render(state: &mut SpaceState, crtc: crtc::Handle) {
     let time = state.start_time.elapsed();
     let renderer = &mut b.gpu.renderer;
 
-    let mut prepared = (state.render_mode == RenderMode::Scene3D)
+    let locked = state.lock.is_locked();
+    let mut prepared = (state.render_mode == RenderMode::Scene3D && !locked)
         .then(|| state.view.prepare(renderer, primary_size, crate::scene_inputs!(state, time)));
-    let mut elements =
-        render::overlay_elements(renderer, crate::overlay_inputs!(state, &output, scale, time));
-    match prepared.as_mut() {
-        Some(p) => {
-            // Stretch the shared scene to this output (same size on the primary one).
-            if let Some(scene) = state.view.scene_element_sized(size.to_logical(1)) {
-                elements.push(SpaceRenderElement::Texture(scene));
+    let (elements, clear) = if locked {
+        // Locked: the locker's surface and nothing else (see wayland/session_lock.rs).
+        render::lock_elements(renderer, &state.lock, &output, scale)
+    } else {
+        let mut elements =
+            render::overlay_elements(renderer, crate::overlay_inputs!(state, &output, scale, time));
+        match prepared.as_mut() {
+            Some(p) => {
+                // Stretch the shared scene to this output (same size on the primary one).
+                if let Some(scene) = state.view.scene_element_sized(size.to_logical(1)) {
+                    elements.push(SpaceRenderElement::Texture(scene));
+                }
+                p.element = None;
             }
-            p.element = None;
+            None => {
+                // 2D: bars above the windows, wallpapers below (smithay's space renderer
+                // does this for the other backends).
+                use smithay::wayland::shell::wlr_layer::Layer;
+                let map = smithay::desktop::layer_map_for_output(&output);
+                elements.extend(render::layer_elements(
+                    renderer,
+                    &map,
+                    &[Layer::Overlay, Layer::Top],
+                    scale,
+                ));
+                elements.extend(render::space_elements(renderer, &state.space, &output, scale));
+                elements.extend(render::layer_elements(
+                    renderer,
+                    &map,
+                    &[Layer::Bottom, Layer::Background],
+                    scale,
+                ));
+            }
         }
-        None => elements.extend(render::space_elements(renderer, &state.space, &output, scale)),
-    }
-    let clear = match state.render_mode {
-        RenderMode::Scene3D => {
-            let [r, g, bl] = render::scene::SKY_COLOR;
-            [r, g, bl, 1.0]
-        }
-        RenderMode::Flat2D => render::CLEAR_COLOR_2D,
+        let clear = match state.render_mode {
+            RenderMode::Scene3D => {
+                let [r, g, bl] = render::scene::SKY_COLOR;
+                [r, g, bl, 1.0]
+            }
+            RenderMode::Flat2D => render::CLEAR_COLOR_2D,
+        };
+        (elements, clear)
     };
 
     let rendered =
@@ -842,6 +867,7 @@ fn render(state: &mut SpaceState, crtc: crtc::Handle) {
         &state.space,
         &state.cursor_status,
         state.dnd_icon.as_ref(),
+        &state.lock,
         time,
     );
     super::headless::finish_frame(state, frame_start, prepared);

@@ -133,6 +133,9 @@ pub struct SpaceState {
         smithay::wayland::image_capture_source::OutputCaptureSourceState,
     pub image_copy_capture_state: smithay::wayland::image_copy_capture::ImageCopyCaptureState,
     pub screencopy: crate::wayland::screencopy::Screencopy,
+    /// ext-session-lock (wayland/session_lock.rs).
+    pub session_lock_state: smithay::wayland::session_lock::SessionLockManagerState,
+    pub lock: crate::wayland::session_lock::LockState,
     /// zwlr_screencopy_manager_v1 (wf-recorder). Never read: keeps the global.
     #[allow(dead_code)]
     pub wlr_screencopy_global: smithay::reexports::wayland_server::backend::GlobalId,
@@ -243,6 +246,8 @@ impl SpaceState {
         let image_copy_capture_state =
             smithay::wayland::image_copy_capture::ImageCopyCaptureState::new::<Self>(&dh);
         let wlr_screencopy_global = crate::wayland::screencopy::create_wlr_global(&dh);
+        let session_lock_state =
+            smithay::wayland::session_lock::SessionLockManagerState::new::<Self, _>(&dh, |_| true);
         tracing::debug!("global: zwlr_layer_shell_v1");
         tracing::debug!("global: xdg_wm_base");
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
@@ -319,6 +324,8 @@ impl SpaceState {
             output_capture_source_state,
             image_copy_capture_state,
             screencopy: Default::default(),
+            session_lock_state,
+            lock: Default::default(),
             wlr_screencopy_global,
             overlay: Overlay::None,
             launcher: None,
@@ -526,6 +533,21 @@ impl SpaceState {
         &self,
         pos: Point<f64, Logical>,
     ) -> Option<(PointerFocusTarget, Point<f64, Logical>)> {
+        // Locked: only the lock surface of the output under the pointer.
+        if self.lock.is_locked() {
+            let output = self.space.outputs().find(|o| {
+                self.space.output_geometry(o).is_some_and(|g| g.to_f64().contains(pos))
+            })?;
+            let origin = self.space.output_geometry(output)?.loc;
+            let surface = self.lock.surface_for(output)?.wl_surface().clone();
+            let (s, at) = smithay::desktop::utils::under_from_surface_tree(
+                &surface,
+                pos - origin.to_f64(),
+                (0, 0),
+                WindowSurfaceType::ALL,
+            )?;
+            return Some((PointerFocusTarget::Surface(s), (at + origin).to_f64()));
+        }
         // Layer surfaces on top of windows first, then windows (only in 2D: in 3D they
         // are panels, reached through raycasts), then layers below them.
         use smithay::wayland::shell::wlr_layer::Layer;

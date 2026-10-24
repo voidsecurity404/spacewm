@@ -135,16 +135,12 @@ pub fn set_mode(state: &mut SpaceState, new_mode: InputMode, hit: Option<&PanelH
                 _ => Point::from((size.w as f64 / 2.0, size.h as f64 / 2.0)),
             };
             set_activated(&window, true);
-            if let Some(keyboard) = state.seat.get_keyboard() {
-                keyboard.set_focus(state, Some(KeyboardFocusTarget::Window(window)), serial);
-            }
+            state.set_keyboard_focus(Some(KeyboardFocusTarget::Window(window)));
             send_window_pointer(state, InputTime::now());
         }
         InputMode::Walk => {
             state.mode = new_mode;
-            if let Some(keyboard) = state.seat.get_keyboard() {
-                keyboard.set_focus(state, None, serial);
-            }
+            state.set_keyboard_focus(None);
             // Pointer leaves every surface.
             if let Some(pointer) = state.seat.get_pointer() {
                 let location = pointer.current_location();

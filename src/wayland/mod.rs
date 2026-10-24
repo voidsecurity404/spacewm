@@ -13,6 +13,7 @@ pub mod layer_shell;
 pub mod output;
 pub mod screencopy;
 pub mod seat;
+pub mod session_lock;
 pub mod shm;
 pub mod socket;
 pub mod xdg_shell;

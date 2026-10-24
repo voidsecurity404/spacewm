@@ -179,7 +179,8 @@ fn render(state: &mut SpaceState) {
     };
     // 3D: advance the camera and re-render the scene texture first. The scene pass uses
     // our own framebuffers, so it must run before the output framebuffer is bound.
-    let mut prepared = (state.render_mode == RenderMode::Scene3D)
+    let locked = state.lock.is_locked();
+    let mut prepared = (state.render_mode == RenderMode::Scene3D && !locked)
         .then(|| state.view.prepare(&mut b.renderer, size, crate::scene_inputs!(state, time)));
 
     let mut framebuffer = match b.renderer.bind(&mut b.target) {
@@ -189,33 +190,46 @@ fn render(state: &mut SpaceState) {
             return;
         }
     };
-    let overlay = render::overlay_elements(
-        &mut b.renderer,
-        crate::overlay_inputs!(state, &output, scale, time),
-    );
-    let result = match prepared.as_mut() {
-        Some(prepared) => {
-            let mut elements = overlay;
-            if let Some(scene) = prepared.element.take() {
-                elements.push(render::SpaceRenderElement::Texture(scene));
-            }
-            render::render_3d(
-                &mut b.renderer,
-                &mut framebuffer,
-                age,
-                &elements,
-                &mut b.damage_tracker,
-            )
-        }
-        None => render::render_2d(
+    let result = if locked {
+        // Locked: the locker's surface and nothing else (see wayland/session_lock.rs).
+        let (elements, clear) = render::lock_elements(&mut b.renderer, &state.lock, &output, scale);
+        render::render_with_clear(
             &mut b.renderer,
             &mut framebuffer,
             age,
-            &output,
-            &state.space,
-            &overlay,
+            &elements,
             &mut b.damage_tracker,
-        ),
+            clear,
+        )
+    } else {
+        let overlay = render::overlay_elements(
+            &mut b.renderer,
+            crate::overlay_inputs!(state, &output, scale, time),
+        );
+        match prepared.as_mut() {
+            Some(prepared) => {
+                let mut elements = overlay;
+                if let Some(scene) = prepared.element.take() {
+                    elements.push(render::SpaceRenderElement::Texture(scene));
+                }
+                render::render_3d(
+                    &mut b.renderer,
+                    &mut framebuffer,
+                    age,
+                    &elements,
+                    &mut b.damage_tracker,
+                )
+            }
+            None => render::render_2d(
+                &mut b.renderer,
+                &mut framebuffer,
+                age,
+                &output,
+                &state.space,
+                &overlay,
+                &mut b.damage_tracker,
+            ),
+        }
     };
     if let Err(err) = result {
         tracing::error!("rendering failed: {err:?}");
@@ -247,6 +261,7 @@ fn render(state: &mut SpaceState) {
         &state.space,
         &state.cursor_status,
         state.dnd_icon.as_ref(),
+        &state.lock,
         time,
     );
 
@@ -262,6 +277,8 @@ pub fn finish_frame(
 ) {
     let scene_rendered = prepared.as_ref().is_some_and(|p| p.scene_rendered);
     state.last_frame = Some(frame_start);
+    // A lock waiting for confirmation was just drawn: tell the locker it is in charge.
+    state.confirm_lock();
     if state.view.stats.enabled {
         state.view.stats.record(frame_start.elapsed(), scene_rendered);
     }
