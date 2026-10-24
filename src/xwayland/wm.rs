@@ -174,6 +174,13 @@ impl XwmHandler for SpaceState {
         _reorder: Option<Reorder>,
     ) {
         let mut geo = surface.last_configure();
+        // A tiled window on the 2D desktop keeps the size the tiling gave it.
+        let tiled = self.render_mode == RenderMode::Flat2D
+            && self.x11_panel(&surface).is_some_and(|id| !self.desktop2d.is_floating(id));
+        if tiled {
+            let _ = surface.configure(geo);
+            return;
+        }
         if let Some(w) = w {
             geo.size.w = (w as i32).clamp(1, 16384);
         }
@@ -226,6 +233,10 @@ impl XwmHandler for SpaceState {
     }
 
     fn maximize_request(&mut self, _xwm: XwmId, surface: X11Surface) {
+        // The tiling decides sizes on the 2D desktop.
+        if self.render_mode == RenderMode::Flat2D {
+            return;
+        }
         let _ = surface.set_maximized(true);
         self.enlarge(&surface);
     }
@@ -248,8 +259,9 @@ impl XwmHandler for SpaceState {
             }
             return;
         }
-        let _ = surface.set_fullscreen(true);
-        self.enlarge(&surface);
+        if let Some(id) = self.x11_panel(&surface) {
+            self.set_fullscreen_2d(id, true);
+        }
     }
 
     fn unfullscreen_request(&mut self, _xwm: XwmId, surface: X11Surface) {
@@ -259,9 +271,8 @@ impl XwmHandler for SpaceState {
             }
             return;
         }
-        let _ = surface.set_fullscreen(false);
-        if !surface.is_maximized() {
-            self.restore_normal(&surface);
+        if let Some(id) = self.x11_panel(&surface) {
+            self.set_fullscreen_2d(id, false);
         }
     }
 
@@ -360,6 +371,7 @@ impl SpaceState {
         self.restore_placement(window);
         self.view.dirty = true;
         crate::ipc::broadcast(self, Event::PanelOpened { id, app_id });
+        self.ws_add_window(id);
         self.launch_window_opened(window);
         self.arrange_seated();
         if self.render_mode == RenderMode::Scene3D {

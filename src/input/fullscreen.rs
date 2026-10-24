@@ -81,7 +81,7 @@ impl SpaceState {
 
 /// Tell the app it is (or no longer is) fullscreen. `Some(rect)`: fullscreen on that
 /// output area. Leaving, the caller sets the size and sends the configure.
-fn set_fullscreen_state(
+pub fn set_fullscreen_state(
     window: &Window,
     output: Option<smithay::utils::Rectangle<i32, smithay::utils::Logical>>,
 ) {

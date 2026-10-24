@@ -99,6 +99,12 @@ pub enum Action {
     Toggle2d,
     /// Open/close the settings box.
     Settings,
+    /// Show workspace 1..9 (3D with building on: hotbar block).
+    Workspace(u8),
+    MoveToWorkspace(u8),
+    ToggleFloat,
+    FocusDir(crate::desktop2d::tiling::Dir),
+    MoveDir(crate::desktop2d::tiling::Dir),
     /// Lock the screen now.
     Lock,
     Screenshot,
@@ -443,6 +449,9 @@ pub fn run_action(state: &mut SpaceState, action: Action) {
         Action::SelectBlock(i) if state.config.general.building => state.select_slot(i as usize),
         Action::Inventory if state.config.general.building => state.toggle_inventory(),
         Action::SelectBlock(_) | Action::Inventory => {}
+        Action::ToggleFullscreen if state.render_mode == RenderMode::Flat2D => {
+            state.toggle_fullscreen_2d(None);
+        }
         Action::ToggleFullscreen => {
             let target = world_ops::target_panel(state);
             state.toggle_fullscreen(target);
@@ -453,6 +462,17 @@ pub fn run_action(state: &mut SpaceState, action: Action) {
         Action::ToggleSeated => state.toggle_seated(),
         Action::Toggle2d => state.toggle_2d(),
         Action::Settings => state.toggle_settings(),
+        Action::Workspace(n) => {
+            if state.render_mode == RenderMode::Scene3D && state.config.general.building {
+                state.select_slot(n as usize - 1);
+            } else {
+                state.switch_workspace(n);
+            }
+        }
+        Action::MoveToWorkspace(n) => state.move_to_workspace(n),
+        Action::ToggleFloat => state.toggle_float(),
+        Action::FocusDir(d) => state.focus_dir(d),
+        Action::MoveDir(d) => state.move_dir(d),
         Action::Screenshot => state.screenshot(false),
         Action::ScreenshotRegion => state.screenshot(true),
         Action::Hardware(hw) => state.hardware_key(hw),
@@ -525,6 +545,7 @@ pub fn release_all_keys(state: &mut SpaceState) {
 /// Per-frame input work in 3D: walking (held keys) and the hover highlight.
 pub fn before_frame(state: &mut SpaceState) {
     let _span = tracing::trace_span!("physics").entered();
+    state.refresh_2d();
     state.refresh_hud();
     state.refresh_inventory();
     state.refresh_launching();
@@ -881,6 +902,17 @@ pub fn handle_pointer_button(
         && state.render_mode == RenderMode::Flat2D
         && !state.lock.is_locked()
     {
+        // The top bar: workspace buttons (and nothing goes to the windows below it).
+        if let Some(geo) = state.primary_output_geometry() {
+            let local = pointer.current_location() - geo.loc.to_f64();
+            if local.y < crate::desktop2d::bar::HEIGHT as f64
+                && state.desktop2d.fullscreen.is_none()
+            {
+                state.input.suppressed_buttons.insert(button);
+                state.bar_click(local.x);
+                return;
+            }
+        }
         // Mod+drag moves, Mod+right-drag resizes the window under the pointer.
         let mods = state.seat.get_keyboard().map(|k| k.modifier_state()).unwrap_or_default();
         let nested = state.backend.is_nested();
@@ -895,6 +927,8 @@ pub fn handle_pointer_button(
         // 2D click-to-focus. Not while a grab (popup menu, drag) is active: the grab decides.
         let window = state.space.element_under(pointer.current_location()).map(|(w, _)| w.clone());
         state.focus_window(window.as_ref(), serial);
+        state.note_2d_focus();
+        state.desktop2d.bar.dirty = true;
     }
     pointer.button(state, &ButtonEvent { button, state: button_state, serial, time });
     pointer.frame(state);

@@ -179,6 +179,8 @@ pub struct SpaceState {
     pub drag_hint: Option<(crate::input::drag::Zone, crate::inventory::Image)>,
     /// Seated mode: windows on an arc around you (input/seated.rs).
     pub seated: crate::input::seated::Seated,
+    /// The 2D desktop: workspaces, tiling, the top bar (desktop2d/).
+    pub desktop2d: crate::desktop2d::Desktop2d,
     /// A Mod+drag on the 2D desktop (input/flat.rs).
     pub drag2d: Option<crate::input::flat::Drag2d>,
     /// The dock along the bottom (render/dock.rs).
@@ -421,6 +423,7 @@ impl SpaceState {
             dock: Default::default(),
             seated: Default::default(),
             drag2d: None,
+            desktop2d: crate::desktop2d::Desktop2d::new(),
             building_until: None,
             drag: None,
             drag_hint: None,

@@ -242,6 +242,7 @@ pub fn on_new_window(state: &mut SpaceState, panel: PanelId) {
 
 /// The focused panel went away: back to walking.
 pub fn on_panel_removed(state: &mut SpaceState, panel: PanelId) {
+    state.ws_remove_window(panel);
     if state.drag.is_some_and(|d| d.panel == panel) {
         state.drag = None;
     }

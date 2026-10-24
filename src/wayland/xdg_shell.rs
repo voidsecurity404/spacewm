@@ -58,6 +58,7 @@ impl XdgShellHandler for SpaceState {
         self.world.add_window(id, window.clone(), DEFAULT_WINDOW_SIZE, &self.view.camera, distance);
         self.view.dirty = true;
         crate::ipc::broadcast(self, Event::PanelOpened { id, app_id: None });
+        self.ws_add_window(id);
         self.launch_window_opened(&window);
         self.arrange_seated();
 
@@ -67,6 +68,7 @@ impl XdgShellHandler for SpaceState {
         } else {
             // 2D: new windows get keyboard focus, like on any desktop.
             self.focus_window(Some(&window), SERIAL_COUNTER.next_serial());
+            self.note_2d_focus();
         }
     }
 
@@ -166,6 +168,11 @@ impl XdgShellHandler for SpaceState {
     }
 
     fn maximize_request(&mut self, surface: ToplevelSurface) {
+        // The tiling decides sizes on the 2D desktop: answer with the state unchanged.
+        if self.render_mode == RenderMode::Flat2D {
+            surface.send_configure();
+            return;
+        }
         // Maximized windows leave the strips that bars reserved (exclusive zones) free.
         let Some(output) = self.space.outputs().next().cloned() else {
             return;
@@ -211,17 +218,16 @@ impl XdgShellHandler for SpaceState {
             }
             return;
         }
-        let Some(output_geo) = self.primary_output_geometry() else {
-            return;
-        };
-        if let Some(window) = self.window_for_surface(surface.wl_surface()) {
-            surface.with_pending_state(|state| {
-                state.states.set(xdg_toplevel::State::Fullscreen);
-                state.size = Some(output_geo.size);
-            });
-            self.space.map_element(window, output_geo.loc, true);
+        // 2D desktop: the window covers the screen above the tiling.
+        let panel = self
+            .window_for_surface(surface.wl_surface())
+            .and_then(|w| self.world.panel_for_window(&w).map(|p| p.id));
+        match panel {
+            Some(id) => self.set_fullscreen_2d(id, true),
+            None => {
+                surface.send_configure();
+            }
         }
-        surface.send_configure();
     }
 
     fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
@@ -237,11 +243,15 @@ impl XdgShellHandler for SpaceState {
             }
             return;
         }
-        surface.with_pending_state(|state| {
-            state.states.unset(xdg_toplevel::State::Fullscreen);
-            state.size = Some(DEFAULT_WINDOW_SIZE.into());
-        });
-        surface.send_pending_configure();
+        let panel = self
+            .window_for_surface(surface.wl_surface())
+            .and_then(|w| self.world.panel_for_window(&w).map(|p| p.id));
+        match panel {
+            Some(id) => self.set_fullscreen_2d(id, false),
+            None => {
+                surface.send_configure();
+            }
+        }
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {

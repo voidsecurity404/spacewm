@@ -267,8 +267,18 @@ pub struct KeybindsConfig {
     pub play_pause: Binding,
     pub next_track: Binding,
     pub previous_track: Binding,
-    /// Hotbar slots for building, in order (more keys than block types do nothing).
-    pub select_block: Binding,
+    /// Workspaces 1..9 (with building on, in 3D they pick hotbar blocks). Older
+    /// configs call this `select_block`.
+    #[serde(alias = "select_block")]
+    pub workspace: Binding,
+    /// Send the focused window to workspace 1..9.
+    pub move_to_workspace: Binding,
+    /// 2D desktop: the focused window floats / tiles again.
+    pub float: Binding,
+    /// 2D desktop: keyboard to the window left, right, up, down.
+    pub focus: Binding,
+    /// 2D desktop: swap the focused window with the one left, right, up, down.
+    pub move_window: Binding,
     pub spawn: Vec<SpawnBind>,
 }
 
@@ -312,7 +322,28 @@ impl Default for KeybindsConfig {
             play_pause: Binding::many(&["XF86AudioPlay", "XF86AudioPause"]),
             next_track: Binding::one("XF86AudioNext"),
             previous_track: Binding::one("XF86AudioPrev"),
-            select_block: Binding::many(&["Mod+1", "Mod+2", "Mod+3", "Mod+4", "Mod+5"]),
+            workspace: Binding::many(&[
+                "Mod+1", "Mod+2", "Mod+3", "Mod+4", "Mod+5", "Mod+6", "Mod+7", "Mod+8", "Mod+9",
+            ]),
+            move_to_workspace: Binding::many(&[
+                "Mod+Shift+1",
+                "Mod+Shift+2",
+                "Mod+Shift+3",
+                "Mod+Shift+4",
+                "Mod+Shift+5",
+                "Mod+Shift+6",
+                "Mod+Shift+7",
+                "Mod+Shift+8",
+                "Mod+Shift+9",
+            ]),
+            float: Binding::one("Mod+V"),
+            focus: Binding::many(&["Mod+Left", "Mod+Right", "Mod+Up", "Mod+Down"]),
+            move_window: Binding::many(&[
+                "Mod+Shift+Left",
+                "Mod+Shift+Right",
+                "Mod+Shift+Up",
+                "Mod+Shift+Down",
+            ]),
             spawn: Vec::new(),
         }
     }
@@ -363,8 +394,23 @@ impl KeybindsConfig {
                 out.push((format!("keybinds.{key}"), c.as_str(), action));
             }
         }
-        for (i, c) in self.select_block.0.iter().enumerate() {
-            out.push(("keybinds.select_block".into(), c.as_str(), Action::SelectBlock(i as u8)));
+        for (i, c) in self.workspace.0.iter().enumerate() {
+            out.push(("keybinds.workspace".into(), c.as_str(), Action::Workspace(i as u8 + 1)));
+        }
+        for (i, c) in self.move_to_workspace.0.iter().enumerate() {
+            let action = Action::MoveToWorkspace(i as u8 + 1);
+            out.push(("keybinds.move_to_workspace".into(), c.as_str(), action));
+        }
+        for c in &self.float.0 {
+            out.push(("keybinds.float".into(), c.as_str(), Action::ToggleFloat));
+        }
+        use crate::desktop2d::tiling::Dir;
+        const DIRS: [Dir; 4] = [Dir::Left, Dir::Right, Dir::Up, Dir::Down];
+        for (c, d) in self.focus.0.iter().zip(DIRS) {
+            out.push(("keybinds.focus".into(), c.as_str(), Action::FocusDir(d)));
+        }
+        for (c, d) in self.move_window.0.iter().zip(DIRS) {
+            out.push(("keybinds.move_window".into(), c.as_str(), Action::MoveDir(d)));
         }
         for (i, s) in self.spawn.iter().enumerate() {
             out.push((format!("keybinds.spawn[{i}].key"), s.key.as_str(), Action::Spawn(i)));
@@ -375,8 +421,20 @@ impl KeybindsConfig {
     pub fn validate(&self) -> Vec<Problem> {
         let mut problems = Vec::new();
         // Older configs list 8 keys; keys past the last block type just do nothing.
-        if self.select_block.0.len() > 9 {
-            problems.push(super::problem("keybinds.select_block", "at most 9 keys"));
+        for (key, b) in
+            [("workspace", &self.workspace), ("move_to_workspace", &self.move_to_workspace)]
+        {
+            if b.0.len() > 9 {
+                problems.push(super::problem(format!("keybinds.{key}"), "at most 9 keys"));
+            }
+        }
+        for (key, b) in [("focus", &self.focus), ("move_window", &self.move_window)] {
+            if b.0.len() > 4 {
+                problems.push(super::problem(
+                    format!("keybinds.{key}"),
+                    "at most 4 keys: left, right, up, down",
+                ));
+            }
         }
         for (i, s) in self.spawn.iter().enumerate() {
             if let Err(e) = super::check_command(&s.command) {
@@ -499,7 +557,15 @@ mod tests {
             binds.get(Mods { shift: true, ..MOD }, Keysym::equal),
             Some(Action::ScalePanelUp)
         );
-        assert_eq!(binds.get(MOD, Keysym::_3), Some(Action::SelectBlock(2)));
+        assert_eq!(binds.get(MOD, Keysym::_3), Some(Action::Workspace(3)));
+        assert_eq!(
+            binds.get(Mods { shift: true, ..MOD }, Keysym::_3),
+            Some(Action::MoveToWorkspace(3))
+        );
+        // Old configs name the workspace keys select_block: still accepted.
+        let old: KeybindsConfig =
+            toml::from_str("select_block = [\"Mod+1\", \"Mod+2\"]").expect("parse");
+        assert_eq!(old.workspace.0.len(), 2);
     }
 
     #[test]

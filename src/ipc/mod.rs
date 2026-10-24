@@ -716,6 +716,16 @@ fn list_panels(state: &SpaceState) -> Vec<PanelInfo> {
                 size_px: [size.w, size.h],
                 focused: matches!(&focused, Some(crate::focus::KeyboardFocusTarget::Window(w)) if w == window),
                 kind: if window.x11_surface().is_some() { "x11" } else { "wayland" }.into(),
+                workspace: state
+                    .world
+                    .panel_for_window(window)
+                    .and_then(|p| state.desktop2d.workspace_of(p.id))
+                    .unwrap_or(0),
+                rect_2d: (state.render_mode == crate::cli::RenderMode::Flat2D)
+                    .then(|| state.space.element_location(window))
+                    .flatten()
+                    .filter(|l| l.x > -10000)
+                    .map(|l| [l.x, l.y, size.w, size.h]),
             }
         })
         .collect()

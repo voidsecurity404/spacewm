@@ -5,6 +5,7 @@ mod backend;
 mod cli;
 mod config;
 mod desktop;
+mod desktop2d;
 mod error;
 mod focus;
 mod input;

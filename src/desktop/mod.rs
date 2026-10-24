@@ -57,6 +57,8 @@ pub enum Msg {
     Level { what: osd::Kind, percent: Option<u32>, muted: bool },
     /// Show a message (info or error).
     Note { text: String, error: bool },
+    /// The volume, read in the background for the 2D bar.
+    Volume { percent: Option<u32>, muted: bool },
     /// A program spacewm started has exited (`None`: killed by a signal).
     Exited { pid: u32, code: Option<i32> },
 }
@@ -82,6 +84,9 @@ pub struct DesktopState {
     pub battery: Option<status::Battery>,
     /// Apps on their way ("Starting Firefox ...").
     pub launching: launching::Launching,
+    /// For the 2D bar: volume (percent, muted) and Wi-Fi signal.
+    pub volume: Option<(u32, bool)>,
+    pub wifi: Option<u8>,
 }
 
 /// Set up the result channel and the periodic tick. Called once at startup.
@@ -100,6 +105,8 @@ pub fn init(state: &mut SpaceState, handle: &LoopHandle<'static, SpaceState>) {
     state.desktop.tx = Some(tx);
     state.desktop.last_input = Some(Instant::now());
     state.desktop.battery = status::battery();
+    state.desktop.wifi = status::wifi();
+    state.read_volume();
     let _ = handle.insert_source(Timer::from_duration(TICK), |_, _, state| {
         state.desktop_tick();
         TimeoutAction::ToDuration(TICK)
@@ -285,7 +292,19 @@ impl SpaceState {
 
     fn desktop_msg(&mut self, msg: Msg) {
         match msg {
-            Msg::Level { what, percent, muted } => self.show_osd(what, percent, muted),
+            Msg::Level { what, percent, muted } => {
+                if what == osd::Kind::Volume {
+                    self.desktop.volume = percent.map(|p| (p, muted));
+                }
+                self.show_osd(what, percent, muted)
+            }
+            Msg::Volume { percent, muted } => {
+                let v = percent.map(|p| (p, muted));
+                if v != self.desktop.volume {
+                    self.desktop.volume = v;
+                    self.queue_redraw();
+                }
+            }
             Msg::Note { text, error: true } => self.show_error(vec![text]),
             Msg::Note { text, error: false } => self.show_info(text),
             Msg::Exited { pid, code } => self.launch_exited(pid, code),
@@ -324,6 +343,12 @@ impl SpaceState {
             self.lock_now();
         }
 
+        let wifi = status::wifi();
+        if wifi != self.desktop.wifi {
+            self.desktop.wifi = wifi;
+            self.queue_redraw();
+        }
+        self.read_volume();
         let battery = status::battery();
         if battery != self.desktop.battery {
             self.desktop.battery = battery;
@@ -342,6 +367,23 @@ impl SpaceState {
             }
             _ => {}
         }
+    }
+
+    /// Read the volume in the background (for the 2D bar).
+    fn read_volume(&mut self) {
+        let get = self.config.desktop.volume_get.clone();
+        if get.trim().is_empty() {
+            return;
+        }
+        let Some((tx, socket)) = self.send_to_thread() else { return };
+        std::thread::spawn(move || {
+            if let Some(out) = run(&get, &socket, None) {
+                let _ = tx.send(Msg::Volume {
+                    percent: status::parse_percent(&out),
+                    muted: status::parse_muted(&out),
+                });
+            }
+        });
     }
 
     /// A real session has no desktop around it: start a notification daemon if nobody

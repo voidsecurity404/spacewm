@@ -129,6 +129,9 @@ pub struct OverlayInputs<'a> {
     pub dock_cursor: bool,
     /// "drag: move" under the crosshair.
     pub drag_hint: Option<&'a crate::inventory::Image>,
+    /// 2D desktop: the top bar, and the focused window's frame (rectangle, 1x1 color).
+    pub bar: Option<&'a crate::inventory::Image>,
+    pub focus_frame: Option<(crate::desktop2d::tiling::Rect, &'a MemoryRenderBuffer)>,
     /// The settings box (centered), with its own cursor.
     pub settings: Option<&'a crate::inventory::Image>,
     /// The window menu and its top-left corner (output-relative).
@@ -188,6 +191,37 @@ where
     if let Some((buffer, size)) = inputs.drag_hint {
         let x = (geo.size.w - size.0) / 2;
         elements.extend(boxed(renderer, buffer, (x, geo.size.h / 2 + 16)));
+    }
+    if !three_d {
+        if let Some((buffer, _)) = inputs.bar {
+            elements.extend(boxed(renderer, buffer, (0, 0)));
+        }
+        if let Some((r, px)) = inputs.focus_frame {
+            // Four 2 px lines just outside the window, in the gap.
+            let t = 2;
+            let lines = [
+                (r.x - t, r.y - t, r.w + 2 * t, t),
+                (r.x - t, r.y + r.h, r.w + 2 * t, t),
+                (r.x - t, r.y, t, r.h),
+                (r.x + r.w, r.y, t, r.h),
+            ];
+            for (x, y, w, h) in lines {
+                let pos =
+                    Point::<f64, Logical>::from(((x - geo.loc.x) as f64, (y - geo.loc.y) as f64))
+                        .to_physical(scale);
+                if let Ok(e) = MemoryRenderBufferRenderElement::from_buffer(
+                    renderer,
+                    pos,
+                    px,
+                    None,
+                    None,
+                    Some((w.max(1), h.max(1)).into()),
+                    Kind::Unspecified,
+                ) {
+                    elements.push(SpaceRenderElement::Memory(e));
+                }
+            }
+        }
     }
     if let Some((buffer, _)) = inputs.settings {
         elements.extend(pointer_elements(
@@ -394,6 +428,17 @@ macro_rules! overlay_inputs {
             menu: $state.menu.as_ref().and_then(|m| m.image.as_ref().map(|i| (i, m.origin))),
             drag_hint: $state.drag_hint.as_ref().map(|(_, i)| i),
             settings: $state.settings.as_ref().and_then(|s| s.image.as_ref()),
+            // Nothing over a fullscreen window.
+            bar: $state
+                .desktop2d
+                .bar
+                .image
+                .as_ref()
+                .filter(|_| $state.desktop2d.fullscreen.is_none()),
+            focus_frame: $state
+                .desktop2d
+                .border
+                .and_then(|r| $state.desktop2d.accent.as_ref().map(|a| (r, a))),
             dock: $state.dock.image.as_ref().map(|i| (i, $state.dock.origin)),
             dock_tooltip: $state.dock.tooltip.as_ref().map(|t| (t, $state.dock.tooltip_at)),
             dock_cursor: $state.dock.cursor && $state.dock.cursor_moved,

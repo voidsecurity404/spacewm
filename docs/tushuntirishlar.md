@@ -528,3 +528,36 @@ Maqsad: spacewm'ni tugma yodlamasdan, sichqoncha bilan va adashmasdan ishlatish.
   1–5 tugmalari, blokni buzish va qo'yish ishlamaydi, ya'ni klik dunyoni tasodifan
   o'zgartira olmaydi. Pastda faqat dock turadi. Xohlasangiz, sozlamalardan (Alt+,)
   "Building blocks" ni yoqing.
+
+## 2D desktop: workspace'lar, tiling, tepa panel (src/desktop2d/)
+
+Alt+D endi Hyprland'ga o'xshash to'liq tiling desktop'ni ochadi:
+
+- **Tepa panel**: chapda workspace raqamlari (hozirgisi ko'k, oynasi bor workspace
+  ostida nuqta; bosilsa o'shanga o'tiladi) va fokusdagi oyna nomi. O'rtada sana va
+  soat. O'ngda til (bir nechta til sozlangan bo'lsa), ovoz, Wi-Fi (ulangan bo'lsa) va
+  batareya. Ikonkalar oddiy shakllar bilan chiziladi; batareya kam qolsa sariq, keyin
+  qizil bo'ladi, quvvat olayotganda yashil. Ovoz har 15 soniyada fonda o'qiladi.
+- **Tiling**: bitta oyna butun maydonni egallaydi. Ko'proq bo'lsa, birinchisi chapda
+  katta (master, 55%), qolganlari o'ngda ustma-ust turadi. Oynalar orasida 8 px
+  bo'shliq bor, fokusdagi oyna ko'k ramka bilan ajralib turadi.
+- **Tugmalar**:
+  - Alt+1…9: workspace'ni almashtirish;
+  - Alt+Shift+1…9: oynani boshqa workspace'ga yuborish;
+  - Alt+strelkalar: fokusni qo'shni oynaga o'tkazish;
+  - Alt+Shift+strelkalar: oynani qo'shnisi bilan almashtirish;
+  - Alt+V: oynani suzuvchi qilish (ekran markazida) yoki tiling'ga qaytarish;
+  - Alt+F: fullscreen (panel ham yashiriladi);
+  - Alt+tortish: oynani surish (oyna suzuvchiga aylanadi), Alt+o'ng tugma bilan
+    tortish: o'lchamni o'zgartirish.
+- **3D bilan bog'liqlik**: oynalar ro'yxati bitta. 3D'da ochilgan oyna ham hozirgi
+  workspace'ga tushadi (3D'da Alt+N bosilsa, keyingi oynalar o'sha workspace'ga
+  tushishi haqida xabar chiqadi). Bitta oynaning faqat bitta o'lchami bo'lishi mumkin,
+  shuning uchun 2D'ga o'tishda har bir oynaning 3D o'lchami eslab qolinadi va 3D'ga
+  qaytganda tiklanadi.
+- Boshqa workspace'lardagi oynalar ekrandan tashqarida kutib turadi. X11 ilovalari
+  (Telegram, VS Code) ham tiling'ga bo'ysunadi: ular o'z o'lchamini o'zlari
+  o'zgartira olmaydi.
+- Eski config'dagi `select_block` kaliti endi `workspace` deb ataladi, eski nomi ham
+  qabul qilinadi. `spacectl --json list` har bir oyna uchun `workspace` va `rect_2d` ni
+  ko'rsatadi.

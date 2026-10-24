@@ -22,7 +22,7 @@ pub struct Hud {
     pub visible: bool,
     text: String,
     /// See `current_layout_tag`.
-    layout_tag: Option<String>,
+    pub layout_tag: Option<String>,
     /// The rendered line and its size in logical px.
     pub image: Option<(MemoryRenderBuffer, (i32, i32))>,
     clock_timer: Option<RegistrationToken>,
@@ -106,8 +106,11 @@ impl SpaceState {
 
     pub fn refresh_hud(&mut self) {
         self.hud.layout_tag = self.current_layout_tag();
-        // Nothing over a fullscreen window.
-        if !self.hud.visible || self.fullscreen.is_some() {
+        // Nothing over a fullscreen window; the 2D desktop has its bar instead.
+        if !self.hud.visible
+            || self.fullscreen.is_some()
+            || self.render_mode == crate::cli::RenderMode::Flat2D
+        {
             self.hud.image = None;
             return;
         }

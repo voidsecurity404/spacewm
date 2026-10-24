@@ -97,7 +97,6 @@ pub fn help_columns(
         row(&keys(&binds.next_window), "go to next window"),
         row(&keys(&binds.seated), "seated: windows around me"),
         row(&keys(&binds.toggle_2d), "3D world / plain 2D desktop"),
-        row(&format!("2D: {mod_name}+drag"), "move (right button: resize)"),
         row(&keys(&binds.grab), "carry / put down a window"),
         row(&keys(&binds.rotate), "turn a window"),
         row(&keys(&binds.reset_rotation), "face me again"),
@@ -119,6 +118,14 @@ pub fn help_columns(
         ]);
     }
     right.extend([
+        header("2D desktop"),
+        row(&format!("{mod_name}+1..9"), "workspace"),
+        row(&format!("{mod_name}+Shift+1..9"), "window to workspace"),
+        row(&format!("{mod_name}+arrows"), "focus left/right/up/down"),
+        row(&format!("{mod_name}+Shift+arrows"), "swap with a neighbor"),
+        row(&keys(&binds.float), "float / tile a window"),
+        row(&format!("{mod_name}+drag"), "move (right button: resize)"),
+        Line::default(),
         header("Desktop"),
         row(&keys(&binds.lock), "lock the screen"),
         row(&keys(&binds.screenshot), "screenshot (+ clipboard)"),
