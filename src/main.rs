@@ -9,6 +9,7 @@ mod focus;
 mod input;
 mod inventory;
 mod ipc;
+mod isolate;
 mod launcher;
 mod logging;
 mod render;
@@ -199,7 +200,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
 
     let autostart = state.config.general.autostart.clone();
     for command in state.cli.spawn.clone().into_iter().chain(autostart) {
-        if let Err(err) = spawn::spawn(&command, &state.socket_name) {
+        if let Err(err) = state.launch(&command) {
             tracing::warn!("{err}");
         }
     }
@@ -211,6 +212,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     }
 
     state.save_layout();
+    isolate::shutdown();
     // GL objects can only be freed while the context exists, i.e. before the backend drops.
     if let Some(scene) = state.view.scene.take() {
         scene.destroy(state.backend.renderer());

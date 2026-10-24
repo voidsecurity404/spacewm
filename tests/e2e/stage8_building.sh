@@ -148,6 +148,36 @@ second=$(focused)
     fail "Mod+grave did not visit two windows (panels $ids; got $first then $second)"
 pass "Mod+grave turns to the next window and enters it ($first -> $second)"
 
+# ---- Mod+K: the key help over everything; keys don't reach the app; Escape closes.
+kc mode walk
+kc spawn foot >/dev/null
+wait_windows 3
+sleep 0.8
+FOOT=$(focused)
+B=$(shot s8-before-help)
+kc input key Super+k
+sleep 0.3
+K=$(shot s8-help)
+grep -q "key help shown" "$OUT/spacewm.log" || fail "Mod+K did not show the help"
+python3 -c "exit(0 if $($PX diff "$B" "$K") > 0.05 else 1)" || fail "help box not drawn"
+kc input type 'zzzz'
+sleep 0.3
+python3 -c "exit(0 if $($PX diff "$K" "$(shot s8-help-typed)") < 0.001 else 1)" ||
+    fail "typing while the help is shown changed the screen (keys leaked to the app)"
+kc input key Escape
+sleep 0.3
+tail -n 20 "$OUT/spacewm.log" | grep -q "key help closed" || fail "Escape did not close the help"
+[ "$(focused)" = "$FOOT" ] || fail "closing the help changed focus: $(focused) (was $FOOT)"
+python3 -c "exit(0 if $($PX diff "$B" "$(shot s8-help-closed)") < 0.01 else 1)" ||
+    fail "screen not back after closing the help"
+pass "Mod+K shows every key; keys don't leak to the app; Escape closes it"
+kc input key Super+k
+sleep 0.2
+kc input click
+sleep 0.2
+tail -n 20 "$OUT/spacewm.log" | grep -q "key help closed" || fail "a click did not close the help"
+pass "a click closes the help too"
+
 space_stop || fail "unclean exit"
 grep -E "panicked|ERROR" "$OUT/spacewm.log" && fail "errors in log"
 pass "clean exit"

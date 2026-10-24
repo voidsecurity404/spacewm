@@ -169,12 +169,12 @@ impl SpaceState {
             KeyResult::Close => self.close_launcher(),
             KeyResult::Launch(entry) => {
                 self.close_launcher();
-                self.launch(&entry);
+                self.launch_entry(&entry);
             }
         }
     }
 
-    fn launch(&mut self, entry: &DesktopEntry) {
+    fn launch_entry(&mut self, entry: &DesktopEntry) {
         // Terminal apps (htop, vim) run inside the configured terminal.
         let command = if entry.terminal {
             format!("{} -e {}", self.config.general.terminal, entry.exec)
@@ -184,7 +184,7 @@ impl SpaceState {
         tracing::info!(app = entry.name, command, "launching");
         self.expect_window_until =
             Some(std::time::Instant::now() + crate::input::mode::SPAWN_FOCUS_WINDOW);
-        if let Err(e) = crate::spawn::spawn(&command, &self.socket_name) {
+        if let Err(e) = self.launch(&command) {
             tracing::warn!("{e}");
             self.show_error(vec![format!("Cannot start {}:", entry.name), e]);
         }

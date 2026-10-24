@@ -379,3 +379,60 @@ ham bog'langan.
 Yo'l-yo'lakay tuzatilgan xato: yangi ochilgan oynaga kirganda kursor oyna o'rtasida
 emas, chap yuqori burchakda boshlanardi. Sababi, oynada hali bufer yo'q edi va
 o'lchami 0 deb olinardi.
+
+### Alt+K: barcha tugmalar ekranda
+
+Alt+K bosilganda spacewm ishlatadigan barcha tugmalar ikki ustunda chiqadi. Ro'yxat
+amaldagi konfiguratsiyadan olinadi: config'da tugmani o'zgartirsangiz, bu yerda ham
+o'zgaradi. Siz qo'shgan `[[keybinds.spawn]]` tugmalari ham ko'rsatiladi. "Mod" esa
+sizda haqiqatda qaysi tugma bo'lsa, o'sha nom bilan yoziladi: nested rejimda Alt, haqiqiy
+sessiyada Super. Oyna ochiq paytda bosilgan tugmalar ilovaga yetib bormaydi, kamera
+ham qimirlamaydi. Esc, Alt+K yoki sichqoncha bosilsa yopiladi. Bu Window rejimida ham,
+fullscreen'da ham ishlaydi.
+
+### Dastur tashqarida ochiq bo'lsa ham spacewm ichida ochiladi (src/isolate.rs)
+
+Muammo: Telegram, Firefox, Nautilus kabi ko'p dasturlar "bitta nusxali". Ularni ikkinchi
+marta ishga tushirsangiz, yangi oyna ochilmaydi: yangi nusxa ishlab turgan nusxaga
+"oyna och" deb xabar yuboradi va yopiladi. Agar o'sha nusxa Hyprland'da ishlayotgan
+bo'lsa, oyna spacewm'da emas, Hyprland'da ochiladi. Tajriba: Hyprland'da Telegram ochiq
+turganda spacewm'dan `Telegram` buyrug'i 0 ta oyna berdi.
+
+Ular bir-birini quyidagi yo'llar bilan topadi:
+- **D-Bus**: GTK/GNOME ilovalari (GApplication), Firefox. Session bus'da nom egallaydi,
+  masalan `org.gnome.Nautilus`.
+- **Profil papkasidagi lock yoki socket**: Telegram, Chromium.
+
+Yechim: dastur ishga tushirilishidan oldin spacewm `/proc` orqali shu dasturning
+spacewm'ga tegishli bo'lmagan nusxasini qidiradi. Bu nusxa sizga tegishli bo'lishi,
+lekin spacewm'ning bolasi bo'lmasligi kerak (ota jarayonlar zanjiri `/proc/<pid>/stat`
+orqali tekshiriladi). Topilsa, dastur ajratib ishga tushiriladi:
+- **Firefox oilasi**: `--profile ~/.local/share/spacewm/apps/firefox`
+- **Chromium oilasi**: `--user-data-dir=...`
+- **Telegram**: `-workdir ...`. Bir marta login qilasiz, keyin saqlanib qoladi.
+- **Boshqa dasturlar**: faqat tashqi nusxa session bus'da nom egallagan bo'lsa (`busctl`
+  bilan tekshiriladi), spacewm'ning shaxsiy `dbus-daemon`'i beriladi. Terminal kabi oddiy
+  dasturlarga tegilmaydi, shunda ular ichida `notify-send` kabi buyruqlar avvalgidek
+  ishlaydi.
+
+Ekranda ko'k xabar chiqadi, unda nima uchun bu nusxa alohida ekani yoziladi. Profil
+papkalari 0700 huquqi bilan yaratiladi, chunki ularda login ma'lumotlari saqlanadi.
+Shaxsiy D-Bus spacewm bilan birga to'xtaydi; spacewm qulasa ham `PR_SET_PDEATHSIG` tufayli
+to'xtaydi. Tashqarida hech narsa ochiq bo'lmasa, dastur odatdagidek, sizning asl
+profilingiz bilan ochiladi. Haqiqiy spacewm sessiyasida (DRM) "tashqi desktop" yo'q,
+shuning uchun bu holat u yerda deyarli uchramaydi.
+
+Test (`tests/e2e/stage8_isolation.sh`) alohida `dbus-run-session` va vaqtinchalik HOME
+ichida ishlaydi: sizning haqiqiy D-Bus'ingizga va Firefox profilingizga tegmaydi.
+
+### Barqarorlik: stress testi (tests/e2e/stage8_stress.sh)
+
+Har bir siklda quyidagilar bajariladi:
+- foot, weston-simple-shm va xterm (X11) ochiladi;
+- fullscreen ikki marta yoqib-o'chiriladi;
+- har 3-siklda xterm `kill -9` bilan o'ldiriladi;
+- inventar, yordam oynasi va keyingi oynaga o'tish ishlatiladi, bloklar qo'yiladi;
+- hamma oynalar yopiladi.
+
+100 sikl (300 ta oyna) natijasi: ochiq fayllar 33 → 33, xotira 83.4 → 85.2 MB (oyna
+boshiga taxminan 6 KB, bu allocator keshlari, oqish emas), panic va xato yo'q.

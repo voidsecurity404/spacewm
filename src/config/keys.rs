@@ -244,6 +244,8 @@ pub struct KeybindsConfig {
     pub fullscreen: Binding,
     /// Turn to the next window (enter it when it is near).
     pub next_window: Binding,
+    /// Show every key on screen.
+    pub help: Binding,
     /// Hotbar slots for building, in order (more keys than block types do nothing).
     pub select_block: Binding,
     pub spawn: Vec<SpawnBind>,
@@ -273,6 +275,7 @@ impl Default for KeybindsConfig {
             // Mod+grave (the key above Tab) too: nested in a desktop that uses Alt+Tab
             // itself, Mod+Tab never reaches us.
             next_window: Binding::many(&["Mod+Tab", "Mod+grave"]),
+            help: Binding::one("Mod+K"),
             select_block: Binding::many(&["Mod+1", "Mod+2", "Mod+3", "Mod+4", "Mod+5"]),
             spawn: Vec::new(),
         }
@@ -302,6 +305,7 @@ impl KeybindsConfig {
             ("hud", &self.hud, Action::ToggleHud),
             ("fullscreen", &self.fullscreen, Action::ToggleFullscreen),
             ("next_window", &self.next_window, Action::NextWindow),
+            ("help", &self.help, Action::Help),
         ];
         for (key, binding, action) in singles {
             for c in &binding.0 {

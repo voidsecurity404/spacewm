@@ -47,6 +47,11 @@ Mod is Super on a real session and Alt when nested (`general.mod_key`).
 | Mod+Ctrl+= / Mod+Ctrl+- | resize the window itself |
 | Mod+Return, Mod+Space | terminal, launcher |
 | Mod+Shift+Q, Mod+Shift+E | close window, quit |
+| Mod+K | every key on screen (Escape closes) |
+
+Apps already open outside spacewm (on the desktop it is nested in) still open inside it:
+browsers and Telegram then get their own profile in `~/.local/share/spacewm/apps/`
+(log in once), D-Bus single-instance apps a private session bus. See `src/isolate.rs`.
 
 ## Config
 

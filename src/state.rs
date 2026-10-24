@@ -169,6 +169,8 @@ pub struct SpaceState {
     /// The inventory screen (E while walking), while open.
     pub inventory: Option<crate::inventory::Inventory>,
     pub hotbar: crate::inventory::Hotbar,
+    /// The key help box (Mod+K), while shown.
+    pub help: Option<crate::inventory::Image>,
     /// A panel shown flat over the whole screen instead of the 3D world (Mod+F).
     pub fullscreen: Option<crate::input::fullscreen::Fullscreen>,
     pub hud: crate::render::hud::Hud,
@@ -390,6 +392,7 @@ impl SpaceState {
             launcher: None,
             inventory: None,
             hotbar: Default::default(),
+            help: None,
             fullscreen: None,
             hud: Default::default(),
             shm_state,

@@ -421,7 +421,7 @@ fn handle_request(state: &mut SpaceState, id: ConnectionId, request: Request) ->
             let result = if shell {
                 crate::spawn::spawn_shell(&command, &state.socket_name)
             } else {
-                crate::spawn::spawn(&command, &state.socket_name)
+                state.launch(&command)
             };
             match result {
                 Ok(pid) => Response::Spawned { pid },

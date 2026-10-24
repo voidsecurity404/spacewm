@@ -100,6 +100,8 @@ hud = "Mod+F1"
 fullscreen = "Mod+F"
 # Turn to the next window; you're put into it when it is within reach.
 next_window = ["Mod+Tab", "Mod+grave"]
+# Every key on screen (Escape or a click closes it).
+help = "Mod+K"
 # Hotbar slots. While walking, plain 1-5, the scroll wheel and E (inventory) work too;
 # left click breaks a block, right click places the selected one.
 select_block = ["Mod+1", "Mod+2", "Mod+3", "Mod+4", "Mod+5"]

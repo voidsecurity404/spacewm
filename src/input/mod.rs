@@ -87,6 +87,8 @@ pub enum Action {
     ToggleFullscreen,
     /// Turn to the next window (and enter it when it is within reach).
     NextWindow,
+    /// Show / hide every key on screen.
+    Help,
 }
 
 /// The nested-only escape hatch: Ctrl+Alt+G gives the mouse back to the host desktop
@@ -215,6 +217,7 @@ enum KeyOutcome {
     DismissLayer,
     /// A key while the inventory is open: its symbol, and whether it was Mod+Escape.
     Inventory(Keysym, bool),
+    CloseHelp,
 }
 
 pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState, time: InputTime) {
@@ -260,6 +263,16 @@ pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState,
         }
         let combo_mods = Mods::from_state(mods, state.config.general.mod_key, nested);
         let mod_escape = combo_mods.mod_ && sym == Some(Keysym::Escape);
+        // The key help is on top of everything: Escape (or its own key) closes it, other
+        // keys do nothing while it is shown.
+        if state.help.is_some() {
+            state.input.suppressed_keys.insert(keycode);
+            let bound = sym.and_then(|s| state.keybinds.get(combo_mods, s));
+            if sym == Some(Keysym::Escape) || bound == Some(Action::Help) {
+                return FilterResult::Intercept(Some(KeyOutcome::CloseHelp));
+            }
+            return FilterResult::Intercept(None);
+        }
         // The launcher takes every key while it is open.
         if state.launcher.is_some() {
             state.input.suppressed_keys.insert(keycode);
@@ -321,6 +334,7 @@ pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState,
         Some(Some(KeyOutcome::Launcher(sym, ctrl))) => state.launcher_key(sym, ctrl),
         Some(Some(KeyOutcome::DismissLayer)) => state.dismiss_layer(),
         Some(Some(KeyOutcome::Inventory(sym, mod_escape))) => inventory_key(state, sym, mod_escape),
+        Some(Some(KeyOutcome::CloseHelp)) => state.close_help(),
         _ => {}
     }
 }
@@ -366,6 +380,7 @@ pub fn run_action(state: &mut SpaceState, action: Action) {
             state.toggle_fullscreen(target);
         }
         Action::NextWindow => mode::next_window(state),
+        Action::Help => state.toggle_help(),
         Action::WalkMode => mode::set_mode(state, InputMode::Walk, None),
         Action::Launcher => state.toggle_launcher(),
         Action::ToggleHud => {
@@ -377,7 +392,7 @@ pub fn run_action(state: &mut SpaceState, action: Action) {
                 let command = bind.command.clone();
                 state.expect_window_until =
                     Some(std::time::Instant::now() + mode::SPAWN_FOCUS_WINDOW);
-                if let Err(err) = crate::spawn::spawn(&command, &state.socket_name) {
+                if let Err(err) = state.launch(&command) {
                     tracing::warn!("{err}");
                 }
             }
@@ -556,6 +571,8 @@ pub fn handle_pointer_motion(
             InputMode::Walk if state.inventory.is_some() => {
                 state.inventory_pointer(state.pointer_location + delta);
             }
+            // Reading the key help: the view holds still.
+            InputMode::Walk if state.help.is_some() => {}
             InputMode::Walk => look(state, delta),
             InputMode::Window { .. } => {
                 mode::move_virtual_cursor(state, delta, time);
@@ -637,6 +654,14 @@ pub fn handle_pointer_button(
 ) {
     state.input_activity();
     if button_state == ButtonState::Released && state.input.suppressed_buttons.remove(&button) {
+        return;
+    }
+    // A click closes the key help (and goes nowhere else).
+    if state.help.is_some() {
+        if button_state == ButtonState::Pressed {
+            state.input.suppressed_buttons.insert(button);
+            state.close_help();
+        }
         return;
     }
     let Some(pointer) = state.seat.get_pointer() else {

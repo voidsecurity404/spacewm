@@ -9,6 +9,7 @@ pub mod crosshair;
 pub mod cursor;
 pub mod frustum;
 pub mod gl;
+pub mod help;
 pub mod hud;
 pub mod notice;
 pub mod panel_texture;
@@ -112,6 +113,8 @@ pub struct OverlayInputs<'a> {
     /// The hotbar (3D Walk mode) and the open inventory, with their size in logical px.
     pub hotbar: Option<&'a crate::inventory::Image>,
     pub inventory: Option<&'a crate::inventory::Image>,
+    /// The key help box (Mod+K), on top of everything.
+    pub help: Option<&'a crate::inventory::Image>,
     /// A fullscreen window is shown: where to draw the 2D cursor (output-relative
     /// logical px). Also hides bars.
     pub fullscreen_cursor: Option<Point<f64, Logical>>,
@@ -147,6 +150,11 @@ where
         .ok()
         .map(SpaceRenderElement::Memory)
     };
+    if let Some((buffer, size)) = inputs.help {
+        let x = (geo.size.w - size.0) / 2;
+        let y = ((geo.size.h - size.1) / 2).max(0);
+        elements.extend(boxed(renderer, buffer, (x, y)));
+    }
     if let Some(notice) = inputs.notice {
         // Centered, a bit above the middle (below the crosshair would look odd).
         let x = (geo.size.w - notice.size.0) / 2;
@@ -212,8 +220,11 @@ where
     }
     drop(map);
     // The crosshair only while actually walking.
-    if !(inputs.layer_focus || inputs.launcher.is_some() || inputs.inventory.is_some()) || !three_d
-    {
+    let covered = inputs.layer_focus
+        || inputs.launcher.is_some()
+        || inputs.inventory.is_some()
+        || inputs.help.is_some();
+    if !covered || !three_d {
         elements.extend(mode_overlay(renderer, inputs, Some(geo)));
     }
     elements
@@ -299,6 +310,7 @@ macro_rules! overlay_inputs {
             layer_focus: matches!($state.overlay, $crate::state::Overlay::Layer(_)),
             hotbar: $state.hotbar.image.as_ref(),
             inventory: $state.inventory.as_ref().and_then(|i| i.image.as_ref()),
+            help: $state.help.as_ref(),
             fullscreen_cursor: $state.fullscreen.map(|_| $state.virtual_cursor),
         }
     };
