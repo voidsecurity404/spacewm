@@ -16,7 +16,9 @@ export MOZ_ENABLE_WAYLAND=1
 export QT_QPA_PLATFORM="wayland;xcb"
 export SDL_VIDEODRIVER=wayland
 export _JAVA_AWT_WM_NONREPARENTING=1
-# Electron apps (VS Code, Discord, Obsidian...): native Wayland, sharp on any scale.
+# Older Electron apps: native Wayland, sharp on any scale. Newer Electron ignores this
+# variable and uses X11 (Xwayland, works fine); for native Wayland there, put
+# --ozone-platform=wayland in the app's flags file, e.g. ~/.config/code-flags.conf.
 export ELECTRON_OZONE_PLATFORM_HINT=auto
 
 # Keyboard layouts are set in ~/.config/spacewm/config.toml ([input] keyboard_layout);

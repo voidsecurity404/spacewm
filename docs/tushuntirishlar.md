@@ -407,6 +407,12 @@ Yechim: dastur ishga tushirilishidan oldin spacewm `/proc` orqali shu dasturning
 spacewm'ga tegishli bo'lmagan nusxasini qidiradi. Bu nusxa sizga tegishli bo'lishi,
 lekin spacewm'ning bolasi bo'lmasligi kerak (ota jarayonlar zanjiri `/proc/<pid>/stat`
 orqali tekshiriladi). Topilsa, dastur ajratib ishga tushiriladi:
+- **VS Code oilasi** (code, codium, cursor): o'z `--user-data-dir`'i beriladi, lekin
+  kengaytmalaringiz umumiy qoladi (`--extensions-dir ~/.vscode/extensions`).
+- **Boshqa Electron/Chromium dasturlari** (Discord, Obsidian, Slack): tashqi nusxaning
+  papkasida Chromium fayllari (`chrome_crashpad_handler`, `resources.pak`) bo'lsa, ular
+  ham alohida `--user-data-dir` oladi. VS Code D-Bus emas, o'z socket'i orqali
+  bog'lanadi, shuning uchun avval bu holat ushlanmay qolgan edi.
 - **Firefox oilasi**: `--profile ~/.local/share/spacewm/apps/firefox`
 - **Chromium oilasi**: `--user-data-dir=...`
 - **Telegram**: `-workdir ...`. Bir marta login qilasiz, keyin saqlanib qoladi.

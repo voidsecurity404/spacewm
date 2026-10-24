@@ -65,6 +65,18 @@ grep -q 'own profile app="firefox"' "$OUT/spacewm.log" || fail "firefox was not 
 shot s8-iso-firefox >/dev/null
 pass "firefox already open elsewhere opens in spacewm with its own profile (0700)"
 
+# ---- An Electron app (VS Code: one instance per --user-data-dir, found by a socket).
+if command -v code >/dev/null; then
+    WAYLAND_DISPLAY="$WLA" code --ozone-platform=wayland --new-window >"$OUT/code-other.log" 2>&1 &
+    for _ in $(seq 300); do ka list | grep -qi "code" && break; sleep 0.1; done
+    ka list | grep -qi "code" || fail "VS Code did not open on the other desktop"
+    kc spawn code >/dev/null
+    for _ in $(seq 300); do kc list | grep -qi "code" && break; sleep 0.1; done
+    kc list | grep -qi "code" || fail "VS Code opened on the other desktop, not in spacewm"
+    grep -q 'own profile app="code"' "$OUT/spacewm.log" || fail "VS Code was not given its own profile"
+    pass "VS Code already open elsewhere opens in spacewm (own --user-data-dir)"
+fi
+
 # ---- A plain program (foot) open elsewhere needs nothing: normal start, normal bus.
 WAYLAND_DISPLAY="$WLA" foot >/dev/null 2>&1 &
 for _ in $(seq 50); do ka list | grep -q foot && break; sleep 0.1; done

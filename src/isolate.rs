@@ -7,7 +7,8 @@
 //!
 //! - D-Bus: GTK/GNOME apps (GApplication), many KDE/Qt apps, Firefox on Wayland register
 //!   a name on the session bus; a second start finds the name and forwards.
-//! - A lock/socket in the profile directory: Telegram, Chromium-based browsers.
+//! - A lock/socket in the profile directory: Telegram, Chromium-based browsers, and
+//!   Electron apps (VS Code, Discord, Obsidian: Chromium inside).
 //!
 //! So when an instance of the same program is running and is NOT one of our own
 //! children, spacewm starts this one apart from it: browsers and Telegram get their own
@@ -33,6 +34,8 @@ pub enum Rule {
     ChromiumDataDir,
     /// Telegram Desktop: `-workdir <dir>`.
     TelegramWorkdir,
+    /// VS Code family: own `--user-data-dir`, but your extensions (`--extensions-dir`).
+    VsCode,
     /// Anything else: a private D-Bus session bus.
     PrivateBus,
 }
@@ -58,15 +61,24 @@ pub fn rule_for(program: &str) -> Rule {
         | "microsoft-edge"
         | "microsoft-edge-stable" => Rule::ChromiumDataDir,
         "Telegram" | "telegram-desktop" | "telegram" => Rule::TelegramWorkdir,
+        "code" | "code-oss" | "codium" | "vscodium" | "cursor" => Rule::VsCode,
         _ => Rule::PrivateBus,
     }
 }
 
 /// The command line with the rule's profile option added right after the program (so
 /// it comes before any `--` that ends the options).
-pub fn apply(rule: Rule, args: &[String], dir: &Path) -> Vec<String> {
+/// `extensions`: the folder a VS Code copy should share with your usual one.
+pub fn apply(rule: Rule, args: &[String], dir: &Path, extensions: Option<&Path>) -> Vec<String> {
     let dir = dir.to_string_lossy().into_owned();
     let extra: Vec<String> = match rule {
+        Rule::VsCode => {
+            let mut v = vec!["--user-data-dir".into(), dir];
+            if let Some(ext) = extensions {
+                v.extend(["--extensions-dir".into(), ext.to_string_lossy().into_owned()]);
+            }
+            v
+        }
         Rule::FirefoxProfile => vec!["--profile".into(), dir],
         Rule::ChromiumDataDir => vec![format!("--user-data-dir={dir}")],
         Rule::TelegramWorkdir => vec!["-workdir".into(), dir],
@@ -83,7 +95,7 @@ pub fn apply(rule: Rule, args: &[String], dir: &Path) -> Vec<String> {
 fn has_own_profile(rule: Rule, args: &[String]) -> bool {
     let flags: &[&str] = match rule {
         Rule::FirefoxProfile => &["--profile", "-profile", "-P", "--no-remote", "-no-remote"],
-        Rule::ChromiumDataDir => &["--user-data-dir"],
+        Rule::ChromiumDataDir | Rule::VsCode => &["--user-data-dir"],
         Rule::TelegramWorkdir => &["-workdir", "-many"],
         Rule::PrivateBus => &[],
     };
@@ -152,6 +164,29 @@ fn running_elsewhere(name: &str) -> Vec<u32> {
         .collect()
 }
 
+/// Is one of `pids` a Chromium/Electron program? Their folder holds Chromium's files
+/// (VS Code, Discord, Obsidian, Slack: one app instance per --user-data-dir).
+fn is_chromium_based(pids: &[u32]) -> bool {
+    pids.iter().any(|pid| {
+        let Ok(exe) = std::fs::read_link(format!("/proc/{pid}/exe")) else { return false };
+        let Some(dir) = exe.parent() else { return false };
+        ["chrome_crashpad_handler", "resources.pak", "resources/app.asar", "chrome-sandbox"]
+            .iter()
+            .any(|f| dir.join(f).exists())
+    })
+}
+
+/// The extensions folder VS Code (or VSCodium/Code - OSS) uses, if it exists.
+fn vscode_extensions(name: &str) -> Option<PathBuf> {
+    let home = PathBuf::from(std::env::var_os("HOME")?);
+    let dir = match name {
+        "code" => home.join(".vscode/extensions"),
+        "cursor" => home.join(".cursor/extensions"),
+        _ => home.join(".vscode-oss/extensions"),
+    };
+    dir.is_dir().then_some(dir)
+}
+
 /// Well-known names that don't mean "single instance" (media controls, tray icons).
 const GENERIC_NAMES: &[&str] =
     &["org.mpris.MediaPlayer2.", "org.kde.StatusNotifierItem-", "org.a11y."];
@@ -211,13 +246,19 @@ pub fn prepare(args: &[String]) -> Prepared {
     if elsewhere.is_empty() {
         return plain;
     }
-    let rule = rule_for(&name);
+    let mut rule = rule_for(&name);
+    // Unknown apps without a bus name may still be Electron/Chromium inside: those find
+    // their other copy through a socket in their profile folder.
+    let owns_bus = rule == Rule::PrivateBus && owns_bus_name(&elsewhere);
+    if rule == Rule::PrivateBus && !owns_bus && is_chromium_based(&elsewhere) {
+        rule = Rule::ChromiumDataDir;
+    }
     if has_own_profile(rule, args) {
         return plain;
     }
     match rule {
         // Not reachable through the bus (a terminal...): it opens here anyway.
-        Rule::PrivateBus if !owns_bus_name(&elsewhere) => plain,
+        Rule::PrivateBus if !owns_bus => plain,
         Rule::PrivateBus => match private_bus() {
             Some(bus) => {
                 tracing::info!(app = name, "already running outside spacewm: private D-Bus");
@@ -234,8 +275,9 @@ pub fn prepare(args: &[String]) -> Prepared {
         _ => match profile_dir(&name) {
             Some(dir) => {
                 tracing::info!(app = name, dir = %dir.display(), "already running outside spacewm: own profile");
+                let extensions = if rule == Rule::VsCode { vscode_extensions(&name) } else { None };
                 Prepared {
-                    args: apply(rule, args, &dir),
+                    args: apply(rule, args, &dir, extensions.as_deref()),
                     bus: None,
                     note: Some(format!(
                         "{name} is also open outside spacewm: opened here with its own profile ({})",
@@ -330,18 +372,29 @@ mod tests {
     fn rules_put_the_profile_before_other_arguments() {
         let dir = Path::new("/p");
         assert_eq!(
-            apply(Rule::TelegramWorkdir, &v(&["Telegram", "--", "tg://x"]), dir),
+            apply(Rule::TelegramWorkdir, &v(&["Telegram", "--", "tg://x"]), dir, None),
             v(&["Telegram", "-workdir", "/p", "--", "tg://x"])
         );
         assert_eq!(
-            apply(Rule::FirefoxProfile, &v(&["firefox", "https://a"]), dir),
+            apply(Rule::FirefoxProfile, &v(&["firefox", "https://a"]), dir, None),
             v(&["firefox", "--profile", "/p", "https://a"])
         );
         assert_eq!(
-            apply(Rule::ChromiumDataDir, &v(&["chromium"]), dir),
+            apply(Rule::ChromiumDataDir, &v(&["chromium"]), dir, None),
             v(&["chromium", "--user-data-dir=/p"])
         );
-        assert_eq!(apply(Rule::PrivateBus, &v(&["nautilus", "-w"]), dir), v(&["nautilus", "-w"]));
+        assert_eq!(
+            apply(Rule::PrivateBus, &v(&["nautilus", "-w"]), dir, None),
+            v(&["nautilus", "-w"])
+        );
+        assert_eq!(
+            apply(Rule::VsCode, &v(&["code", "."]), dir, Some(Path::new("/e"))),
+            v(&["code", "--user-data-dir", "/p", "--extensions-dir", "/e", "."])
+        );
+        assert_eq!(
+            apply(Rule::VsCode, &v(&["code"]), dir, None),
+            v(&["code", "--user-data-dir", "/p"])
+        );
     }
 
     #[test]
@@ -350,6 +403,7 @@ mod tests {
         assert_eq!(rule_for("Telegram"), Rule::TelegramWorkdir);
         assert_eq!(rule_for("brave"), Rule::ChromiumDataDir);
         assert_eq!(rule_for("nautilus"), Rule::PrivateBus);
+        assert_eq!(rule_for("code"), Rule::VsCode);
     }
 
     #[test]
