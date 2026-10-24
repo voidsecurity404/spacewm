@@ -420,6 +420,44 @@ where
     damage_tracker.render_output(renderer, framebuffer, age, elements, clear)
 }
 
+/// Collect presentation-time feedback from everything that was on `output` this frame
+/// (windows/panels, layer surfaces, the lock surface). The backend reports it as
+/// presented once the frame is really on screen (DRM: at the vblank).
+pub fn take_presentation_feedback(
+    output: &Output,
+    space: &Space<Window>,
+    lock: &crate::wayland::session_lock::LockState,
+) -> smithay::desktop::utils::OutputPresentationFeedback {
+    use smithay::{
+        desktop::utils::{take_presentation_feedback_surface_tree, OutputPresentationFeedback},
+        reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback::Kind,
+    };
+    let mut feedback = OutputPresentationFeedback::new(output);
+    let on_output = |_: &_, _: &_| Some(output.clone());
+    let flags = |_: &_, _: &_| Kind::empty();
+    if let Some(surface) = lock.surface_for(output) {
+        take_presentation_feedback_surface_tree(
+            surface.wl_surface(),
+            &mut feedback,
+            on_output,
+            flags,
+        );
+        return feedback; // nothing else is visible while locked
+    }
+    for window in space.elements() {
+        window.take_presentation_feedback(&mut feedback, on_output, flags);
+    }
+    for layer in smithay::desktop::layer_map_for_output(output).layers() {
+        layer.take_presentation_feedback(&mut feedback, on_output, flags);
+    }
+    feedback
+}
+
+/// "Now" on the monotonic clock presentation-time uses.
+pub fn monotonic_now() -> smithay::utils::Time<smithay::utils::Monotonic> {
+    smithay::utils::Clock::<smithay::utils::Monotonic>::new().now()
+}
+
 /// Tell clients they may draw their next frame. Without frame callbacks a client draws
 /// one frame and then waits forever — the classic "frozen window" beginner bug.
 pub fn send_frame_callbacks(

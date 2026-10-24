@@ -5,13 +5,16 @@
 //! single `delegate_dispatch2!` below generates them for ALL protocols at once (older
 //! smithay versions needed one `delegate_*!` macro per protocol).
 
+pub mod activation;
 pub mod compositor;
 pub mod data_device;
 pub mod decoration;
 pub mod dmabuf;
+pub mod fractional_scale;
 pub mod idle;
 pub mod layer_shell;
 pub mod output;
+pub mod pointer;
 pub mod screencopy;
 pub mod seat;
 pub mod session_lock;

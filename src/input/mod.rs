@@ -383,6 +383,11 @@ pub fn before_frame(state: &mut SpaceState) {
     if state.render_mode != RenderMode::Scene3D {
         return;
     }
+    // Pulsing borders (xdg-activation) change every frame.
+    let now = std::time::Instant::now();
+    if state.world.panels().iter().any(|p| p.attention_until.is_some_and(|t| t > now)) {
+        state.view.dirty = true;
+    }
     let eye = state.player.eye();
     state.voxels.dispatch_dirty(eye);
 

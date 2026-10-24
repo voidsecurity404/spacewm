@@ -8,7 +8,6 @@ use smithay::{
     input::{keyboard::LedState, pointer::CursorImageStatus, Seat, SeatHandler, SeatState},
     reexports::wayland_server::{protocol::wl_surface::WlSurface, Resource},
     wayland::{
-        pointer_constraints::PointerConstraintsHandler,
         seat::WaylandFocus,
         selection::{data_device::set_data_device_focus, primary_selection::set_primary_focus},
     },
@@ -53,24 +52,5 @@ impl SeatHandler for SpaceState {
 
     fn led_state_changed(&mut self, _seat: &Seat<Self>, led_state: LedState) {
         self.backend.update_led_state(led_state);
-    }
-}
-
-// Required by smithay's pointer focus machinery; constraint requests themselves are handled
-// in Stage 7.5.
-impl PointerConstraintsHandler for SpaceState {
-    fn new_constraint(
-        &mut self,
-        _surface: &WlSurface,
-        _pointer: &smithay::input::pointer::PointerHandle<Self>,
-    ) {
-    }
-
-    fn cursor_position_hint(
-        &mut self,
-        _surface: &WlSurface,
-        _pointer: &smithay::input::pointer::PointerHandle<Self>,
-        _location: smithay::utils::Point<f64, smithay::utils::Logical>,
-    ) {
     }
 }

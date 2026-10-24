@@ -237,6 +237,11 @@ pub fn move_virtual_cursor(state: &mut SpaceState, delta: Point<f64, Logical>, t
     let InputMode::Window { panel } = state.mode else {
         return;
     };
+    // A game locked the pointer (mouse-look): the cursor stays, only raw deltas go on.
+    if state.pointer_locked() {
+        tracing::debug!("pointer locked by the app: cursor stays");
+        return;
+    }
     let Some(p) = state.world.panels().iter().find(|p| p.id == panel) else {
         return;
     };
@@ -313,6 +318,7 @@ pub fn send_window_pointer(state: &mut SpaceState, time: InputTime) {
         &MotionEvent { location, serial: SERIAL_COUNTER.next_serial(), time },
     );
     pointer.frame(state);
+    state.activate_pointer_constraint();
 }
 
 /// The surface (toplevel, subsurface, popup or X11 menu) at `point` in window-geometry

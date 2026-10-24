@@ -231,10 +231,29 @@ fn render(state: &mut SpaceState) {
             ),
         }
     };
-    if let Err(err) = result {
-        tracing::error!("rendering failed: {err:?}");
-    }
+    let presented = match &result {
+        Ok(r) => r.damage.is_some(),
+        Err(err) => {
+            tracing::error!("rendering failed: {err:?}");
+            false
+        }
+    };
     b.rendered_once = true;
+    if presented {
+        // No real display: the frame counts as presented now.
+        let refresh = output
+            .current_mode()
+            .map(|m| std::time::Duration::from_secs_f64(1000.0 / m.refresh.max(1) as f64));
+        let mut feedback = render::take_presentation_feedback(&output, &state.space, &state.lock);
+        feedback.presented(
+            render::monotonic_now(),
+            refresh.map_or(smithay::wayland::presentation::Refresh::Unknown, |r| {
+                smithay::wayland::presentation::Refresh::fixed(r)
+            }),
+            0,
+            smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback::Kind::empty(),
+        );
+    }
 
     let capture = capturing.then(|| {
         screenshot::start_capture(&mut b.renderer, &framebuffer, b.size, output.current_transform())

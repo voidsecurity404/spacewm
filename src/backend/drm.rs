@@ -86,8 +86,10 @@ const HIDPI: f64 = 200.0;
 
 type Allocator = GbmAllocator<DrmDeviceFd>;
 type Exporter = GbmFramebufferExporter<DrmDeviceFd>;
-type SpaceDrmOutput = DrmOutput<Allocator, Exporter, (), DrmDeviceFd>;
-type SpaceDrmOutputManager = DrmOutputManager<Allocator, Exporter, (), DrmDeviceFd>;
+/// The user data of a queued frame: its presentation feedback, reported at the vblank.
+type FrameData = Option<smithay::desktop::utils::OutputPresentationFeedback>;
+type SpaceDrmOutput = DrmOutput<Allocator, Exporter, FrameData, DrmDeviceFd>;
+type SpaceDrmOutputManager = DrmOutputManager<Allocator, Exporter, FrameData, DrmDeviceFd>;
 
 /// Where one output is in its frame cycle.
 #[derive(Debug)]
@@ -379,8 +381,8 @@ fn open_gpu(
     );
 
     loop_handle
-        .insert_source(notifier, move |event, _metadata, state| match event {
-            DrmEvent::VBlank(crtc) => on_vblank(state, crtc),
+        .insert_source(notifier, move |event, metadata, state| match event {
+            DrmEvent::VBlank(crtc) => on_vblank(state, crtc, metadata.take()),
             DrmEvent::Error(e) => tracing::error!("DRM error: {e}"),
         })
         .map_err(|e| backend_err("drm event source", &e.error))?;
@@ -840,7 +842,8 @@ fn render(state: &mut SpaceState, crtc: crtc::Handle) {
     }
 
     if rendered {
-        surface.redraw = match surface.drm_output.queue_frame(()) {
+        let feedback = render::take_presentation_feedback(&output, &state.space, &state.lock);
+        surface.redraw = match surface.drm_output.queue_frame(Some(feedback)) {
             Ok(()) => RedrawState::WaitingForVBlank { redraw_needed: false, since: Instant::now() },
             Err(e) => {
                 tracing::warn!("queue_frame failed: {e:?}");
@@ -873,12 +876,30 @@ fn render(state: &mut SpaceState, crtc: crtc::Handle) {
     super::headless::finish_frame(state, frame_start, prepared);
 }
 
-fn on_vblank(state: &mut SpaceState, crtc: crtc::Handle) {
+fn on_vblank(
+    state: &mut SpaceState,
+    crtc: crtc::Handle,
+    metadata: Option<smithay::backend::drm::DrmEventMetadata>,
+) {
     let animating = state.animating();
     let Backend::Drm(b) = &mut state.backend else { return };
     let Some(surface) = b.gpu.surfaces.get_mut(&crtc) else { return };
-    if let Err(e) = surface.drm_output.frame_submitted() {
-        tracing::warn!("frame_submitted failed: {e:?}");
+    use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback::Kind;
+    match surface.drm_output.frame_submitted() {
+        Ok(Some(Some(mut feedback))) => {
+            // The kernel's vblank timestamp is the moment the frame went on screen.
+            let (time, seq, flags) = match metadata {
+                Some(smithay::backend::drm::DrmEventMetadata {
+                    time: smithay::backend::drm::DrmEventTime::Monotonic(t),
+                    sequence,
+                }) => (t.into(), sequence as u64, Kind::Vsync | Kind::HwClock | Kind::HwCompletion),
+                _ => (render::monotonic_now(), 0, Kind::Vsync),
+            };
+            let refresh = smithay::wayland::presentation::Refresh::fixed(surface.frame_duration);
+            feedback.presented(time, refresh, seq, flags);
+        }
+        Ok(_) => {}
+        Err(e) => tracing::warn!("frame_submitted failed: {e:?}"),
     }
     let now = Instant::now();
     surface.flips += 1;

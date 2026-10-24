@@ -708,8 +708,24 @@ fn render(state: &mut SpaceState) {
     drop(framebuffer);
 
     if let Some(damage) = &damage {
-        if let Err(e) = b.submit(damage) {
-            tracing::warn!("failed to submit frame: {e}");
+        match b.submit(damage) {
+            Ok(()) => {
+                // The host shows it with its next frame; close enough for clients.
+                let refresh = output
+                    .current_mode()
+                    .map(|m| std::time::Duration::from_secs_f64(1000.0 / m.refresh.max(1) as f64));
+                let mut feedback =
+                    render::take_presentation_feedback(&output, &state.space, &state.lock);
+                feedback.presented(
+                    render::monotonic_now(),
+                    refresh.map_or(smithay::wayland::presentation::Refresh::Unknown, |r| {
+                        smithay::wayland::presentation::Refresh::fixed(r)
+                    }),
+                    0,
+                    smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback::Kind::empty(),
+                );
+            }
+            Err(e) => tracing::warn!("failed to submit frame: {e}"),
         }
     }
     if let Some(capture) = capture {

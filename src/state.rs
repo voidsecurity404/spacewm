@@ -145,6 +145,20 @@ pub struct SpaceState {
     /// players, browsers). smithay's renderer applies it; holding the state keeps the global.
     #[allow(dead_code)]
     pub viewporter_state: smithay::wayland::viewporter::ViewporterState,
+    /// Globals whose state smithay keeps internally; held so they stay alive.
+    #[allow(dead_code)]
+    pub fractional_scale_state: smithay::wayland::fractional_scale::FractionalScaleManagerState,
+    #[allow(dead_code)]
+    pub relative_pointer_state: smithay::wayland::relative_pointer::RelativePointerManagerState,
+    #[allow(dead_code)]
+    pub pointer_constraints_state: smithay::wayland::pointer_constraints::PointerConstraintsState,
+    #[allow(dead_code)]
+    pub cursor_shape_state: smithay::wayland::cursor_shape::CursorShapeManagerState,
+    /// xdg-activation tokens (wayland/activation.rs).
+    pub activation_state: smithay::wayland::xdg_activation::XdgActivationState,
+    /// wp_presentation: when exactly a frame reached the screen (video players sync to it).
+    #[allow(dead_code)]
+    pub presentation_state: smithay::wayland::presentation::PresentationState,
     /// zwlr_screencopy_manager_v1 (wf-recorder). Never read: keeps the global.
     #[allow(dead_code)]
     pub wlr_screencopy_global: smithay::reexports::wayland_server::backend::GlobalId,
@@ -260,6 +274,20 @@ impl SpaceState {
         let idle_inhibit_state =
             smithay::wayland::idle_inhibit::IdleInhibitManagerState::new::<Self>(&dh);
         let viewporter_state = smithay::wayland::viewporter::ViewporterState::new::<Self>(&dh);
+        let fractional_scale_state =
+            smithay::wayland::fractional_scale::FractionalScaleManagerState::new::<Self>(&dh);
+        let relative_pointer_state =
+            smithay::wayland::relative_pointer::RelativePointerManagerState::new::<Self>(&dh);
+        let pointer_constraints_state =
+            smithay::wayland::pointer_constraints::PointerConstraintsState::new::<Self>(&dh);
+        let cursor_shape_state =
+            smithay::wayland::cursor_shape::CursorShapeManagerState::new::<Self>(&dh);
+        let activation_state =
+            smithay::wayland::xdg_activation::XdgActivationState::new::<Self>(&dh);
+        let presentation_state = smithay::wayland::presentation::PresentationState::new::<Self>(
+            &dh,
+            rustix::time::ClockId::Monotonic as u32,
+        );
         let session_lock_state =
             smithay::wayland::session_lock::SessionLockManagerState::new::<Self, _>(&dh, |_| true);
         tracing::debug!("global: zwlr_layer_shell_v1");
@@ -344,6 +372,12 @@ impl SpaceState {
             idle_inhibit_state,
             idle_inhibitors: Vec::new(),
             viewporter_state,
+            fractional_scale_state,
+            relative_pointer_state,
+            pointer_constraints_state,
+            cursor_shape_state,
+            activation_state,
+            presentation_state,
             wlr_screencopy_global,
             overlay: Overlay::None,
             launcher: None,
@@ -404,10 +438,13 @@ impl SpaceState {
 
     /// Something moves on its own (held keys, falling): keep rendering frames.
     pub fn animating(&self) -> bool {
+        let now = Instant::now();
         self.render_mode == crate::cli::RenderMode::Scene3D
             && (self.view.controls.is_moving()
                 || (!self.player.on_ground && !self.player.flying)
-                || self.player.vel.length_squared() > 1e-6)
+                || self.player.vel.length_squared() > 1e-6
+                // A pulsing border (xdg-activation) is an animation too.
+                || self.world.panels().iter().any(|p| p.attention_until.is_some_and(|t| t > now)))
     }
 
     /// Ask the backend for a new frame (something on screen changed).

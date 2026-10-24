@@ -53,6 +53,53 @@ frames=$(ffprobe -v error -count_frames -select_streams v:0 -show_entries stream
 [ "${frames:-0}" -gt 20 ] || fail "wf-recorder recorded only ${frames:-0} frames"
 pass "wf-recorder records the screen ($frames frames, $size bytes)"
 
+# ---- Small protocols: present, and pointer-constraints honored on a panel.
+for g in wp_fractional_scale_manager_v1 zwp_relative_pointer_manager_v1 \
+    zwp_pointer_constraints_v1 wp_cursor_shape_manager_v1 xdg_activation_v1 \
+    zwp_primary_selection_device_manager_v1 wp_presentation; do
+    has "$g"
+done
+pass "fractional-scale, relative-pointer, pointer-constraints, cursor-shape, activation, primary selection, presentation-time globals"
+kc spawn weston-constraints >/dev/null
+for _ in $(seq 50); do kc list | grep -q constraints && break; sleep 0.1; done
+CID=$(kc --json list | python3 -c "import json,sys; print([p['id'] for p in json.load(sys.stdin)['panels'] if 'constraints' in (p['app_id'] or '') or 'constraints' in (p['title'] or '')][0])")
+face_panel "$CID" "$PIXEL_PERFECT"
+kc mode window "$CID"
+sleep 0.3
+kc input click; sleep 0.2   # unconstrained -> confined
+kc input click; sleep 0.2   # confined -> locked
+kc input move-by 60 0
+sleep 0.2
+grep -q "pointer locked by the app" "$OUT/spacewm.log" || fail "pointer lock not honored"
+pass "pointer-constraints: a locked pointer freezes the panel cursor"
+kc close "$CID" >/dev/null
+kc mode walk
+
+# ---- presentation-time: weston-presentation-shm gets "presented" feedback every frame.
+n=$(WAYLAND_DISPLAY="$WL" timeout -s INT 2 env -u DISPLAY weston-presentation-shm -f 2>&1 | grep -c "p2p" || true)
+[ "$n" -gt 60 ] || fail "presentation feedback for only $n frames in 2 s"
+pass "presentation-time: $n frames reported presented in 2 s"
+
+# ---- xdg-activation: an app asking for attention pulses instead of taking focus.
+kc spawn foot -o bell.urgent=yes sh -c "sleep 1.5; printf '\\a'; sleep 30" >/dev/null
+for _ in $(seq 50); do kc list | grep -q foot && break; sleep 0.1; done
+kc mode walk
+sleep 2.5
+grep -q "panel asks for attention" "$OUT/spacewm.log" || fail "foot's urgent bell did not request activation"
+[ "$(focused)" = "[]" ] || fail "activation stole focus: $(focused)"
+P1=$(shot s7-attention-1); sleep 0.15; P2=$(shot s7-attention-2)
+D=$($PX diff "$P1" "$P2")
+python3 -c "exit(0 if $D > 0.0005 else 1)" || fail "no pulsing border ($D)"
+pass "xdg-activation: the panel pulses, focus stays where it was"
+kc close "$(kc --json list | python3 -c "import json,sys; print([p['id'] for p in json.load(sys.stdin)['panels'] if p['app_id']=='foot'][-1])")" >/dev/null
+
+# ---- primary selection: select-to-copy / middle-click paste between apps.
+WAYLAND_DISPLAY="$WL" wl-copy --primary space-primary
+sleep 0.3
+got=$(WAYLAND_DISPLAY="$WL" timeout 3 wl-paste --primary -n 2>/dev/null || true)
+[ "$got" = space-primary ] || fail "primary selection gave '$got'"
+pass "primary selection round trip"
+
 # ---- ext-idle-notify + idle-inhibit: swayidle fires after 2 s without input, resumes
 # on input, and doesn't fire while mpv plays a video (it holds an idle inhibitor).
 has ext_idle_notifier_v1

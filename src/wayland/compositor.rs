@@ -76,6 +76,21 @@ impl CompositorHandler for SpaceState {
                 }
             }
         }
+        // Window mode was entered on a window before it had any content (a freshly
+        // spawned app): the pointer couldn't enter it then. Now that it has a buffer, put
+        // the pointer on it, or clicks would go nowhere until the mouse moves.
+        if let crate::input::mode::InputMode::Window { panel } = self.mode {
+            let pointer_lost = self.seat.get_pointer().is_some_and(|p| p.current_focus().is_none());
+            let is_panel = self.window_for_surface(surface).is_some_and(|w| {
+                self.world.panels().iter().any(|p| p.id == panel && p.window == w)
+            });
+            if pointer_lost && is_panel {
+                crate::input::mode::send_window_pointer(
+                    self,
+                    smithay::backend::input::InputTime::now(),
+                );
+            }
+        }
         self.queue_client_redraw();
     }
 }
