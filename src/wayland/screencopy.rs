@@ -147,7 +147,17 @@ pub fn deliver(state: &mut Screencopy, output: &Output, image: Result<&CapturedI
                     )
                 });
                 match result {
-                    Ok(()) => frame.success(Transform::Normal, None, monotonic_now()),
+                    // The whole frame is reported as damaged (we copy it all every time).
+                    Ok(()) => {
+                        let full = image.map(|i| {
+                            Rectangle::from_size((i.width as i32, i.height as i32).into())
+                        });
+                        frame.success(
+                            Transform::Normal,
+                            full.ok().map(|r| vec![r]),
+                            monotonic_now(),
+                        )
+                    }
                     Err(e) => {
                         tracing::warn!("screen capture: {e}");
                         frame.fail(FailureReason::BufferConstraints);
