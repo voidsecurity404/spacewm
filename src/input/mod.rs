@@ -573,6 +573,7 @@ pub fn before_frame(state: &mut SpaceState) {
     state.focus_view_apply();
     state.apply_panel_glides();
     world_ops::update_grab(state);
+    state.update_drag_resize();
     mode::update_hover(state);
     // Needs this frame's hover.
     state.refresh_drag_hint();

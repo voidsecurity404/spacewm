@@ -2,7 +2,9 @@
 //!
 //! - drag a window by its top edge: it follows the view (as with Mod+G) and stays where
 //!   you let go (on a wall if you aim at one);
-//! - drag its bottom-right corner: the window itself gets bigger or smaller.
+//! - drag its bottom-right corner: the window itself gets bigger or smaller. The view
+//!   turns as usual and the corner goes where the crosshair points, while the opposite
+//!   (top-left) corner stays put, so you always see how big it will be.
 //!
 //! A press there that doesn't move is still a plain click (it enters the window), so
 //! the edges never get in the way. Looking at those spots shows a hint under the
@@ -10,6 +12,7 @@
 
 use std::time::{Duration, Instant};
 
+use glam::Vec3;
 use smithay::utils::{Logical, Point};
 
 use super::{raycast::PanelHit, world_ops};
@@ -19,6 +22,59 @@ use crate::{state::SpaceState, world::panel::PanelId};
 const DRAG_START: f64 = 6.0;
 /// At most this often a resize is sent to the app while dragging.
 const RESIZE_EVERY: Duration = Duration::from_millis(33);
+/// After letting go, the top-left corner is held this long while the app catches up.
+const SETTLE: Duration = Duration::from_millis(1500);
+/// Smallest window a drag makes (logical px).
+const MIN_SIZE: (f64, f64) = (240.0, 140.0);
+
+/// A resize in progress: the corner that stays put and the window's axes in the world.
+#[derive(Debug, Clone, Copy)]
+pub struct Anchor {
+    pub panel: PanelId,
+    top_left: Vec3,
+    right: Vec3,
+    up: Vec3,
+    normal: Vec3,
+    ppu: f32,
+    /// Where the corner was relative to the crosshair when the drag began (window px),
+    /// so the window doesn't jump to the exact crosshair spot.
+    offset: (f64, f64),
+}
+
+impl Anchor {
+    fn of<W>(p: &crate::world::panel::Panel<W>, crosshair: Option<Vec3>) -> Self {
+        let right = p.rotation * Vec3::X;
+        let up = p.rotation * Vec3::Y;
+        let size = p.world_size();
+        let top_left = p.position - right * (size.x / 2.0) + up * (size.y / 2.0);
+        let mut a = Anchor {
+            panel: p.id,
+            top_left,
+            right,
+            up,
+            normal: p.normal(),
+            ppu: p.pixels_per_unit,
+            offset: (0.0, 0.0),
+        };
+        if let Some(c) = crosshair {
+            let (x, y) = a.local_px(c);
+            a.offset = (p.size_px.0 as f64 - x, p.size_px.1 as f64 - y);
+        }
+        a
+    }
+
+    /// A world point in window pixels from the top-left corner (y down).
+    fn local_px(&self, point: Vec3) -> (f64, f64) {
+        let d = point - self.top_left;
+        ((d.dot(self.right) * self.ppu) as f64, (-d.dot(self.up) * self.ppu) as f64)
+    }
+
+    /// The panel center for a window of `size_px` with this top-left corner.
+    fn center(&self, size_px: (i32, i32)) -> Vec3 {
+        let (w, h) = (size_px.0 as f32 / self.ppu, size_px.1 as f32 / self.ppu);
+        self.top_left + self.right * (w / 2.0) - self.up * (h / 2.0)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Zone {
@@ -65,6 +121,7 @@ pub struct Drag {
     start_size: (i32, i32),
     size: (f64, f64),
     last_sent: Option<Instant>,
+    anchor: Option<Anchor>,
 }
 
 impl SpaceState {
@@ -90,6 +147,7 @@ impl SpaceState {
             start_size: size,
             size: (size.0 as f64, size.1 as f64),
             last_sent: None,
+            anchor: None,
         });
         true
     }
@@ -106,25 +164,80 @@ impl SpaceState {
             }
             d.started = true;
             tracing::info!(panel = d.panel, zone = ?d.zone, "drag started");
-            if d.zone == Zone::Move {
-                world_ops::grab_panel(self, d.panel);
+            match d.zone {
+                Zone::Move => world_ops::grab_panel(self, d.panel),
+                Zone::Resize => {
+                    let crosshair = self.crosshair_on(d.panel);
+                    d.anchor = self
+                        .world
+                        .panels()
+                        .iter()
+                        .find(|p| p.id == d.panel)
+                        .map(|p| Anchor::of(p, crosshair));
+                }
             }
         }
-        if d.zone == Zone::Move {
-            // Carried like Mod+G: the view turns and the window follows.
-            self.drag = Some(d);
-            return false;
-        }
-        // Resize: mouse px -> window px at the window's distance (same scale as the
-        // cursor on a panel), then ask the app, a few times per second at most.
-        let factor = self.panel_px_per_screen_px(d.panel).unwrap_or(1.0);
-        d.size.0 += delta.x * factor;
-        d.size.1 += delta.y * factor;
-        if d.last_sent.is_none_or(|t| t.elapsed() >= RESIZE_EVERY) {
-            self.send_drag_resize(&mut d);
-        }
+        // Both: the view turns. Moving, the window follows (like Mod+G); resizing, its
+        // corner follows the crosshair (`update_drag_resize`, every frame).
         self.drag = Some(d);
-        true
+        false
+    }
+
+    /// Where the crosshair meets a panel's plane.
+    fn crosshair_on(&self, panel: PanelId) -> Option<Vec3> {
+        let p = self.world.panels().iter().find(|p| p.id == panel)?;
+        let ray = super::raycast::camera_center_ray(&self.view.camera);
+        let t = super::raycast::ray_plane(&ray, p.position, p.normal())?;
+        (t > 0.0).then(|| ray.origin + ray.dir * t)
+    }
+
+    /// Every frame: while resizing (and shortly after), size the window so its corner is
+    /// at the crosshair, and keep its top-left corner where it was.
+    pub fn update_drag_resize(&mut self) {
+        let live = self.drag.filter(|d| d.started && d.zone == Zone::Resize);
+        if let Some(mut d) = live {
+            if let Some(a) = d.anchor {
+                let ray = super::raycast::camera_center_ray(&self.view.camera);
+                if let Some(t) =
+                    super::raycast::ray_plane(&ray, a.top_left, a.normal).filter(|t| *t > 0.0)
+                {
+                    let (x, y) = a.local_px(ray.origin + ray.dir * t);
+                    // Never bigger than the screen: a window you can't see whole is no use.
+                    let max = self
+                        .primary_output_geometry()
+                        .map_or((1920.0, 1080.0), |g| (g.size.w as f64, g.size.h as f64));
+                    d.size = (
+                        (x + a.offset.0).clamp(MIN_SIZE.0, max.0.max(MIN_SIZE.0)),
+                        (y + a.offset.1).clamp(MIN_SIZE.1, max.1.max(MIN_SIZE.1)),
+                    );
+                    if d.last_sent.is_none_or(|t| t.elapsed() >= RESIZE_EVERY) {
+                        self.send_drag_resize(&mut d);
+                    }
+                }
+            }
+            self.drag = Some(d);
+        }
+        let anchor = live.and_then(|d| d.anchor).or_else(|| {
+            self.resize_settle.filter(|(_, until)| Instant::now() < *until).map(|(a, _)| a)
+        });
+        if self.resize_settle.is_some_and(|(_, until)| Instant::now() >= until) {
+            self.resize_settle = None;
+        }
+        if let Some(a) = anchor {
+            if let Some(p) = self.world.panels_mut().iter_mut().find(|p| p.id == a.panel) {
+                let center = a.center(p.size_px);
+                if p.position.distance(center) > 1e-5 {
+                    p.position = center;
+                    self.view.dirty = true;
+                }
+            }
+        }
+    }
+
+    /// Something is still being resized: keep rendering.
+    pub fn resizing(&self) -> bool {
+        self.drag.is_some_and(|d| d.started && d.zone == Zone::Resize)
+            || self.resize_settle.is_some()
     }
 
     fn send_drag_resize(&mut self, d: &mut Drag) {
@@ -152,6 +265,11 @@ impl SpaceState {
             }
             Zone::Resize => {
                 self.send_drag_resize(&mut d);
+                // The app answers the last size a moment later: hold the corner till then.
+                if let Some(a) = d.anchor {
+                    self.resize_settle = Some((a, Instant::now() + SETTLE));
+                }
+                self.layout_changed();
                 tracing::info!(
                     panel = d.panel,
                     from = ?d.start_size,
@@ -205,17 +323,6 @@ impl SpaceState {
             }
         }
     }
-
-    /// Window pixels per screen pixel for a panel at its current distance.
-    pub fn panel_px_per_screen_px(&self, panel: PanelId) -> Option<f64> {
-        let p = self.world.panels().iter().find(|p| p.id == panel)?;
-        let output_h = self.primary_output_geometry().map(|g| g.size.h).unwrap_or(1080) as f64;
-        let camera = &self.view.camera;
-        let distance = camera.position.distance(p.position).max(0.05) as f64;
-        let screen_ppm =
-            output_h / (2.0 * distance * (camera.fov_y_deg as f64 / 2.0).to_radians().tan());
-        Some(p.pixels_per_unit as f64 / screen_ppm)
-    }
 }
 
 #[cfg(test)]
@@ -224,6 +331,26 @@ mod tests {
 
     fn px(x: f64, y: f64) -> Point<f64, Logical> {
         Point::from((x, y))
+    }
+
+    #[test]
+    fn anchor_keeps_the_top_left_corner() {
+        // A 800x400 px window at 800 px/m: 1 m x 0.5 m, facing +Z at the origin.
+        let p = crate::world::panel::Panel::new(1, (), (800, 400));
+        let a = Anchor::of(&p, None);
+        assert!(a.top_left.distance(Vec3::new(-0.5, 0.25, 0.0)) < 1e-6, "{:?}", a.top_left);
+        // The bottom-right corner is (800, 400) px from the top-left one.
+        let (x, y) = a.local_px(Vec3::new(0.5, -0.25, 0.0));
+        assert!((x - 800.0).abs() < 1e-3 && (y - 400.0).abs() < 1e-3, "{x} {y}");
+        // Twice the size: the center moves right/down so the top-left stays.
+        assert!(a.center((1600, 800)).distance(Vec3::new(0.5, -0.25, 0.0)) < 1e-6);
+        // The crosshair a bit inside the corner when grabbing: that gap is kept.
+        let b = Anchor::of(&p, Some(Vec3::new(0.45, -0.2, 0.0)));
+        assert!(
+            (b.offset.0 - 40.0).abs() < 1e-3 && (b.offset.1 - 40.0).abs() < 1e-3,
+            "{:?}",
+            b.offset
+        );
     }
 
     #[test]

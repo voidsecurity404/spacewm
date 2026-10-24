@@ -173,6 +173,8 @@ pub struct SpaceState {
     pub hotbar: crate::inventory::Hotbar,
     /// A left press held on a window's top edge / corner (input/drag.rs).
     pub drag: Option<crate::input::drag::Drag>,
+    /// A finished corner resize whose top-left corner is held while the app catches up.
+    pub resize_settle: Option<(crate::input::drag::Anchor, Instant)>,
     /// "drag: move" under the crosshair, and which spot it was drawn for.
     pub drag_hint: Option<(crate::input::drag::Zone, crate::inventory::Image)>,
     /// Seated mode: windows on an arc around you (input/seated.rs).
@@ -422,6 +424,7 @@ impl SpaceState {
             building_until: None,
             drag: None,
             drag_hint: None,
+            resize_settle: None,
             fullscreen: None,
             focus_view: None,
             hud: Default::default(),
@@ -490,7 +493,8 @@ impl SpaceState {
                 // A pulsing border (xdg-activation) is an animation too.
                 || self.world.panels().iter().any(|p| p.attention_until.is_some_and(|t| t > now))
                 || self.focus_view.is_some_and(|f| f.moving())
-                || self.panels_gliding())
+                || self.panels_gliding()
+                || self.resizing())
     }
 
     /// Ask the backend for a new frame (something on screen changed).

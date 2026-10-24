@@ -186,15 +186,46 @@ kc mode walk
 sleep 0.5
 read -r _ _ _ _ W0 H0 _ < <(panel)
 aim $((W0 - 15)) $((H0 - 15))
+# The top-left corner in the world, which must stay put while resizing.
+top_left() { kc --json list | python3 -c "
+import json, math, sys
+p = json.load(sys.stdin)['panels'][0]
+y = math.radians(p['yaw_deg']); ppu = p['pixels_per_unit']
+w, h = p['size_px'][0] / ppu, p['size_px'][1] / ppu
+x, yy, z = p['position']
+print(x - math.cos(y) * w / 2, yy + h / 2, z + math.sin(y) * w / 2)"; }
+read -r TLX0 TLY0 TLZ0 < <(top_left)
 grep -q 'drag hint hint="drag: resize"' "$OUT/spacewm.log" || fail "no resize hint on the corner"
+# Look a little to the right while holding the corner: wider, top-left stays put.
 kc input click --state press
-kc input move-by 120 80
-kc input move-by 120 80
+kc input move-by 20 0
+kc input move-by 20 0
 kc input click --state release
 for _ in $(seq 30); do read -r _ _ _ _ W1 H1 _ < <(panel); [ "$W1" -gt "$((W0 + 40))" ] && break; sleep 0.1; done
-[ "$W1" -gt "$((W0 + 40))" ] && [ "$H1" -gt "$((H0 + 20))" ] || fail "dragging the corner did not resize (${W0}x$H0 -> ${W1}x$H1)"
+[ "$W1" -gt "$((W0 + 40))" ] || fail "dragging the corner did not widen the window (${W0}x$H0 -> ${W1}x$H1)"
 grep -q "drag resize done" "$OUT/spacewm.log" || fail "no resize log"
-pass "dragging the corner resizes the window (${W0}x$H0 -> ${W1}x$H1)"
+sleep 1.6
+read -r TLX1 TLY1 TLZ1 < <(top_left)
+python3 -c "import math; exit(0 if math.dist(($TLX0,$TLY0,$TLZ0),($TLX1,$TLY1,$TLZ1)) < 0.03 else 1)" ||
+    fail "the top-left corner moved while resizing ($TLX0 $TLY0 $TLZ0 -> $TLX1 $TLY1 $TLZ1)"
+# Look far right/down: never bigger than the screen.
+read -r _ _ _ _ WX HX _ < <(panel)
+aim $((WX - 15)) $((HX - 15))
+kc input click --state press
+kc input move-by 400 300
+kc input click --state release
+sleep 1.6
+read -r _ _ _ _ W2 H2 _ < <(panel)
+[ "$W2" -le 1280 ] && [ "$H2" -le 720 ] || fail "resized beyond the screen (${W2}x$H2)"
+# And back up-left: smaller.
+aim $((W2 - 15)) $((H2 - 15))
+kc input click --state press
+kc input move-by -150 -100
+kc input click --state release
+sleep 1.6
+read -r _ _ _ _ W3 H3 _ < <(panel)
+[ "$W3" -lt "$((W2 - 100))" ] && [ "$H3" -lt "$((H2 - 60))" ] || fail "dragging the corner back did not shrink (${W2}x$H2 -> ${W3}x$H3)"
+pass "the corner follows the crosshair (${W0}x$H0 -> ${W1}x$H1, max ${W2}x$H2, back ${W3}x$H3), top-left stays"
 
 space_stop || fail "unclean exit"
 
