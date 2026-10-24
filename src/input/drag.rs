@@ -122,6 +122,8 @@ pub struct Drag {
     size: (f64, f64),
     last_sent: Option<Instant>,
     anchor: Option<Anchor>,
+    /// Resize: where the crosshair asks the corner to be, before the size limits (logs).
+    wanted: (f64, f64),
 }
 
 impl SpaceState {
@@ -148,6 +150,7 @@ impl SpaceState {
             size: (size.0 as f64, size.1 as f64),
             last_sent: None,
             anchor: None,
+            wanted: (size.0 as f64, size.1 as f64),
         });
         true
     }
@@ -206,9 +209,10 @@ impl SpaceState {
                     let max = self
                         .primary_output_geometry()
                         .map_or((1920.0, 1080.0), |g| (g.size.w as f64, g.size.h as f64));
+                    d.wanted = (x + a.offset.0, y + a.offset.1);
                     d.size = (
-                        (x + a.offset.0).clamp(MIN_SIZE.0, max.0.max(MIN_SIZE.0)),
-                        (y + a.offset.1).clamp(MIN_SIZE.1, max.1.max(MIN_SIZE.1)),
+                        d.wanted.0.clamp(MIN_SIZE.0, max.0.max(MIN_SIZE.0)),
+                        d.wanted.1.clamp(MIN_SIZE.1, max.1.max(MIN_SIZE.1)),
                     );
                     if d.last_sent.is_none_or(|t| t.elapsed() >= RESIZE_EVERY) {
                         self.send_drag_resize(&mut d);
@@ -274,6 +278,7 @@ impl SpaceState {
                     panel = d.panel,
                     from = ?d.start_size,
                     to = ?(d.size.0.round() as i32, d.size.1.round() as i32),
+                    wanted = ?(d.wanted.0.round() as i32, d.wanted.1.round() as i32),
                     "drag resize done"
                 );
             }
