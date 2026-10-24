@@ -122,6 +122,10 @@ pub struct SpaceState {
     pub xwayland: Option<crate::xwayland::Xwayland>,
     /// zwlr_layer_shell_v1: bars, launchers, notifications (wayland/layer_shell.rs).
     pub layer_shell_state: WlrLayerShellState,
+    /// zxdg_decoration_manager_v1: we ask apps not to draw title bars.
+    /// Never read: holding it keeps the global alive.
+    #[allow(dead_code)]
+    pub decoration_state: smithay::wayland::shell::xdg::decoration::XdgDecorationState,
     /// Something on top of the view that has the keyboard.
     pub overlay: Overlay,
     /// The built-in launcher, while open (it then gets every key).
@@ -220,6 +224,8 @@ impl SpaceState {
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
         let xwayland_shell_state = XWaylandShellState::new::<Self>(&dh);
         let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
+        let decoration_state =
+            smithay::wayland::shell::xdg::decoration::XdgDecorationState::new::<Self>(&dh);
         tracing::debug!("global: zwlr_layer_shell_v1");
         tracing::debug!("global: xdg_wm_base");
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
@@ -291,6 +297,7 @@ impl SpaceState {
             xwayland_shell_state,
             xwayland: None,
             layer_shell_state,
+            decoration_state,
             overlay: Overlay::None,
             launcher: None,
             hud: Default::default(),

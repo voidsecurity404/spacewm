@@ -7,6 +7,7 @@
 
 pub mod compositor;
 pub mod data_device;
+pub mod decoration;
 pub mod dmabuf;
 pub mod layer_shell;
 pub mod output;
