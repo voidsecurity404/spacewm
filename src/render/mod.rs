@@ -18,6 +18,7 @@ pub mod panel_texture;
 pub mod perf;
 pub mod scene;
 pub mod screenshot;
+pub mod settings;
 pub mod text;
 pub mod view;
 pub mod voxels;
@@ -128,6 +129,8 @@ pub struct OverlayInputs<'a> {
     pub dock_cursor: bool,
     /// "drag: move" under the crosshair.
     pub drag_hint: Option<&'a crate::inventory::Image>,
+    /// The settings box (centered), with its own cursor.
+    pub settings: Option<&'a crate::inventory::Image>,
     /// The window menu and its top-left corner (output-relative).
     pub menu: Option<(&'a crate::inventory::Image, (i32, i32))>,
     /// A fullscreen window is shown: where to draw the 2D cursor (output-relative
@@ -185,6 +188,19 @@ where
     if let Some((buffer, size)) = inputs.drag_hint {
         let x = (geo.size.w - size.0) / 2;
         elements.extend(boxed(renderer, buffer, (x, geo.size.h / 2 + 16)));
+    }
+    if let Some((buffer, _)) = inputs.settings {
+        elements.extend(pointer_elements(
+            renderer,
+            inputs.cursor_status,
+            inputs.cursor_theme,
+            None,
+            inputs.pointer - geo.loc.to_f64(),
+            scale,
+            inputs.time,
+        ));
+        let at = crate::render::settings::box_origin((geo.size.w, geo.size.h));
+        elements.extend(boxed(renderer, buffer, at));
     }
     if let Some(((buffer, _), at)) = inputs.menu {
         // Its cursor on top of it.
@@ -284,6 +300,7 @@ where
         || inputs.inventory.is_some()
         || inputs.help.is_some()
         || inputs.menu.is_some()
+        || inputs.settings.is_some()
         || inputs.dock_cursor;
     if !covered || !three_d {
         elements.extend(mode_overlay(renderer, inputs, Some(geo)));
@@ -376,6 +393,7 @@ macro_rules! overlay_inputs {
             launching: $state.desktop.launching.image.as_ref(),
             menu: $state.menu.as_ref().and_then(|m| m.image.as_ref().map(|i| (i, m.origin))),
             drag_hint: $state.drag_hint.as_ref().map(|(_, i)| i),
+            settings: $state.settings.as_ref().and_then(|s| s.image.as_ref()),
             dock: $state.dock.image.as_ref().map(|i| (i, $state.dock.origin)),
             dock_tooltip: $state.dock.tooltip.as_ref().map(|t| (t, $state.dock.tooltip_at)),
             dock_cursor: $state.dock.cursor && $state.dock.cursor_moved,

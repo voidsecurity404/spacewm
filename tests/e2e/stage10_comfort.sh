@@ -346,5 +346,32 @@ read -r P3b < <(kc --json list | python3 -c "import json,sys; print(json.load(sy
 [ "$(focused)" = "[]" ] || fail "back in 3D the window kept the keyboard"
 pass "Mod+D again: back to the 3D world, the panel where it was"
 space_stop || fail "unclean exit"
+
+# ---- Settings box: a click changes a setting, saved to the file with its comments,
+# applied at once; arrows work; Escape closes.
+CFGS="$FAKE/settings.toml"
+space_start --render 3d --config "$CFGS" --log-level debug
+sleep 1
+COMMENTS0=$(grep -c '^#' "$CFGS")
+kc input key Super+comma
+sleep 0.3
+grep -q "settings opened" "$OUT/spacewm.log" || fail "Mod+comma did not open settings"
+shot s10-settings >/dev/null
+# Row 2 is the field of view: box 470x532 centered, rows from 50 px, 30 px each.
+kc input move-to 640 $(( (720 - 532) / 2 + 50 + 2 * 30 + 15 ))
+kc input click
+sleep 0.4
+grep -q '^fov = 80.0' "$CFGS" || fail "click did not save fov = 80: $(grep '^fov' "$CFGS")"
+[ "$(grep -c '^#' "$CFGS")" = "$COMMENTS0" ] || fail "comments lost in the config file"
+grep -q "config reloaded" "$OUT/spacewm.log" || fail "the new setting was not applied"
+pass "a click in Settings saves the value (fov 80), keeps the file's comments, applies it"
+kc input key Left
+sleep 0.3
+grep -q '^fov = 75.0' "$CFGS" || fail "Left did not step back: $(grep '^fov' "$CFGS")"
+kc input key Escape
+sleep 0.2
+grep -q "settings closed" "$OUT/spacewm.log" || fail "Escape did not close settings"
+pass "arrow keys change the selected setting; Escape closes"
+space_stop || fail "unclean exit"
 grep -E "panicked" "$OUT/spacewm.log" && fail "panic in log"
 pass "clean exit"

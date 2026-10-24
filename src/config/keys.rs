@@ -250,6 +250,8 @@ pub struct KeybindsConfig {
     pub seated: Binding,
     /// Switch between the 3D world and a plain 2D desktop.
     pub toggle_2d: Binding,
+    /// The settings box.
+    pub settings: Binding,
     /// Lock the screen (`desktop.lock_command`).
     pub lock: Binding,
     /// Whole screen to ~/Pictures/Screenshots and the clipboard; a dragged region.
@@ -297,6 +299,7 @@ impl Default for KeybindsConfig {
             help: Binding::one("Mod+K"),
             seated: Binding::one("Mod+S"),
             toggle_2d: Binding::one("Mod+D"),
+            settings: Binding::one("Mod+comma"),
             lock: Binding::one("Mod+L"),
             screenshot: Binding::one("Print"),
             screenshot_region: Binding::one("Shift+Print"),
@@ -341,6 +344,7 @@ impl KeybindsConfig {
             ("help", &self.help, Action::Help),
             ("seated", &self.seated, Action::ToggleSeated),
             ("toggle_2d", &self.toggle_2d, Action::Toggle2d),
+            ("settings", &self.settings, Action::Settings),
             ("lock", &self.lock, Action::Lock),
             ("screenshot", &self.screenshot, Action::Screenshot),
             ("screenshot_region", &self.screenshot_region, Action::ScreenshotRegion),

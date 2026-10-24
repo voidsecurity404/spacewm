@@ -10,6 +10,7 @@
 //! edit keeps the previous settings and shows the error on screen.
 
 mod apply;
+pub mod edit;
 pub mod keys;
 pub mod watch;
 

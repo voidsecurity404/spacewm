@@ -116,13 +116,13 @@ impl SpaceState {
         if !self.seated.active {
             return;
         }
-        let camera = self.view.camera;
-        let eye = camera.position;
+        // Around where you sit and look, not where the view may be gliding.
+        let (eye, view_yaw) = self.walk_view();
         // Keep the left-to-right order the windows have as seen from here.
         let rel_yaw = |pos: Vec3| {
             let d = pos - eye;
             let yaw = d.x.atan2(-d.z);
-            (yaw - camera.yaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
+            (yaw - view_yaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
         };
         struct Spot {
             id: PanelId,
@@ -151,7 +151,7 @@ impl SpaceState {
         // The distance where the biggest one is sharp / fits, for all.
         let radius = panels.iter().map(|p| self.spawn_distance(p.size_px)).fold(0.0f32, f32::max);
         let widths: Vec<f32> = panels.iter().map(|p| p.width).collect();
-        let (centers, r) = arc(&widths, camera.yaw, radius);
+        let (centers, r) = arc(&widths, view_yaw, radius);
         let now = Instant::now();
         let mut glides = Vec::new();
         for (p, yaw) in panels.iter().zip(centers) {

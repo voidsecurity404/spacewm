@@ -183,6 +183,8 @@ pub struct SpaceState {
     pub dock: crate::render::dock::Dock,
     /// The hotbar replaces the dock until then (just built something).
     pub building_until: Option<Instant>,
+    /// The settings box (Mod+comma), while open.
+    pub settings: Option<crate::render::settings::SettingsBox>,
     /// The window menu (right click on a window), while open.
     pub menu: Option<crate::render::menu::PanelMenu>,
     /// The key help box (Mod+K), while shown.
@@ -413,6 +415,7 @@ impl SpaceState {
             hotbar: Default::default(),
             help: None,
             menu: None,
+            settings: None,
             dock: Default::default(),
             seated: Default::default(),
             drag2d: None,

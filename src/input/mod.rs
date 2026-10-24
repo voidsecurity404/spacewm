@@ -97,6 +97,8 @@ pub enum Action {
     ToggleSeated,
     /// The 3D world or a plain 2D desktop.
     Toggle2d,
+    /// Open/close the settings box.
+    Settings,
     /// Lock the screen now.
     Lock,
     Screenshot,
@@ -245,6 +247,8 @@ enum KeyOutcome {
     CloseHelp,
     /// A key while the window menu is open.
     Menu(Keysym),
+    /// A key while the settings box is open.
+    Settings(Keysym),
 }
 
 pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState, time: InputTime) {
@@ -303,6 +307,17 @@ pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState,
         }
         let combo_mods = Mods::from_state(mods, state.config.general.mod_key, nested);
         let mod_escape = combo_mods.mod_ && sym == Some(Keysym::Escape);
+        // The settings box takes the keys while open (its own key closes it too).
+        if state.settings.is_some() {
+            state.input.suppressed_keys.insert(keycode);
+            let bound = sym.and_then(|s| state.keybinds.get(combo_mods, s));
+            let sym = if bound == Some(Action::Settings) || mod_escape {
+                Keysym::Escape
+            } else {
+                sym.unwrap_or(Keysym::NoSymbol)
+            };
+            return FilterResult::Intercept(Some(KeyOutcome::Settings(sym)));
+        }
         // The window menu takes the keys while open.
         if state.menu.is_some() {
             state.input.suppressed_keys.insert(keycode);
@@ -390,6 +405,7 @@ pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState,
         Some(Some(KeyOutcome::Inventory(sym, mod_escape))) => inventory_key(state, sym, mod_escape),
         Some(Some(KeyOutcome::CloseHelp)) => state.close_help(),
         Some(Some(KeyOutcome::Menu(sym))) => state.menu_key(sym),
+        Some(Some(KeyOutcome::Settings(sym))) => state.settings_key(sym),
         _ => {}
     }
 }
@@ -434,6 +450,7 @@ pub fn run_action(state: &mut SpaceState, action: Action) {
         Action::Lock => state.lock_now(),
         Action::ToggleSeated => state.toggle_seated(),
         Action::Toggle2d => state.toggle_2d(),
+        Action::Settings => state.toggle_settings(),
         Action::Screenshot => state.screenshot(false),
         Action::ScreenshotRegion => state.screenshot(true),
         Action::Hardware(hw) => state.hardware_key(hw),
@@ -510,6 +527,7 @@ pub fn before_frame(state: &mut SpaceState) {
     state.refresh_inventory();
     state.refresh_launching();
     state.refresh_menu();
+    state.refresh_settings();
     state.refresh_dock();
     if state.render_mode != RenderMode::Scene3D {
         return;
@@ -595,6 +613,10 @@ pub fn handle_pointer_motion_absolute(
     time: InputTime,
 ) {
     state.input_activity();
+    if state.settings.is_some() {
+        state.settings_pointer(pos);
+        return;
+    }
     if pointer_is_3d(state) && state.menu.is_some() {
         state.menu_pointer(pos);
         return;
@@ -645,6 +667,10 @@ pub fn handle_pointer_motion(
     time: InputTime,
 ) {
     state.input_activity();
+    if state.settings.is_some() {
+        state.settings_pointer(state.pointer_location + delta);
+        return;
+    }
     if pointer_is_3d(state) && state.menu.is_some() {
         state.menu_pointer(state.pointer_location + delta);
         return;
@@ -774,6 +800,14 @@ pub fn handle_pointer_button(
         return;
     }
     if button_state == ButtonState::Released && state.input.suppressed_buttons.remove(&button) {
+        return;
+    }
+    // The settings box: a click changes a row (right button: back) or closes it.
+    if state.settings.is_some() {
+        if button_state == ButtonState::Pressed {
+            state.input.suppressed_buttons.insert(button);
+            state.settings_click(button == BTN_RIGHT);
+        }
         return;
     }
     // The window menu: a click picks an entry or closes it (and goes nowhere else).

@@ -134,6 +134,13 @@ impl SpaceState {
         self.queue_redraw();
     }
 
+    /// Where the player looks from when walking: the eyes, and the walking yaw (the view
+    /// itself may be away, zoomed into a window or gliding back).
+    pub fn walk_view(&self) -> (Vec3, f32) {
+        let yaw = self.focus_view.map_or(self.view.camera.yaw, |f| f.walk.yaw);
+        (self.player.eye(), yaw)
+    }
+
     /// Drop the zoom at once (the view is about to be set by someone else).
     pub fn focus_view_cancel(&mut self) {
         if let Some(f) = self.focus_view.take() {

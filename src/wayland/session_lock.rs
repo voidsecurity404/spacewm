@@ -89,6 +89,7 @@ impl SessionLockHandler for SpaceState {
         self.close_inventory();
         self.close_help();
         self.close_menu();
+        self.close_settings();
         self.overlay = crate::state::Overlay::None;
         self.view.controls.clear();
         if let Some(keyboard) = self.seat.get_keyboard() {

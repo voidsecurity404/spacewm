@@ -145,6 +145,8 @@ help = "Mod+K"
 seated = "Mod+S"
 # Switch between the 3D world and a plain 2D desktop (windows stay where they are).
 toggle_2d = "Mod+D"
+# The settings box: the common settings with a click (saved to this file).
+settings = "Mod+comma"
 lock = "Mod+L"
 screenshot = "Print"
 screenshot_region = "Shift+Print"
