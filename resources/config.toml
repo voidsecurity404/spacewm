@@ -96,8 +96,13 @@ reload_shaders = "Mod+F5"
 # The built-in app launcher (type, arrows, Enter; Escape closes).
 launcher = "Mod+space"
 hud = "Mod+F1"
-# Block types for building (Mod+click breaks, Mod+right click places).
-select_block = ["Mod+1", "Mod+2", "Mod+3", "Mod+4", "Mod+5", "Mod+6", "Mod+7", "Mod+8"]
+# The panel you look at fills the whole screen (Mod+F again or Mod+Escape: back).
+fullscreen = "Mod+F"
+# Turn to the next window; you're put into it when it is within reach.
+next_window = ["Mod+Tab", "Mod+grave"]
+# Hotbar slots. While walking, plain 1-5, the scroll wheel and E (inventory) work too;
+# left click breaks a block, right click places the selected one.
+select_block = ["Mod+1", "Mod+2", "Mod+3", "Mod+4", "Mod+5"]
 
 # Keys that start programs:
 # [[keybinds.spawn]]

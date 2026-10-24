@@ -332,3 +332,50 @@ saqlangan joylariga qaytadi.
 Yo'l-yo'lakay topilgan xato: oyna yopilganda uning joyi esda qolmasdi, chunki
 `toplevel_destroyed` chaqirilganda app_id allaqachon tozalangan bo'ladi. Endi panel oxirgi
 app_id va sarlavhani o'zida saqlaydi (`Panel::names`).
+
+### Qurilish: hotbar, inventar (E), oddiy klik bilan blok qo'yish
+
+Minecraft'dagidek:
+- **Hotbar**: ekran pastida 5 ta slot. Grass Block, Stone, Oak Planks, Bricks, Glass.
+  Oak Planks va Bricks yangi bloklar, ularning teksturalari ham kodda chiziladi
+  (`render/atlas.rs`). Tanlangan slot oq ramkada turadi. Faqat Walk rejimida ko'rinadi.
+- **1-5** tugmalari va **sichqoncha g'ildiragi** slot tanlaydi. Panel ko'tarib
+  yurganingizda g'ildirak avvalgidek panelni yaqinlashtiradi yoki uzoqlashtiradi.
+- **E**: inventar ochiladi. O'rtada kulrang quti chiqadi, sichqoncha esa kamerani emas,
+  oddiy kursorni suradi. Blokni bossangiz, u tanlanadi va quti yopiladi. E yoki Escape
+  bilan ham yopiladi. Bu tugmalar faqat Walk rejimida ishlaydi; oyna ichida E oddiy
+  harf bo'lib qoladi.
+- **O'ng klik** tanlangan blokni qo'yadi. **Chap klik** blokda bo'lsa uni sindiradi,
+  panelda bo'lsa avvalgidek oynaga kiradi. Mod+klik ham ishlashda davom etadi.
+
+Ikonkalar CPU'da "inverse mapping" usulida chiziladi: ikonkaning har bir pikseli
+uchun kubning qaysi yuzasiga va teksturaning qaysi pikseliga tushishi hisoblanadi.
+Yuqori yuza yorug'roq, yon yuzalar qoraroq, shunda kub yuqoridan yoritilgandek ko'rinadi.
+
+### Fullscreen (Mod+F)
+
+Panelga qarab yoki oyna ichida turib Mod+F bossangiz, ilovaga ekran o'lchami va
+`fullscreen` holati yuboriladi. X11 ilovalari `_NET_WM_STATE_FULLSCREEN` oladi.
+spacewm bu paytda 3D dunyoni chizmaydi: oyna butun ekranga tekis chiziladi, bitta oyna
+pikseli bitta ekran pikseliga to'g'ri keladi, kursor ham oddiy 2D kursor bo'ladi.
+Chiqish usullari:
+- Mod+F yana: oynada qolasiz;
+- Mod+Escape: yurish rejimiga qaytasiz;
+- ilovaning o'zi so'raganda.
+
+Oyna eski o'lchamiga qaytadi. Ilova o'zi so'raganda ham (Firefox'da F11, YouTube'dagi
+fullscreen tugmasi, `mpv --fs`) shu mexanizm ishlaydi, lekin faqat siz ishlatayotgan
+oyna uchun. Fon'dagi dastur ekranni egallab ololmaydi. Fullscreen paytida Waybar kabi
+panellar yashiriladi.
+
+### Mod+Tab / Mod+` : keyingi oyna
+
+Kamera keyingi oynaga buriladi. Oyna yaqin bo'lsa (reach masofasida, old tomoni
+sizga qaragan), siz darhol uning ichiga kirasiz. Uzoq bo'lsa, shunchaki unga qarab
+turasiz. Dunyoda "yo'qolib qolgan" oynani topishning eng oson yo'li shu. Nested
+rejimda Alt+Tab'ni Hyprland o'zi oladi, shuning uchun Alt+` (Tab ustidagi tugma)
+ham bog'langan.
+
+Yo'l-yo'lakay tuzatilgan xato: yangi ochilgan oynaga kirganda kursor oyna o'rtasida
+emas, chap yuqori burchakda boshlanardi. Sababi, oynada hali bufer yo'q edi va
+o'lchami 0 deb olinardi.

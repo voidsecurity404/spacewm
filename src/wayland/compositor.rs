@@ -85,6 +85,16 @@ impl CompositorHandler for SpaceState {
                 self.world.panels().iter().any(|p| p.id == panel && p.window == w)
             });
             if pointer_lost && is_panel {
+                // The cursor was centered on the size the panel was made with; the app
+                // may have picked a smaller one. Outside the real window: center it there.
+                if let Some(size) = self.window_for_surface(surface).map(|w| w.geometry().size) {
+                    let c = self.virtual_cursor;
+                    let inside =
+                        c.x >= 0.0 && c.y >= 0.0 && c.x < size.w as f64 && c.y < size.h as f64;
+                    if !inside && size.w > 0 && size.h > 0 {
+                        self.virtual_cursor = (size.w as f64 / 2.0, size.h as f64 / 2.0).into();
+                    }
+                }
                 crate::input::mode::send_window_pointer(
                     self,
                     smithay::backend::input::InputTime::now(),

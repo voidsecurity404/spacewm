@@ -16,6 +16,9 @@ pub enum Block {
     Glass,
     Sand,
     Water,
+    /// Oak planks: built, not found in the generated world.
+    Planks,
+    Bricks,
 }
 
 /// Texture layers (see render/atlas.rs).
@@ -30,7 +33,9 @@ pub mod tile {
     pub const GLASS: u16 = 7;
     pub const SAND: u16 = 8;
     pub const WATER: u16 = 9;
-    pub const COUNT: u16 = 10;
+    pub const PLANKS: u16 = 10;
+    pub const BRICKS: u16 = 11;
+    pub const COUNT: u16 = 12;
 }
 
 /// How a block is drawn.
@@ -59,7 +64,7 @@ const fn props(solid: bool, render: RenderKind, tiles: [u16; 3]) -> BlockProps {
 }
 
 use tile::*;
-const TABLE: [BlockProps; 9] = [
+const TABLE: [BlockProps; 11] = [
     props(false, RenderKind::Invisible, [0, 0, 0]), // Air
     props(true, RenderKind::Opaque, [GRASS_TOP, GRASS_SIDE, DIRT]), // Grass
     props(true, RenderKind::Opaque, [DIRT, DIRT, DIRT]), // Dirt
@@ -69,20 +74,31 @@ const TABLE: [BlockProps; 9] = [
     props(true, RenderKind::Translucent, [GLASS, GLASS, GLASS]), // Glass
     props(true, RenderKind::Opaque, [SAND, SAND, SAND]), // Sand
     props(false, RenderKind::Translucent, [WATER, WATER, WATER]), // Water
+    props(true, RenderKind::Opaque, [PLANKS, PLANKS, PLANKS]), // Planks
+    props(true, RenderKind::Opaque, [BRICKS, BRICKS, BRICKS]), // Bricks
 ];
 
 impl Block {
-    /// The blocks the number keys select, in order (1 = Grass ... 8 = Water).
-    pub const PLACEABLE: [Block; 8] = [
-        Block::Grass,
-        Block::Dirt,
-        Block::Stone,
-        Block::Wood,
-        Block::Leaves,
-        Block::Glass,
-        Block::Sand,
-        Block::Water,
-    ];
+    /// The inventory and the hotbar, in order (key 1 = Grass ... 5 = Glass).
+    pub const PLACEABLE: [Block; 5] =
+        [Block::Grass, Block::Stone, Block::Planks, Block::Bricks, Block::Glass];
+
+    /// Shown in the inventory.
+    pub fn name(self) -> &'static str {
+        match self {
+            Block::Air => "Air",
+            Block::Grass => "Grass Block",
+            Block::Dirt => "Dirt",
+            Block::Stone => "Stone",
+            Block::Wood => "Oak Log",
+            Block::Leaves => "Leaves",
+            Block::Glass => "Glass",
+            Block::Sand => "Sand",
+            Block::Water => "Water",
+            Block::Planks => "Oak Planks",
+            Block::Bricks => "Bricks",
+        }
+    }
 
     pub fn props(self) -> &'static BlockProps {
         &TABLE[self as usize]
@@ -108,6 +124,8 @@ impl Block {
             6 => Block::Glass,
             7 => Block::Sand,
             8 => Block::Water,
+            9 => Block::Planks,
+            10 => Block::Bricks,
             _ => Block::Air,
         }
     }
@@ -119,7 +137,7 @@ mod tests {
 
     #[test]
     fn table_matches_enum() {
-        for v in 0..9u8 {
+        for v in 0..11u8 {
             assert_eq!(Block::from_u8(v) as u8, v);
         }
         assert!(!Block::Air.is_solid() && Block::Air.is_transparent());

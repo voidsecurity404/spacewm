@@ -180,8 +180,16 @@ fn render(state: &mut SpaceState) {
     // 3D: advance the camera and re-render the scene texture first. The scene pass uses
     // our own framebuffers, so it must run before the output framebuffer is bound.
     let locked = state.lock.is_locked();
-    let mut prepared = (state.render_mode == RenderMode::Scene3D && !locked)
-        .then(|| state.view.prepare(&mut b.renderer, size, crate::scene_inputs!(state, time)));
+    // Fullscreen: no 3D world this frame, just the window.
+    // (Fields, not `fullscreen_panel()`: the backend is borrowed.)
+    let fullscreen = state
+        .fullscreen
+        .map(|f| f.panel)
+        .and_then(|id| state.world.panels().iter().find(|p| p.id == id))
+        .map(|p| (p.window.clone(), p.x11_children.clone()));
+    let mut prepared =
+        (state.render_mode == RenderMode::Scene3D && !locked && fullscreen.is_none())
+            .then(|| state.view.prepare(&mut b.renderer, size, crate::scene_inputs!(state, time)));
 
     let mut framebuffer = match b.renderer.bind(&mut b.target) {
         Ok(fb) => fb,
@@ -207,29 +215,42 @@ fn render(state: &mut SpaceState) {
             &mut b.renderer,
             crate::overlay_inputs!(state, &output, scale, time),
         );
-        match prepared.as_mut() {
-            Some(prepared) => {
-                let mut elements = overlay;
-                if let Some(scene) = prepared.element.take() {
-                    elements.push(render::SpaceRenderElement::Texture(scene));
-                }
-                render::render_3d(
-                    &mut b.renderer,
-                    &mut framebuffer,
-                    age,
-                    &elements,
-                    &mut b.damage_tracker,
-                )
-            }
-            None => render::render_2d(
+        if let Some((window, children)) = &fullscreen {
+            let mut elements = overlay;
+            elements.extend(render::fullscreen_elements(&mut b.renderer, window, children, scale));
+            render::render_with_clear(
                 &mut b.renderer,
                 &mut framebuffer,
                 age,
-                &output,
-                &state.space,
-                &overlay,
+                &elements,
                 &mut b.damage_tracker,
-            ),
+                [0.0, 0.0, 0.0, 1.0],
+            )
+        } else {
+            match prepared.as_mut() {
+                Some(prepared) => {
+                    let mut elements = overlay;
+                    if let Some(scene) = prepared.element.take() {
+                        elements.push(render::SpaceRenderElement::Texture(scene));
+                    }
+                    render::render_3d(
+                        &mut b.renderer,
+                        &mut framebuffer,
+                        age,
+                        &elements,
+                        &mut b.damage_tracker,
+                    )
+                }
+                None => render::render_2d(
+                    &mut b.renderer,
+                    &mut framebuffer,
+                    age,
+                    &output,
+                    &state.space,
+                    &overlay,
+                    &mut b.damage_tracker,
+                ),
+            }
         }
     };
     drop(composite);
@@ -283,7 +304,12 @@ fn render(state: &mut SpaceState) {
         &state.cursor_status,
         state.dnd_icon.as_ref(),
         &state.lock,
-        &render::hidden_panels(state.render_mode, &state.world, &state.view.visible_panels),
+        &render::hidden_panels(
+            state.render_mode,
+            &state.world,
+            &state.view.visible_panels,
+            state.fullscreen_panel(),
+        ),
         time,
     );
 

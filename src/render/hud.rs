@@ -45,6 +45,8 @@ impl SpaceState {
         let (h, m, _) = local_time();
         let mode = if self.launcher.is_some() {
             "Launcher"
+        } else if self.inventory.is_some() {
+            "Inventory"
         } else if self.overlay_layer().is_some() {
             "Overlay"
         } else if self.render_mode == crate::cli::RenderMode::Flat2D {
@@ -77,7 +79,8 @@ impl SpaceState {
 
     /// Called before every frame: re-render the HUD if its text changed.
     pub fn refresh_hud(&mut self) {
-        if !self.hud.visible {
+        // Nothing over a fullscreen window.
+        if !self.hud.visible || self.fullscreen.is_some() {
             self.hud.image = None;
             return;
         }

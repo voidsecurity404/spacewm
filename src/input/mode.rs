@@ -114,6 +114,13 @@ pub fn set_mode(state: &mut SpaceState, new_mode: InputMode, hit: Option<&PanelH
     }
     tracing::debug!(from = ?old, to = ?new_mode, "input mode");
     let serial = SERIAL_COUNTER.next_serial();
+    // Fullscreen belongs to one window: leaving it (Mod+Escape, another window) ends it.
+    if state.fullscreen.is_some_and(|f| new_mode != (InputMode::Window { panel: f.panel })) {
+        state.exit_fullscreen();
+    }
+    if new_mode != InputMode::Walk {
+        state.close_inventory();
+    }
 
     // Deactivate the window we are leaving (clients draw unfocused decorations).
     if let InputMode::Window { panel } = old {
@@ -128,11 +135,18 @@ pub fn set_mode(state: &mut SpaceState, new_mode: InputMode, hit: Option<&PanelH
                 return;
             };
             state.mode = new_mode;
-            // Where the cursor starts: where the user clicked, else the window center.
-            let size = window.geometry().size;
+            // Where the cursor starts: where the user clicked, else the window center. A
+            // window that was just opened has no buffer yet (size 0): use the size the
+            // panel was made with, or the cursor would start in the corner.
+            let geo = window.geometry().size;
+            let (w, h) = if geo.w > 0 && geo.h > 0 {
+                (geo.w, geo.h)
+            } else {
+                state.world.panels().iter().find(|p| p.id == panel).map_or((0, 0), |p| p.size_px)
+            };
             state.virtual_cursor = match hit {
                 Some(h) if h.panel == panel => h.surface_px,
-                _ => Point::from((size.w as f64 / 2.0, size.h as f64 / 2.0)),
+                _ => Point::from((w as f64 / 2.0, h as f64 / 2.0)),
             };
             set_activated(&window, true);
             state.set_keyboard_focus(Some(KeyboardFocusTarget::Window(window)));
@@ -225,8 +239,49 @@ pub fn on_new_window(state: &mut SpaceState, panel: PanelId) {
 
 /// The focused panel went away: back to walking.
 pub fn on_panel_removed(state: &mut SpaceState, panel: PanelId) {
+    if state.fullscreen_panel() == Some(panel) {
+        state.exit_fullscreen();
+    }
     if state.mode == (InputMode::Window { panel }) {
         set_mode(state, InputMode::Walk, None);
+    }
+}
+
+/// Mod+Tab: turn the view to the next window (by id, wrapping around) and enter it when
+/// it is within reach and seen from the front; otherwise just look at it, so a window
+/// lost somewhere in the world is easy to find.
+pub fn next_window(state: &mut SpaceState) {
+    if state.render_mode != crate::cli::RenderMode::Scene3D || state.lock.is_locked() {
+        return;
+    }
+    let current = match state.mode {
+        InputMode::Window { panel } => Some(panel),
+        InputMode::Walk => state.highlight.hovered,
+    };
+    let mut ids: Vec<PanelId> =
+        state.world.panels().iter().filter(|p| p.visible).map(|p| p.id).collect();
+    ids.sort_unstable();
+    let Some(&next) = current.and_then(|c| ids.iter().find(|&&id| id > c)).or_else(|| ids.first())
+    else {
+        return;
+    };
+    let Some(p) = state.world.panels().iter().find(|p| p.id == next) else { return };
+    let (target, normal) = (p.position, p.normal());
+    if state.fullscreen.is_some() {
+        state.exit_fullscreen();
+    }
+    set_mode(state, InputMode::Walk, None);
+    let camera = &mut state.view.camera;
+    let d = target - camera.position;
+    // Yaw 0 looks along -Z (see Camera::forward); pitch up is positive.
+    camera.yaw = (d.x).atan2(-d.z).rem_euclid(std::f32::consts::TAU);
+    camera.pitch = d.y.atan2(d.x.hypot(d.z)).clamp(-1.5, 1.5);
+    let in_reach = d.length() <= state.input_settings.reach_distance && normal.dot(-d) > 0.0;
+    tracing::debug!(panel = next, in_reach, "next window");
+    state.view.dirty = true;
+    state.queue_redraw();
+    if in_reach {
+        set_mode(state, InputMode::Window { panel: next }, None);
     }
 }
 
@@ -245,13 +300,18 @@ pub fn move_virtual_cursor(state: &mut SpaceState, delta: Point<f64, Logical>, t
     let Some(p) = state.world.panels().iter().find(|p| p.id == panel) else {
         return;
     };
-    let output_h = state.primary_output_geometry().map(|g| g.size.h).unwrap_or(1080) as f64;
-    let camera = &state.view.camera;
-    let distance = camera.position.distance(p.position).max(0.05) as f64;
-    // Screen px per metre at that distance, and panel px per metre.
-    let screen_ppm =
-        output_h / (2.0 * distance * (camera.fov_y_deg as f64 / 2.0).to_radians().tan());
-    let factor = p.pixels_per_unit as f64 / screen_ppm * state.input_settings.window_cursor_speed;
+    let factor = if state.fullscreen_panel() == Some(panel) {
+        // Fullscreen: one window pixel per screen pixel.
+        state.input_settings.window_cursor_speed
+    } else {
+        let output_h = state.primary_output_geometry().map(|g| g.size.h).unwrap_or(1080) as f64;
+        let camera = &state.view.camera;
+        let distance = camera.position.distance(p.position).max(0.05) as f64;
+        // Screen px per metre at that distance, and panel px per metre.
+        let screen_ppm =
+            output_h / (2.0 * distance * (camera.fov_y_deg as f64 / 2.0).to_radians().tan());
+        p.pixels_per_unit as f64 / screen_ppm * state.input_settings.window_cursor_speed
+    };
     let bbox = p.bbox_px;
     let mut c = state.virtual_cursor + delta.upscale(factor);
     // Clamp to the window's bbox (not just its geometry) so popups that hang outside the
@@ -276,6 +336,18 @@ pub fn point_virtual_cursor(state: &mut SpaceState, screen: Point<f64, Logical>,
     let Some(p) = state.world.panels().iter().find(|p| p.id == panel) else {
         return;
     };
+    if state.fullscreen_panel() == Some(panel) {
+        // The window covers the output with its geometry at the top-left corner.
+        let bbox = p.bbox_px;
+        let local = screen - geo.loc.to_f64();
+        state.virtual_cursor = Point::from((
+            local.x.clamp(bbox.loc.x as f64, (bbox.loc.x + bbox.size.w) as f64 - 1.0),
+            local.y.clamp(bbox.loc.y as f64, (bbox.loc.y + bbox.size.h) as f64 - 1.0),
+        ));
+        send_window_pointer(state, time);
+        state.queue_redraw();
+        return;
+    }
     let ray = raycast::camera_screen_ray(
         &state.view.camera,
         screen - geo.loc.to_f64(),

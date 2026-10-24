@@ -238,11 +238,27 @@ impl XwmHandler for SpaceState {
     }
 
     fn fullscreen_request(&mut self, _xwm: XwmId, surface: X11Surface) {
+        if self.render_mode == RenderMode::Scene3D {
+            // Same rule as for Wayland windows: only the window you are using.
+            let panel = self.x11_panel(&surface);
+            if let Some(id) = panel
+                .filter(|&id| self.mode == (crate::input::mode::InputMode::Window { panel: id }))
+            {
+                self.enter_fullscreen(id);
+            }
+            return;
+        }
         let _ = surface.set_fullscreen(true);
         self.enlarge(&surface);
     }
 
     fn unfullscreen_request(&mut self, _xwm: XwmId, surface: X11Surface) {
+        if self.render_mode == RenderMode::Scene3D {
+            if self.x11_panel(&surface).is_some_and(|id| self.fullscreen_panel() == Some(id)) {
+                self.exit_fullscreen();
+            }
+            return;
+        }
         let _ = surface.set_fullscreen(false);
         if !surface.is_maximized() {
             self.restore_normal(&surface);
@@ -359,6 +375,11 @@ impl SpaceState {
             p.content_dirty = true;
         }
         self.queue_redraw();
+    }
+
+    /// The panel showing an X11 window.
+    fn x11_panel(&self, surface: &X11Surface) -> Option<crate::world::panel::PanelId> {
+        self.world.panels().iter().find(|p| p.window.x11_surface() == Some(surface)).map(|p| p.id)
     }
 
     pub fn x11_window(&self, surface: &X11Surface) -> Option<Window> {

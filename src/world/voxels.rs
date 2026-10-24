@@ -29,7 +29,7 @@ pub struct VoxelWorld {
     in_flight: HashSet<IVec3>,
     /// Meshes back from the worker, waiting for upload.
     pub pending: Vec<ChunkMeshData>,
-    /// What the number keys selected for placing.
+    /// What the hotbar has selected for placing.
     pub selected: Block,
 }
 

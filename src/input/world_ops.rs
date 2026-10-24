@@ -47,7 +47,7 @@ fn snap_disabled(state: &SpaceState) -> bool {
 
 /// The panel a panel command applies to: the one being carried, else the one under the
 /// crosshair (front side, within reach), else the focused one.
-fn target_panel(state: &SpaceState) -> Option<PanelId> {
+pub fn target_panel(state: &SpaceState) -> Option<PanelId> {
     if let Some(g) = state.grab {
         return Some(g.panel);
     }
@@ -198,7 +198,7 @@ pub fn toggle_hidden(state: &mut SpaceState) {
     state.layout_changed();
 }
 
-/// Mod+left click: break the targeted block.
+/// Left click on a block (Mod+left click anywhere): break the targeted block.
 pub fn break_block(state: &mut SpaceState) {
     let Some(hit) = state.target_block else {
         return;
@@ -209,8 +209,8 @@ pub fn break_block(state: &mut SpaceState) {
     state.queue_redraw();
 }
 
-/// Mod+right click: place the selected block against the targeted face (never inside
-/// the player).
+/// Right click: place the selected block against the targeted face (never inside the
+/// player).
 pub fn place_block(state: &mut SpaceState) {
     let Some(hit) = state.target_block else {
         return;
@@ -227,13 +227,6 @@ pub fn place_block(state: &mut SpaceState) {
     state.layout.record_block(pos, block);
     state.layout_changed();
     state.queue_redraw();
-}
-
-pub fn select_block(state: &mut SpaceState, index: usize) {
-    if let Some(&b) = Block::PLACEABLE.get(index) {
-        state.voxels.selected = b;
-        tracing::info!(block = ?b, "block selected");
-    }
 }
 
 /// Window sizes spacewm asks apps for are kept within these (logical px).

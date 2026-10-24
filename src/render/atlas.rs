@@ -99,6 +99,28 @@ fn pixel(layer: u16, x: i32, y: i32) -> Rgba {
             let c = vary([0.20, 0.42, 0.78], 0.06, n);
             [c[0] + ripple, c[1] + ripple, c[2] + ripple, 0.62]
         }
+        tile::PLANKS => {
+            // Four boards, each with its own end joint and a darker gap below it.
+            let board = y / 4;
+            let joint = (board * 7 + 3) % TILE;
+            if y % 4 == 3 || x == joint {
+                vary([0.42, 0.31, 0.18], 0.08, n)
+            } else {
+                let grain = if hash(0, y, 13 + board as u32) > 0.6 { 0.92 } else { 1.0 };
+                let c = vary([0.70, 0.55, 0.34], 0.07, n);
+                [c[0] * grain, c[1] * grain, c[2] * grain, 1.0]
+            }
+        }
+        tile::BRICKS => {
+            // Rows of bricks offset by half a brick, with light mortar between.
+            let row = y / 4;
+            let shift = if row % 2 == 0 { 0 } else { 4 };
+            if y % 4 == 3 || (x + shift) % 8 == 7 {
+                vary([0.70, 0.67, 0.62], 0.06, n)
+            } else {
+                vary([0.60, 0.29, 0.22], 0.14, 0.6 * n + 0.4 * hash(x / 8, row, 29))
+            }
+        }
         _ => [1.0, 0.0, 1.0, 1.0], // magenta: "missing texture"
     }
 }

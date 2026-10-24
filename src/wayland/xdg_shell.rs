@@ -192,6 +192,23 @@ impl XdgShellHandler for SpaceState {
     }
 
     fn fullscreen_request(&mut self, surface: ToplevelSurface, _output: Option<WlOutput>) {
+        if self.render_mode == RenderMode::Scene3D {
+            // F11, a video's fullscreen button: allowed for the window you are using, so
+            // a background app can't take over the screen.
+            let panel = self
+                .window_for_surface(surface.wl_surface())
+                .and_then(|w| self.world.panel_for_window(&w).map(|p| p.id));
+            match panel {
+                Some(id) if self.mode == (crate::input::mode::InputMode::Window { panel: id }) => {
+                    self.enter_fullscreen(id);
+                }
+                // The protocol wants an answer either way: the current state, unchanged.
+                _ => {
+                    surface.send_configure();
+                }
+            }
+            return;
+        }
         let Some(output_geo) = self.primary_output_geometry() else {
             return;
         };
@@ -206,6 +223,18 @@ impl XdgShellHandler for SpaceState {
     }
 
     fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
+        if self.render_mode == RenderMode::Scene3D {
+            let window = self.window_for_surface(surface.wl_surface());
+            let is_fullscreen = window
+                .and_then(|w| self.world.panel_for_window(&w).map(|p| p.id))
+                .is_some_and(|id| self.fullscreen_panel() == Some(id));
+            if is_fullscreen {
+                self.exit_fullscreen();
+            } else {
+                surface.send_configure();
+            }
+            return;
+        }
         surface.with_pending_state(|state| {
             state.states.unset(xdg_toplevel::State::Fullscreen);
             state.size = Some(DEFAULT_WINDOW_SIZE.into());

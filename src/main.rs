@@ -7,6 +7,7 @@ mod config;
 mod error;
 mod focus;
 mod input;
+mod inventory;
 mod ipc;
 mod launcher;
 mod logging;

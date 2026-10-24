@@ -166,6 +166,11 @@ pub struct SpaceState {
     pub overlay: Overlay,
     /// The built-in launcher, while open (it then gets every key).
     pub launcher: Option<crate::launcher::Launcher>,
+    /// The inventory screen (E while walking), while open.
+    pub inventory: Option<crate::inventory::Inventory>,
+    pub hotbar: crate::inventory::Hotbar,
+    /// A panel shown flat over the whole screen instead of the 3D world (Mod+F).
+    pub fullscreen: Option<crate::input::fullscreen::Fullscreen>,
     pub hud: crate::render::hud::Hud,
 
     /// Menus and tooltips. Popups belong to a parent surface, not to the window list.
@@ -383,6 +388,9 @@ impl SpaceState {
             wlr_screencopy_global,
             overlay: Overlay::None,
             launcher: None,
+            inventory: None,
+            hotbar: Default::default(),
+            fullscreen: None,
             hud: Default::default(),
             shm_state,
             output_manager_state,

@@ -22,7 +22,7 @@ grep -q 'vec4(1.0, 0.0, 0.0, 1.0)' "$SH/voxel.frag" || fail "test could not edit
 kc input key Super+F5
 sleep 0.3
 R=$(shot s2-red)
-$PX near "$R" 640 700 255 0 0 10 >/dev/null || fail "reloaded shader not used: $($PX "$R" 640 700)"
+$PX near "$R" 640 600 255 0 0 10 >/dev/null || fail "reloaded shader not used: $($PX "$R" 640 600)"
 pass "Mod+F5 reloads shaders from --shader-dir"
 
 # Break it: compile error must be logged with file and line, old program kept.
@@ -32,6 +32,6 @@ kc input key Super+F5
 sleep 0.3
 grep -q "shader reload failed, keeping old program: .*voxel.frag line $((LINES + 1))" "$OUT/spacewm.log" || fail "no compile error with line number in log"
 R2=$(shot s2-still-red)
-$PX near "$R2" 640 700 255 0 0 10 >/dev/null || fail "broken shader replaced the working one"
+$PX near "$R2" 640 600 255 0 0 10 >/dev/null || fail "broken shader replaced the working one"
 pass "broken shader: error logged with line, old program kept"
 space_stop || fail "unclean exit"

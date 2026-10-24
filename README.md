@@ -29,6 +29,25 @@ On the DRM backend: **Ctrl+Alt+Backspace** always exits, Ctrl+Alt+F1..F12 switch
 the modifier is Super (Alt only when nested). If the screen ever stays black, switch to
 another TTY and read the log.
 
+## Keys
+
+Mod is Super on a real session and Alt when nested (`general.mod_key`).
+
+| key | does |
+|---|---|
+| WASD, mouse, Space | walk, look, jump (double-tap Space: fly) |
+| left click | enter the panel under the crosshair; on a block: break it |
+| right click | place the selected block |
+| 1-5, scroll wheel | pick a hotbar slot |
+| E | inventory (click a block to pick it, E or Escape to close) |
+| Mod+Escape | back to walking (always works; also leaves fullscreen) |
+| Mod+F | the panel fills the screen, and back |
+| Mod+Tab, Mod+\` | turn to the next window (entered when it is near) |
+| Mod+G / Mod+R / Mod+= / Mod+- | carry / rotate / grow / shrink a panel |
+| Mod+Ctrl+= / Mod+Ctrl+- | resize the window itself |
+| Mod+Return, Mod+Space | terminal, launcher |
+| Mod+Shift+Q, Mod+Shift+E | close window, quit |
+
 ## Config
 
 `~/.config/spacewm/config.toml` is created with every option and its default on first

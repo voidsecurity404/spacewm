@@ -770,14 +770,26 @@ fn render(state: &mut SpaceState, crtc: crtc::Handle) {
     let renderer = &mut b.gpu.renderer;
 
     let locked = state.lock.is_locked();
-    let mut prepared = (state.render_mode == RenderMode::Scene3D && !locked)
-        .then(|| state.view.prepare(renderer, primary_size, crate::scene_inputs!(state, time)));
+    // Fullscreen: no 3D world this frame, just the window.
+    // (Fields, not `fullscreen_panel()`: the backend is borrowed.)
+    let fullscreen = state
+        .fullscreen
+        .map(|f| f.panel)
+        .and_then(|id| state.world.panels().iter().find(|p| p.id == id))
+        .map(|p| (p.window.clone(), p.x11_children.clone()));
+    let mut prepared =
+        (state.render_mode == RenderMode::Scene3D && !locked && fullscreen.is_none())
+            .then(|| state.view.prepare(renderer, primary_size, crate::scene_inputs!(state, time)));
     let (elements, clear) = if locked {
         // Locked: the locker's surface and nothing else (see wayland/session_lock.rs).
         render::lock_elements(renderer, &state.lock, &output, scale)
     } else {
         let mut elements =
             render::overlay_elements(renderer, crate::overlay_inputs!(state, &output, scale, time));
+        if let Some((window, children)) = &fullscreen {
+            // Every monitor shows the fullscreen window (the 3D view is mirrored too).
+            elements.extend(render::fullscreen_elements(renderer, window, children, scale));
+        }
         match prepared.as_mut() {
             Some(p) => {
                 // Stretch the shared scene to this output (same size on the primary one).
@@ -786,6 +798,7 @@ fn render(state: &mut SpaceState, crtc: crtc::Handle) {
                 }
                 p.element = None;
             }
+            None if fullscreen.is_some() => {}
             None => {
                 // 2D: bars above the windows, wallpapers below (smithay's space renderer
                 // does this for the other backends).
@@ -807,6 +820,7 @@ fn render(state: &mut SpaceState, crtc: crtc::Handle) {
             }
         }
         let clear = match state.render_mode {
+            RenderMode::Scene3D if fullscreen.is_some() => [0.0, 0.0, 0.0, 1.0],
             RenderMode::Scene3D => {
                 let [r, g, bl] = render::scene::SKY_COLOR;
                 [r, g, bl, 1.0]
@@ -877,7 +891,12 @@ fn render(state: &mut SpaceState, crtc: crtc::Handle) {
         &state.cursor_status,
         state.dnd_icon.as_ref(),
         &state.lock,
-        &render::hidden_panels(state.render_mode, &state.world, &state.view.visible_panels),
+        &render::hidden_panels(
+            state.render_mode,
+            &state.world,
+            &state.view.visible_panels,
+            state.fullscreen_panel(),
+        ),
         time,
     );
     super::headless::finish_frame(state, frame_start, prepared);

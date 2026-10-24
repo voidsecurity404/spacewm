@@ -240,7 +240,11 @@ pub struct KeybindsConfig {
     pub launcher: Binding,
     /// Show/hide the clock-and-mode line in the corner.
     pub hud: Binding,
-    /// Block types 1..8 for building, in order.
+    /// The panel over the whole screen, and back.
+    pub fullscreen: Binding,
+    /// Turn to the next window (enter it when it is near).
+    pub next_window: Binding,
+    /// Hotbar slots for building, in order (more keys than block types do nothing).
     pub select_block: Binding,
     pub spawn: Vec<SpawnBind>,
 }
@@ -265,9 +269,11 @@ impl Default for KeybindsConfig {
             reload_shaders: Binding::one("Mod+F5"),
             launcher: Binding::one("Mod+space"),
             hud: Binding::one("Mod+F1"),
-            select_block: Binding::many(&[
-                "Mod+1", "Mod+2", "Mod+3", "Mod+4", "Mod+5", "Mod+6", "Mod+7", "Mod+8",
-            ]),
+            fullscreen: Binding::one("Mod+F"),
+            // Mod+grave (the key above Tab) too: nested in a desktop that uses Alt+Tab
+            // itself, Mod+Tab never reaches us.
+            next_window: Binding::many(&["Mod+Tab", "Mod+grave"]),
+            select_block: Binding::many(&["Mod+1", "Mod+2", "Mod+3", "Mod+4", "Mod+5"]),
             spawn: Vec::new(),
         }
     }
@@ -294,6 +300,8 @@ impl KeybindsConfig {
             ("reload_shaders", &self.reload_shaders, Action::ReloadShaders),
             ("launcher", &self.launcher, Action::Launcher),
             ("hud", &self.hud, Action::ToggleHud),
+            ("fullscreen", &self.fullscreen, Action::ToggleFullscreen),
+            ("next_window", &self.next_window, Action::NextWindow),
         ];
         for (key, binding, action) in singles {
             for c in &binding.0 {
@@ -311,14 +319,9 @@ impl KeybindsConfig {
 
     pub fn validate(&self) -> Vec<Problem> {
         let mut problems = Vec::new();
-        if self.select_block.0.len() > crate::world::block::Block::PLACEABLE.len() {
-            problems.push(super::problem(
-                "keybinds.select_block",
-                format!(
-                    "at most {} keys (one per block type)",
-                    crate::world::block::Block::PLACEABLE.len()
-                ),
-            ));
+        // Older configs list 8 keys; keys past the last block type just do nothing.
+        if self.select_block.0.len() > 9 {
+            problems.push(super::problem("keybinds.select_block", "at most 9 keys"));
         }
         for (i, s) in self.spawn.iter().enumerate() {
             if let Err(e) = super::check_command(&s.command) {

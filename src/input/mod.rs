@@ -8,6 +8,7 @@
 //! (mode.rs): Walk drives the camera, Window drives one panel's client.
 
 pub mod camera_controls;
+pub mod fullscreen;
 pub mod inject;
 pub mod mode;
 pub mod raycast;
@@ -45,6 +46,8 @@ pub struct InputState {
     pub suppressed_buttons: HashSet<u32>,
     /// Walk mode with an absolute pointer (tests): last position, to compute deltas.
     pub last_abs: Option<Point<f64, Logical>>,
+    /// Touchpad scrolling in Walk mode: notches not yet turned into hotbar steps.
+    pub scroll_accum: f64,
 }
 
 /// Something a keybind does.
@@ -78,6 +81,12 @@ pub enum Action {
     ResizeGrow,
     ResizeShrink,
     ToggleHud,
+    /// E while walking: the block inventory.
+    Inventory,
+    /// The target panel over the whole screen, or back.
+    ToggleFullscreen,
+    /// Turn to the next window (and enter it when it is within reach).
+    NextWindow,
 }
 
 /// The nested-only escape hatch: Ctrl+Alt+G gives the mouse back to the host desktop
@@ -124,10 +133,24 @@ pub fn route_key(
     match (three_d, mode) {
         (false, _) => KeyRoute::Forward,
         (true, InputMode::Window { .. }) => KeyRoute::Forward,
-        (true, InputMode::Walk) => match sym.and_then(camera_controls::movement_for) {
-            Some(_) => KeyRoute::Camera,
-            None => KeyRoute::Swallow,
-        },
+        (true, InputMode::Walk) => {
+            // Minecraft keys, only while walking (in a window they are ordinary typing):
+            // E opens the inventory, 1..9 pick a hotbar slot.
+            let plain = !(mods.mod_ || mods.ctrl || mods.alt || mods.super_);
+            match sym.map(|s| s.raw()) {
+                Some(keysyms::KEY_e | keysyms::KEY_E) if plain => {
+                    return KeyRoute::Bind(Action::Inventory)
+                }
+                Some(d @ keysyms::KEY_1..=keysyms::KEY_9) if plain => {
+                    return KeyRoute::Bind(Action::SelectBlock((d - keysyms::KEY_1) as u8))
+                }
+                _ => {}
+            }
+            match sym.and_then(camera_controls::movement_for) {
+                Some(_) => KeyRoute::Camera,
+                None => KeyRoute::Swallow,
+            }
+        }
     }
 }
 
@@ -190,6 +213,8 @@ enum KeyOutcome {
     Launcher(Keysym, bool),
     /// Mod+Escape while a layer surface holds the keyboard.
     DismissLayer,
+    /// A key while the inventory is open: its symbol, and whether it was Mod+Escape.
+    Inventory(Keysym, bool),
 }
 
 pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState, time: InputTime) {
@@ -247,6 +272,14 @@ pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState,
                 mods.ctrl,
             )));
         }
+        // The inventory is open: its keys only (walking is paused).
+        if state.inventory.is_some() {
+            state.input.suppressed_keys.insert(keycode);
+            return FilterResult::Intercept(Some(KeyOutcome::Inventory(
+                sym.unwrap_or(Keysym::NoSymbol),
+                mod_escape,
+            )));
+        }
         // An exclusive layer surface (fuzzel...) has the keyboard: everything goes to it,
         // except Mod+Escape, which takes the keyboard back — a stuck overlay must never
         // trap you.
@@ -287,6 +320,7 @@ pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState,
         Some(Some(KeyOutcome::SwitchVt(vt))) => state.backend.change_vt(vt),
         Some(Some(KeyOutcome::Launcher(sym, ctrl))) => state.launcher_key(sym, ctrl),
         Some(Some(KeyOutcome::DismissLayer)) => state.dismiss_layer(),
+        Some(Some(KeyOutcome::Inventory(sym, mod_escape))) => inventory_key(state, sym, mod_escape),
         _ => {}
     }
 }
@@ -325,7 +359,13 @@ pub fn run_action(state: &mut SpaceState, action: Action) {
         Action::ResizeGrow => world_ops::resize_target(state, true),
         Action::ResizeShrink => world_ops::resize_target(state, false),
         Action::TogglePanelHidden => world_ops::toggle_hidden(state),
-        Action::SelectBlock(i) => world_ops::select_block(state, i as usize),
+        Action::SelectBlock(i) => state.select_slot(i as usize),
+        Action::Inventory => state.toggle_inventory(),
+        Action::ToggleFullscreen => {
+            let target = world_ops::target_panel(state);
+            state.toggle_fullscreen(target);
+        }
+        Action::NextWindow => mode::next_window(state),
         Action::WalkMode => mode::set_mode(state, InputMode::Walk, None),
         Action::Launcher => state.toggle_launcher(),
         Action::ToggleHud => {
@@ -344,6 +384,16 @@ pub fn run_action(state: &mut SpaceState, action: Action) {
         }
     }
     state.queue_redraw();
+}
+
+/// Keys while the inventory is open: E / Escape close it, 1..9 pick a slot.
+fn inventory_key(state: &mut SpaceState, sym: Keysym, mod_escape: bool) {
+    match sym.raw() {
+        _ if mod_escape => state.close_inventory(),
+        keysyms::KEY_e | keysyms::KEY_E | keysyms::KEY_Escape => state.close_inventory(),
+        d @ keysyms::KEY_1..=keysyms::KEY_9 => state.select_slot((d - keysyms::KEY_1) as usize),
+        _ => {}
+    }
 }
 
 fn toggle_debug(state: &mut SpaceState) {
@@ -387,6 +437,7 @@ pub fn release_all_keys(state: &mut SpaceState) {
 pub fn before_frame(state: &mut SpaceState) {
     let _span = tracing::trace_span!("physics").entered();
     state.refresh_hud();
+    state.refresh_inventory();
     if state.render_mode != RenderMode::Scene3D {
         return;
     }
@@ -466,6 +517,8 @@ pub fn handle_pointer_motion_absolute(
     state.input_activity();
     if pointer_is_3d(state) {
         match state.mode {
+            // The inventory has an ordinary cursor.
+            InputMode::Walk if state.inventory.is_some() => state.inventory_pointer(pos),
             InputMode::Walk => {
                 // An absolute device can only turn by how far it moved since last time.
                 let delta = state.input.last_abs.map(|last| pos - last).unwrap_or_default();
@@ -500,6 +553,9 @@ pub fn handle_pointer_motion(
     state.input_activity();
     if pointer_is_3d(state) {
         match state.mode {
+            InputMode::Walk if state.inventory.is_some() => {
+                state.inventory_pointer(state.pointer_location + delta);
+            }
             InputMode::Walk => look(state, delta),
             InputMode::Window { .. } => {
                 mode::move_virtual_cursor(state, delta, time);
@@ -543,10 +599,19 @@ const BTN_LEFT: u32 = 0x110;
 const BTN_RIGHT: u32 = 0x111;
 
 /// A click while walking:
+/// - inventory open: pick the block under the cursor;
 /// - carrying a panel: put it down;
-/// - Mod+left / Mod+right: break / place a block;
-/// - left: enter the panel under the crosshair.
+/// - left: enter the panel under the crosshair, else break the block there;
+/// - right: place the selected block against the face under the crosshair.
+///
+/// Mod+left / Mod+right always break / place, even with a panel in front.
 fn walk_click(state: &mut SpaceState, button: u32) {
+    if state.inventory.is_some() {
+        if button == BTN_LEFT {
+            state.inventory_click();
+        }
+        return;
+    }
     if state.grab.is_some() {
         world_ops::toggle_grab(state);
         return;
@@ -556,10 +621,10 @@ fn walk_click(state: &mut SpaceState, button: u32) {
         Mods::from_state(&mods, state.config.general.mod_key, state.backend.is_nested()).mod_;
     match (modkey, button) {
         (true, BTN_LEFT) => world_ops::break_block(state),
-        (true, BTN_RIGHT) => world_ops::place_block(state),
-        (false, BTN_LEFT) => {
-            mode::try_enter_hovered(state);
-        }
+        (_, BTN_RIGHT) => world_ops::place_block(state),
+        // Enter the panel under the crosshair; no panel there: break the block instead
+        // (`target_block` is only set when no panel is nearer than the block).
+        (false, BTN_LEFT) if !mode::try_enter_hovered(state) => world_ops::break_block(state),
         _ => {}
     }
 }
@@ -604,10 +669,23 @@ pub fn handle_pointer_button(
 pub fn handle_pointer_axis(state: &mut SpaceState, frame: AxisFrame) {
     state.input_activity();
     if pointer_is_3d(state) && state.mode == InputMode::Walk {
-        // Scrolling while carrying a panel moves it nearer/farther.
         let notches = frame.v120.map(|(_, v)| v as f64 / 120.0).unwrap_or(frame.axis.1 / 15.0);
-        if notches != 0.0 {
+        if notches == 0.0 {
+            return;
+        }
+        if state.grab.is_some() {
+            // Scrolling while carrying a panel moves it nearer/farther.
             world_ops::grab_scroll(state, -notches);
+        } else {
+            // Otherwise it walks the hotbar (down = next slot). Touchpads send many small
+            // steps: one slot per notch's worth.
+            let acc = &mut state.input.scroll_accum;
+            *acc += notches;
+            let steps = acc.trunc();
+            *acc -= steps;
+            if steps != 0.0 {
+                state.scroll_slot(steps as i32);
+            }
         }
         return;
     }

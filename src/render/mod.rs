@@ -109,6 +109,12 @@ pub struct OverlayInputs<'a> {
     pub hud: Option<&'a (MemoryRenderBuffer, (i32, i32))>,
     /// A layer surface has the keyboard: show a 2D cursor instead of the 3D one.
     pub layer_focus: bool,
+    /// The hotbar (3D Walk mode) and the open inventory, with their size in logical px.
+    pub hotbar: Option<&'a crate::inventory::Image>,
+    pub inventory: Option<&'a crate::inventory::Image>,
+    /// A fullscreen window is shown: where to draw the 2D cursor (output-relative
+    /// logical px). Also hides bars.
+    pub fullscreen_cursor: Option<Point<f64, Logical>>,
 }
 
 /// 2D things drawn on top of the output, front-most first:
@@ -147,6 +153,21 @@ where
         let y = ((geo.size.h - notice.size.1) / 2 - geo.size.h / 8).max(0);
         elements.extend(boxed(renderer, &notice.buffer, (x, y)));
     }
+    if let Some((buffer, size)) = inputs.inventory {
+        // Its cursor on top of it.
+        elements.extend(pointer_elements(
+            renderer,
+            inputs.cursor_status,
+            inputs.cursor_theme,
+            None,
+            inputs.pointer - geo.loc.to_f64(),
+            scale,
+            inputs.time,
+        ));
+        let at = crate::inventory::inventory_origin((geo.size.w, geo.size.h));
+        debug_assert_eq!(*size, crate::inventory::inventory_size());
+        elements.extend(boxed(renderer, buffer, at));
+    }
     if let Some((buffer, size)) = inputs.launcher {
         let x = (geo.size.w - size.0) / 2;
         let y = (geo.size.h / 5).min((geo.size.h - size.1).max(0));
@@ -172,18 +193,27 @@ where
             ));
         }
         elements.extend(layer_elements(renderer, Layer::Overlay));
-        elements.extend(layer_elements(renderer, Layer::Top));
+        // A fullscreen window covers bars (top layer), like on any desktop; overlays
+        // (notifications, lockers-to-be) stay on top.
+        if inputs.fullscreen_cursor.is_none() {
+            elements.extend(layer_elements(renderer, Layer::Top));
+        }
     }
     if let Some((buffer, _)) = inputs.hud {
         // Inside the area bars leave free, so it never hides under waybar.
         elements.extend(boxed(renderer, buffer, (zone.loc.x + 12, zone.loc.y + 10)));
     }
-    if three_d {
+    if let Some(image) = inputs.hotbar {
+        let at = crate::inventory::hotbar_rect(zone.size, image);
+        elements.extend(boxed(renderer, &image.0, (zone.loc.x + at.0, zone.loc.y + at.1)));
+    }
+    if three_d && inputs.fullscreen_cursor.is_none() {
         elements.extend(layer_elements(renderer, Layer::Bottom));
     }
     drop(map);
     // The crosshair only while actually walking.
-    if !(inputs.layer_focus || inputs.launcher.is_some()) || !three_d {
+    if !(inputs.layer_focus || inputs.launcher.is_some() || inputs.inventory.is_some()) || !three_d
+    {
         elements.extend(mode_overlay(renderer, inputs, Some(geo)));
     }
     elements
@@ -230,7 +260,19 @@ where
             .map(|e| vec![SpaceRenderElement::Memory(e)])
             .unwrap_or_default()
         }
-        (RenderMode::Scene3D, InputMode::Window { .. }) => Vec::new(),
+        // Fullscreen: an ordinary cursor. Otherwise it is drawn ON the panel, in 3D.
+        (RenderMode::Scene3D, InputMode::Window { .. }) => match inputs.fullscreen_cursor {
+            Some(pos) => pointer_elements(
+                renderer,
+                inputs.cursor_status,
+                inputs.cursor_theme,
+                inputs.dnd_icon,
+                pos,
+                inputs.scale,
+                inputs.time,
+            ),
+            None => Vec::new(),
+        },
     }
 }
 
@@ -255,6 +297,9 @@ macro_rules! overlay_inputs {
             launcher: $state.launcher.as_ref().and_then(|l| l.image.as_ref()),
             hud: $state.hud.image.as_ref(),
             layer_focus: matches!($state.overlay, $crate::state::Overlay::Layer(_)),
+            hotbar: $state.hotbar.image.as_ref(),
+            inventory: $state.inventory.as_ref().and_then(|i| i.image.as_ref()),
+            fullscreen_cursor: $state.fullscreen.map(|_| $state.virtual_cursor),
         }
     };
 }
@@ -465,11 +510,60 @@ pub fn hidden_panels(
     render_mode: RenderMode,
     world: &crate::world::World,
     visible: &std::collections::HashSet<crate::world::panel::PanelId>,
+    fullscreen: Option<crate::world::panel::PanelId>,
 ) -> std::collections::HashSet<crate::world::panel::PanelId> {
     if render_mode != RenderMode::Scene3D {
         return Default::default();
     }
-    world.panels().iter().map(|p| p.id).filter(|id| !visible.contains(id)).collect()
+    let shown = |id: &crate::world::panel::PanelId| match fullscreen {
+        // Fullscreen: only that window is on screen.
+        Some(f) => *id == f,
+        None => visible.contains(id),
+    };
+    world.panels().iter().map(|p| p.id).filter(|id| !shown(id)).collect()
+}
+
+/// The fullscreen window drawn flat over the output: its geometry at the output's
+/// top-left corner, X11 menus on top of it.
+pub fn fullscreen_elements<R>(
+    renderer: &mut R,
+    window: &Window,
+    x11_children: &[crate::xwayland::X11Child],
+    scale: Scale<f64>,
+) -> Vec<SpaceRenderElement<R>>
+where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Texture + Clone + Send + 'static,
+{
+    // The buffer origin is the geometry's top-left minus its offset (CSD shadows).
+    let origin = Point::<i32, Logical>::default() - window.geometry().loc;
+    let mut elements = Vec::new();
+    for child in x11_children.iter().rev() {
+        let at = (origin + child.offset).to_physical_precise_round(scale);
+        elements.extend(
+            AsRenderElements::<R>::render_elements::<WaylandSurfaceRenderElement<R>>(
+                &child.surface,
+                renderer,
+                at,
+                scale,
+                1.0,
+            )
+            .into_iter()
+            .map(SpaceRenderElement::Surface),
+        );
+    }
+    elements.extend(
+        AsRenderElements::<R>::render_elements::<WaylandSurfaceRenderElement<R>>(
+            window,
+            renderer,
+            origin.to_physical_precise_round(scale),
+            scale,
+            1.0,
+        )
+        .into_iter()
+        .map(SpaceRenderElement::Surface),
+    );
+    elements
 }
 
 /// Tell clients they may draw their next frame. Without frame callbacks a client draws
@@ -515,7 +609,12 @@ impl crate::state::SpaceState {
     /// Throttled frame callbacks for panels out of view, without rendering (see the
     /// timer in main). Shown windows get theirs from the frame they are drawn in.
     pub fn send_hidden_frame_callbacks(&mut self) {
-        let hidden = hidden_panels(self.render_mode, &self.world, &self.view.visible_panels);
+        let hidden = hidden_panels(
+            self.render_mode,
+            &self.world,
+            &self.view.visible_panels,
+            self.fullscreen_panel(),
+        );
         if hidden.is_empty() {
             return;
         }

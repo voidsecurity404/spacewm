@@ -38,7 +38,7 @@ kc input key Super_L --state release
 sleep 0.3
 [ "$(kc get-block 0 "$TOP" 1)" = "air" ] || fail "Mod+click did not break (0,$TOP,1): $(kc get-block 0 "$TOP" 1)"
 pass "Mod+left click breaks the aimed block"
-kc input key Super+6
+kc input key Super+5
 kc input key Super_L --state press
 kc input click right
 kc input key Super_L --state release
