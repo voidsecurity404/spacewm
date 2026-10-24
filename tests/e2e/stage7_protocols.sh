@@ -53,6 +53,31 @@ frames=$(ffprobe -v error -count_frames -select_streams v:0 -show_entries stream
 [ "${frames:-0}" -gt 20 ] || fail "wf-recorder recorded only ${frames:-0} frames"
 pass "wf-recorder records the screen ($frames frames, $size bytes)"
 
+# ---- ext-idle-notify + idle-inhibit: swayidle fires after 2 s without input, resumes
+# on input, and doesn't fire while mpv plays a video (it holds an idle inhibitor).
+has ext_idle_notifier_v1
+has zwp_idle_inhibit_manager_v1
+IDLE="$OUT/idle-$$"
+rm -f "$IDLE".*
+kc spawn swayidle -w timeout 2 "touch $IDLE.idle" resume "touch $IDLE.resume" >/dev/null
+sleep 3.2
+[ -e "$IDLE.idle" ] || fail "swayidle did not see the session go idle"
+kc input move-by 5 0
+sleep 0.5
+[ -e "$IDLE.resume" ] || fail "input did not end the idle state"
+pass "swayidle: idle after 2 s without input, resumed by input"
+rm -f "$IDLE".*
+kc spawn mpv --really-quiet --loop --geometry=320x240 av://lavfi:testsrc=size=320x240:rate=30 >/dev/null
+for _ in $(seq 80); do grep -q "idle inhibited" "$OUT/spacewm.log" && break; sleep 0.1; done
+grep -q "idle inhibited" "$OUT/spacewm.log" || fail "mpv did not inhibit idle"
+kc input move-by 5 0
+sleep 3.2
+[ -e "$IDLE.idle" ] && fail "swayidle fired although mpv inhibits idle"
+pass "mpv's idle inhibitor keeps the session awake"
+pkill -P "$SPACE_PID" -x mpv || true
+pkill -P "$SPACE_PID" -x swayidle || true
+rm -f "$IDLE".*
+
 # ---- ext-session-lock with a test locker: lock, unlock, focus comes back; a second
 # locker is refused while the first one holds the lock.
 has ext_session_lock_manager_v1

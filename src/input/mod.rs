@@ -190,6 +190,7 @@ enum KeyOutcome {
 }
 
 pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState, time: InputTime) {
+    state.input_activity();
     let Some(keyboard) = state.seat.get_keyboard() else {
         return;
     };
@@ -450,6 +451,7 @@ pub fn handle_pointer_motion_absolute(
     pos: Point<f64, Logical>,
     time: InputTime,
 ) {
+    state.input_activity();
     if pointer_is_3d(state) {
         match state.mode {
             InputMode::Walk => {
@@ -483,6 +485,7 @@ pub fn handle_pointer_motion(
     delta_unaccel: Point<f64, Logical>,
     time: InputTime,
 ) {
+    state.input_activity();
     if pointer_is_3d(state) {
         match state.mode {
             InputMode::Walk => look(state, delta),
@@ -555,6 +558,7 @@ pub fn handle_pointer_button(
     button_state: ButtonState,
     time: InputTime,
 ) {
+    state.input_activity();
     if button_state == ButtonState::Released && state.input.suppressed_buttons.remove(&button) {
         return;
     }
@@ -586,6 +590,7 @@ pub fn handle_pointer_button(
 }
 
 pub fn handle_pointer_axis(state: &mut SpaceState, frame: AxisFrame) {
+    state.input_activity();
     if pointer_is_3d(state) && state.mode == InputMode::Walk {
         // Scrolling while carrying a panel moves it nearer/farther.
         let notches = frame.v120.map(|(_, v)| v as f64 / 120.0).unwrap_or(frame.axis.1 / 15.0);

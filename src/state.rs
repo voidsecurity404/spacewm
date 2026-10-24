@@ -136,6 +136,11 @@ pub struct SpaceState {
     /// ext-session-lock (wayland/session_lock.rs).
     pub session_lock_state: smithay::wayland::session_lock::SessionLockManagerState,
     pub lock: crate::wayland::session_lock::LockState,
+    /// ext-idle-notify (swayidle) and the surfaces holding idle inhibitors (wayland/idle.rs).
+    pub idle_notifier_state: smithay::wayland::idle_notify::IdleNotifierState<SpaceState>,
+    #[allow(dead_code)]
+    pub idle_inhibit_state: smithay::wayland::idle_inhibit::IdleInhibitManagerState,
+    pub idle_inhibitors: Vec<WlSurface>,
     /// zwlr_screencopy_manager_v1 (wf-recorder). Never read: keeps the global.
     #[allow(dead_code)]
     pub wlr_screencopy_global: smithay::reexports::wayland_server::backend::GlobalId,
@@ -246,6 +251,10 @@ impl SpaceState {
         let image_copy_capture_state =
             smithay::wayland::image_copy_capture::ImageCopyCaptureState::new::<Self>(&dh);
         let wlr_screencopy_global = crate::wayland::screencopy::create_wlr_global(&dh);
+        let idle_notifier_state =
+            smithay::wayland::idle_notify::IdleNotifierState::new(&dh, loop_handle.clone());
+        let idle_inhibit_state =
+            smithay::wayland::idle_inhibit::IdleInhibitManagerState::new::<Self>(&dh);
         let session_lock_state =
             smithay::wayland::session_lock::SessionLockManagerState::new::<Self, _>(&dh, |_| true);
         tracing::debug!("global: zwlr_layer_shell_v1");
@@ -326,6 +335,9 @@ impl SpaceState {
             screencopy: Default::default(),
             session_lock_state,
             lock: Default::default(),
+            idle_notifier_state,
+            idle_inhibit_state,
+            idle_inhibitors: Vec::new(),
             wlr_screencopy_global,
             overlay: Overlay::None,
             launcher: None,
