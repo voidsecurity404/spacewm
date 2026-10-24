@@ -33,6 +33,12 @@ pub enum Request {
         #[serde(default)]
         yaw_deg: Option<f32>,
     },
+    /// The window's own size in logical px (an app may pick a nearby size).
+    ResizePanel {
+        id: u64,
+        width: i32,
+        height: i32,
+    },
     /// Panel scale: window pixels per metre (200..3000; bigger = smaller panel).
     ScalePanel {
         id: u64,

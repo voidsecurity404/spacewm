@@ -22,6 +22,15 @@ pass "xterm opened as an X11 panel"
 face_panel 1 "$PIXEL_PERFECT"
 sleep 0.5
 
+# ---- Resizing an X11 window: spacewm configures it, xterm redraws at the new size.
+xsize() { kc --json list | python3 -c "import json,sys; print(*json.load(sys.stdin)['panels'][0]['size_px'])"; }
+kc resize 1 600 400
+for _ in $(seq 30); do read -r XW XH < <(xsize); [ "$XW" -le 620 ] && break; sleep 0.1; done
+python3 -c "exit(0 if abs($XW - 600) <= 20 and abs($XH - 400) <= 30 else 1)" || fail "xterm resize gave ${XW}x$XH"
+pass "spacectl resize works on an X11 window (${XW}x$XH)"
+face_panel 1 "$PIXEL_PERFECT"
+sleep 0.3
+
 # ---- Typing + X11 -> Wayland clipboard: xterm runs xclip, a Wayland tool reads it.
 kc input type 'printf space-from-x11 | xclip -selection clipboard'
 kc input key Return

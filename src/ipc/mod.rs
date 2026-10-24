@@ -449,6 +449,19 @@ fn handle_request(state: &mut SpaceState, id: ConnectionId, request: Request) ->
             }
             panel_changed(state)
         }
+        Request::ResizePanel { id: panel, width, height } => {
+            if !(100..=8000).contains(&width) || !(100..=8000).contains(&height) {
+                return Some(Response::error("width and height must be 100..8000"));
+            }
+            match state.window_by_id(panel) {
+                Some(window) => {
+                    crate::input::world_ops::resize_window(&window, (width, height));
+                    state.queue_redraw();
+                    Response::Ok
+                }
+                None => Response::error(format!("no panel {panel}")),
+            }
+        }
         Request::ScalePanel { id: panel, pixels_per_unit } => {
             if !(200.0..=3000.0).contains(&pixels_per_unit) {
                 return Some(Response::error("pixels_per_unit must be 200..3000"));

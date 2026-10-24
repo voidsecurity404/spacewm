@@ -74,6 +74,9 @@ pub enum Action {
     Spawn(usize),
     /// Open/close the built-in launcher.
     Launcher,
+    /// Make the window itself bigger / smaller (not just the panel).
+    ResizeGrow,
+    ResizeShrink,
     ToggleHud,
 }
 
@@ -319,6 +322,8 @@ pub fn run_action(state: &mut SpaceState, action: Action) {
         Action::ResetPanelRotation => world_ops::rotate_target(state, true),
         Action::ScalePanelUp => world_ops::scale_target(state, true),
         Action::ScalePanelDown => world_ops::scale_target(state, false),
+        Action::ResizeGrow => world_ops::resize_target(state, true),
+        Action::ResizeShrink => world_ops::resize_target(state, false),
         Action::TogglePanelHidden => world_ops::toggle_hidden(state),
         Action::SelectBlock(i) => world_ops::select_block(state, i as usize),
         Action::WalkMode => mode::set_mode(state, InputMode::Walk, None),

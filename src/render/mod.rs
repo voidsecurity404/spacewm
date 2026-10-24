@@ -459,8 +459,6 @@ pub fn monotonic_now() -> smithay::utils::Time<smithay::utils::Monotonic> {
     smithay::utils::Clock::<smithay::utils::Monotonic>::new().now()
 }
 
-/// Tell clients they may draw their next frame. Without frame callbacks a client draws
-/// one frame and then waits forever — the classic "frozen window" beginner bug.
 /// Panels whose apps get only throttled frame callbacks: 3D panels out of view (or
 /// hidden with Mod+H). They keep running, slowly, without drawing frames nobody sees.
 pub fn hidden_panels(
@@ -474,6 +472,8 @@ pub fn hidden_panels(
     world.panels().iter().map(|p| p.id).filter(|id| !visible.contains(id)).collect()
 }
 
+/// Tell clients they may draw their next frame. Without frame callbacks a client draws
+/// one frame and then waits forever — the classic "frozen window" beginner bug.
 pub fn send_frame_callbacks(
     output: &Output,
     space: &Space<Window>,
@@ -508,6 +508,26 @@ pub fn send_frame_callbacks(
         send_frames_surface_tree(&icon.surface, output, time, throttle, |_, _| {
             Some(output.clone())
         });
+    }
+}
+
+impl crate::state::SpaceState {
+    /// Throttled frame callbacks for panels out of view, without rendering (see the
+    /// timer in main). Shown windows get theirs from the frame they are drawn in.
+    pub fn send_hidden_frame_callbacks(&mut self) {
+        let hidden = hidden_panels(self.render_mode, &self.world, &self.view.visible_panels);
+        if hidden.is_empty() {
+            return;
+        }
+        let time = self.start_time.elapsed();
+        let throttle = Some(Duration::from_secs(1));
+        for output in self.space.outputs() {
+            for window in self.space.elements() {
+                if hidden.contains(&crate::state::window_id(window)) {
+                    window.send_frame(output, time, throttle, |_, _| None);
+                }
+            }
+        }
     }
 }
 

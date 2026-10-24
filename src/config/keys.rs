@@ -230,6 +230,9 @@ pub struct KeybindsConfig {
     pub reset_rotation: Binding,
     pub scale_up: Binding,
     pub scale_down: Binding,
+    /// The window itself: more/fewer rows and columns in a terminal.
+    pub resize_grow: Binding,
+    pub resize_shrink: Binding,
     pub hide: Binding,
     pub debug: Binding,
     pub reload_shaders: Binding,
@@ -255,6 +258,8 @@ impl Default for KeybindsConfig {
             // "+" is Shift+"=" on most layouts.
             scale_up: Binding::many(&["Mod+equal", "Mod+Shift+equal", "Mod+KP_Add"]),
             scale_down: Binding::many(&["Mod+minus", "Mod+KP_Subtract"]),
+            resize_grow: Binding::many(&["Mod+Ctrl+equal", "Mod+Ctrl+Shift+equal"]),
+            resize_shrink: Binding::one("Mod+Ctrl+minus"),
             hide: Binding::one("Mod+H"),
             debug: Binding::one("Mod+F3"),
             reload_shaders: Binding::one("Mod+F5"),
@@ -282,6 +287,8 @@ impl KeybindsConfig {
             ("reset_rotation", &self.reset_rotation, Action::ResetPanelRotation),
             ("scale_up", &self.scale_up, Action::ScalePanelUp),
             ("scale_down", &self.scale_down, Action::ScalePanelDown),
+            ("resize_grow", &self.resize_grow, Action::ResizeGrow),
+            ("resize_shrink", &self.resize_shrink, Action::ResizeShrink),
             ("hide", &self.hide, Action::TogglePanelHidden),
             ("debug", &self.debug, Action::ToggleDebug),
             ("reload_shaders", &self.reload_shaders, Action::ReloadShaders),

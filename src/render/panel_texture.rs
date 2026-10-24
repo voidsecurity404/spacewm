@@ -131,6 +131,17 @@ impl PanelTextureCache {
         self.targets.retain(|id, _| world.panels().iter().any(|p| p.id == *id));
 
         let mut changed = false;
+        // Sizes follow the client even for panels out of view (they aren't retextured, but
+        // their place in the world and `spacectl list` must stay right).
+        for panel in world.panels_mut() {
+            let geo = panel.window.geometry();
+            if geo.size.w > 0 && geo.size.h > 0 && (geo.size.w, geo.size.h) != panel.size_px {
+                // The client resized (e.g. font size change): the panel grows around its
+                // center, because `position` is the center.
+                panel.set_size((geo.size.w, geo.size.h));
+                changed = true;
+            }
+        }
         let mut budget = UPDATES_PER_FRAME;
         let mut waiting = false;
         for panel in world.panels_mut().iter_mut().filter(|p| visible.contains(&p.id)) {
@@ -153,12 +164,6 @@ impl PanelTextureCache {
                 .fold(panel.window.bbox_with_popups(), |b, c| b.merge(c.rect()));
             if bbox.size.w <= 0 || bbox.size.h <= 0 {
                 continue; // no buffer attached yet
-            }
-            if (geo.size.w, geo.size.h) != panel.size_px {
-                // The client resized (e.g. font size change): the panel grows around its
-                // center, because `position` is the center.
-                panel.set_size((geo.size.w, geo.size.h));
-                changed = true;
             }
             // Bbox relative to the geometry's top-left corner.
             let bbox_rel = Rectangle::new(bbox.loc - geo.loc, bbox.size);

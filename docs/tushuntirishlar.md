@@ -296,3 +296,19 @@ tracing span'lari (`--features profile` → tracy, yoki `SPACEWM_SPAN_TIMES=1`).
 Profil ko'rsatdi: ko'rinib turgan faol terminalda vaqtning asosiy qismi — client shm
 buferini GPU'ga yuklash (~1 ms/kadr, terminal butun ekranni aylantiradi); sahna 0.5 ms,
 mipmap 0.01 ms. Direct scanout — TODO (drm.rs da izoh).
+
+### Oyna o'lchamini o'zgartirish (Mod+Ctrl+= / Mod+Ctrl+-)
+
+`Mod+=` / `Mod+-` panelni dunyoda kattaroq yoki kichikroq **ko'rsatadi**, lekin oynaning
+pikseli o'zgarmaydi: terminalda qatorlar va ustunlar soni o'shandayligicha qoladi.
+`Mod+Ctrl+=` / `Mod+Ctrl+-` esa oynaning o'zini 10% ga kattalashtiradi yoki kichiklashtiradi:
+spacewm ilovaga yangi o'lcham bilan `xdg_toplevel.configure` yuboradi (X11 ilovaga
+`ConfigureWindow`). Ilova shu o'lchamdagi buferni chizadi, panel esa markazi atrofida
+o'sadi. Aniq o'lcham kerak bo'lsa: `spacectl resize <id> 1400 900`. Ilova o'lchamni biroz
+yaxlitlashi mumkin (foot uni katak o'lchamiga moslaydi).
+
+Shu ish jarayonida topilgan xato: ko'rinmaydigan panellar frame callback'ni "sekundiga 1
+marta" olishi kerak edi, lekin callback'lar faqat chizilgan kadrdan keyin yuborilardi.
+Sahna harakatsiz bo'lsa kadr bo'lmaydi, shuning uchun bunday ilovalar butunlay to'xtab
+qolardi (masalan, resize qilingan terminal yangi o'lchamni hech qachon chizmasdi). Endi
+sekundiga bir marta ishlaydigan timer bu callback'larni render qilmasdan yuboradi.

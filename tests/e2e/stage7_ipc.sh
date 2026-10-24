@@ -4,7 +4,7 @@ source "$(dirname "$0")/lib.sh"
 CFG="$OUT/config-ipc-$$.toml"
 trap 'rm -f "$CFG" "$OUT/ipc-env.txt" "$OUT/watch-$$.txt"; kill %1 2>/dev/null || true; space_stop >/dev/null 2>&1 || true' EXIT
 printf '[general]\nipc_allow_shell = false\n' >"$CFG"
-space_start --render 3d --config "$CFG"
+space_start --render 3d --config "$CFG" --log-level debug
 
 # ---- The socket: owner-only.
 mode=$(stat -c %a "$SOCK")
@@ -34,6 +34,22 @@ pass "spacectl move 1 0 22 -4 and scale apply live"
 kc scale 1 50 2>/dev/null && fail "out-of-range scale accepted"
 kc move 1 1e9 0 0 2>/dev/null && fail "absurd position accepted"
 pass "out-of-range numbers are rejected"
+
+# ---- Window size (not panel scale): keybind and spacectl resize.
+size() { kc --json list | python3 -c "import json,sys; print(*json.load(sys.stdin)['panels'][0]['size_px'])"; }
+read -r W0 H0 < <(size)
+kc mode window 1
+kc input key "Super+Ctrl+equal"
+# The panel is out of view after the move above, so foot gets throttled frame callbacks
+# and redraws at its new size a bit later.
+for _ in $(seq 30); do read -r W1 H1 < <(size); [ "$W1" != "$W0" ] && break; sleep 0.1; done
+python3 -c "exit(0 if $W1 > $W0 * 1.05 and $H1 > $H0 * 1.05 else 1)" || fail "Mod+Ctrl+= did not grow the window (${W0}x$H0 -> ${W1}x$H1)"
+kc resize 1 700 450
+for _ in $(seq 30); do read -r W2 H2 < <(size); [ "$W2" != "$W1" ] && break; sleep 0.1; done
+python3 -c "exit(0 if abs($W2 - 700) <= 20 and abs($H2 - 450) <= 30 else 1)" || fail "spacectl resize gave ${W2}x$H2"
+kc resize 1 5 5 2>/dev/null && fail "absurd size accepted"
+kc mode walk
+pass "window resize: Mod+Ctrl+= (${W0}x$H0 -> ${W1}x$H1), spacectl resize (-> ${W2}x$H2)"
 
 # ---- mode.
 kc mode window 1

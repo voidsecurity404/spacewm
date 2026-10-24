@@ -26,6 +26,7 @@ Field names are snake_case; unknown fields are an error.
 | `close_panel` | `id` | `ok` (asks the app to close; it may ask to save first) |
 | `move_panel` | `id`, `position: [x, y, z]` (m), `yaw_deg?` | `ok` |
 | `scale_panel` | `id`, `pixels_per_unit` (200..3000) | `ok` |
+| `resize_panel` | `id`, `width`, `height` (100..8000 px; the app may round) | `ok` |
 | `spawn` | `command`, `shell?` (default false) | `spawned` with `pid` |
 | `set_mode` | `mode`: `"walk"` or `{"window": id}` | `ok` (3D only) |
 | `teleport` | `position: [x, y, z]`, `yaw_deg?`, `pitch_deg?` | `ok` (camera; puts you in fly mode) |
@@ -90,6 +91,7 @@ null), `mode_changed` (`mode`: `"walk"`/`"window"`), `config_reloaded`.
 spacectl list                      # table; --json for the raw response
 spacectl move 3 0 2 -4 --yaw 90
 spacectl scale 3 1200
+spacectl resize 3 1400 900   # the window itself: more rows/columns
 spacectl mode window 3 | spacectl mode walk
 spacectl spawn foot -e htop        # argv, no shell
 spacectl spawn --shell "ls | wc -l > ~/n.txt"   # needs general.ipc_allow_shell

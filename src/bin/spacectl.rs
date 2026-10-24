@@ -59,6 +59,8 @@ enum Command {
         #[arg(long, allow_hyphen_values = true)]
         yaw: Option<f32>,
     },
+    /// Resize a panel's window to WIDTH x HEIGHT px (more rows/columns in a terminal).
+    Resize { id: u64, width: i32, height: i32 },
     /// Set a panel's scale in window pixels per metre (200..3000; bigger = smaller).
     Scale { id: u64, pixels_per_unit: f32 },
     /// Switch to walking, or into a window: `spacectl mode walk`, `spacectl mode window 3`.
@@ -225,6 +227,7 @@ fn to_request(command: Command) -> Request {
             Request::MovePanel { id, position: [x, y, z], yaw_deg: yaw }
         }
         Command::Scale { id, pixels_per_unit } => Request::ScalePanel { id, pixels_per_unit },
+        Command::Resize { id, width, height } => Request::ResizePanel { id, width, height },
         Command::Mode { target } => Request::SetMode {
             mode: match target {
                 ModeCmd::Walk => proto::ModeTarget::Walk,

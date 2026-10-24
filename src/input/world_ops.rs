@@ -235,3 +235,50 @@ pub fn select_block(state: &mut SpaceState, index: usize) {
         tracing::info!(block = ?b, "block selected");
     }
 }
+
+/// Window sizes spacewm asks apps for are kept within these (logical px).
+const MIN_WINDOW: (i32, i32) = (200, 120);
+const MAX_WINDOW: (i32, i32) = (4000, 3000);
+
+/// Mod+Ctrl+= / Mod+Ctrl+-: make the window itself bigger or smaller (more or fewer
+/// terminal rows and columns), unlike Mod+= which only scales the panel in the world.
+pub fn resize_target(state: &mut SpaceState, grow: bool) {
+    let window = match state.render_mode {
+        crate::cli::RenderMode::Scene3D => target_panel(state).and_then(|id| {
+            state.world.panels().iter().find(|p| p.id == id).map(|p| p.window.clone())
+        }),
+        crate::cli::RenderMode::Flat2D => {
+            match state.seat.get_keyboard().and_then(|k| k.current_focus()) {
+                Some(crate::focus::KeyboardFocusTarget::Window(w)) => Some(w),
+                _ => None,
+            }
+        }
+    };
+    let Some(window) = window else { return };
+    let size = window.geometry().size;
+    let f = if grow { 1.1 } else { 1.0 / 1.1 };
+    let new = ((size.w as f64 * f).round() as i32, (size.h as f64 * f).round() as i32);
+    resize_window(&window, new);
+    state.queue_redraw();
+}
+
+/// Ask a window's app to take a new size (it answers by committing a buffer of that
+/// size; the panel follows then, growing around its center). Callers queue a redraw: an
+/// app waits for a frame callback before drawing at the new size, and an idle scene
+/// sends none.
+pub fn resize_window(window: &smithay::desktop::Window, (w, h): (i32, i32)) {
+    let size = (w.clamp(MIN_WINDOW.0, MAX_WINDOW.0), h.clamp(MIN_WINDOW.1, MAX_WINDOW.1));
+    tracing::debug!(w = size.0, h = size.1, "resize window");
+    if let Some(toplevel) = window.toplevel() {
+        toplevel.with_pending_state(|s| s.size = Some(size.into()));
+        toplevel.send_pending_configure();
+    } else if let Some(x11) = window.x11_surface() {
+        // X11 sizes include client-side shadows: keep them, change the visible part.
+        let geo = x11.geometry();
+        let mut rect = x11.last_configure();
+        rect.size = (size.0 + rect.size.w - geo.size.w, size.1 + rect.size.h - geo.size.h).into();
+        if let Err(e) = x11.configure(rect) {
+            tracing::debug!("X11 resize failed: {e}");
+        }
+    }
+}

@@ -87,6 +87,9 @@ rotate = "Mod+R"
 reset_rotation = "Mod+Shift+R"
 scale_up = ["Mod+equal", "Mod+Shift+equal", "Mod+KP_Add"]
 scale_down = ["Mod+minus", "Mod+KP_Subtract"]
+# The window itself (more rows/columns in a terminal), not just how big the panel looks.
+resize_grow = ["Mod+Ctrl+equal", "Mod+Ctrl+Shift+equal"]
+resize_shrink = "Mod+Ctrl+minus"
 hide = "Mod+H"
 debug = "Mod+F3"
 reload_shaders = "Mod+F5"
