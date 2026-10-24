@@ -83,6 +83,7 @@ pub fn help_columns(
         row("Shift / Ctrl", "down (flying) / run"),
         row("Left click", "use the window you look at"),
         row("Right click", "window menu"),
+        row(&format!("Hold {mod_name}"), "cursor for the dock"),
         row(&keys(&binds.walk_mode), "leave a window, back to walking"),
         Line::default(),
         header("Windows"),

@@ -175,6 +175,10 @@ pub struct SpaceState {
     pub drag: Option<crate::input::drag::Drag>,
     /// "drag: move" under the crosshair, and which spot it was drawn for.
     pub drag_hint: Option<(crate::input::drag::Zone, crate::inventory::Image)>,
+    /// The dock along the bottom (render/dock.rs).
+    pub dock: crate::render::dock::Dock,
+    /// The hotbar replaces the dock until then (just built something).
+    pub building_until: Option<Instant>,
     /// The window menu (right click on a window), while open.
     pub menu: Option<crate::render::menu::PanelMenu>,
     /// The key help box (Mod+K), while shown.
@@ -405,6 +409,8 @@ impl SpaceState {
             hotbar: Default::default(),
             help: None,
             menu: None,
+            dock: Default::default(),
+            building_until: None,
             drag: None,
             drag_hint: None,
             fullscreen: None,

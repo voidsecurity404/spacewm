@@ -15,7 +15,10 @@ EYE=$(python3 -c "print($TOP + 1 + 1.62)")
 kc teleport 0.5 "$EYE" 2.5 --yaw 0 --pitch -60
 sleep 0.4
 
-# ---- Hotbar along the bottom while walking: dark slots, the selected one framed white.
+# ---- Hotbar along the bottom while building (a number key brings it up instead of the
+# dock): dark slots, the selected one framed white.
+kc input key 2
+sleep 0.2
 H=$(shot s8-hotbar)
 $PX near "$H" 640 690 0 0 0 140 >/dev/null || fail "no hotbar at the bottom: $($PX "$H" 640 690)"
 pass "hotbar shown at the bottom"

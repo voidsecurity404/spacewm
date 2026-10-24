@@ -7,6 +7,7 @@ pub mod atlas;
 pub mod camera;
 pub mod crosshair;
 pub mod cursor;
+pub mod dock;
 pub mod frustum;
 pub mod gl;
 pub mod help;
@@ -120,6 +121,11 @@ pub struct OverlayInputs<'a> {
     pub osd: Option<&'a crate::inventory::Image>,
     /// "Starting Firefox ..." at the top.
     pub launching: Option<&'a crate::inventory::Image>,
+    /// The dock (top-left corner, output-relative), its tooltip, and whether its cursor
+    /// is shown.
+    pub dock: Option<(&'a crate::inventory::Image, (i32, i32))>,
+    pub dock_tooltip: Option<(&'a crate::inventory::Image, (i32, i32))>,
+    pub dock_cursor: bool,
     /// "drag: move" under the crosshair.
     pub drag_hint: Option<&'a crate::inventory::Image>,
     /// The window menu and its top-left corner (output-relative).
@@ -159,6 +165,23 @@ where
         .ok()
         .map(SpaceRenderElement::Memory)
     };
+    if inputs.dock_cursor {
+        elements.extend(pointer_elements(
+            renderer,
+            inputs.cursor_status,
+            inputs.cursor_theme,
+            None,
+            inputs.pointer - geo.loc.to_f64(),
+            scale,
+            inputs.time,
+        ));
+    }
+    if let Some(((buffer, _), at)) = inputs.dock_tooltip {
+        elements.extend(boxed(renderer, buffer, at));
+    }
+    if let Some(((buffer, _), at)) = inputs.dock {
+        elements.extend(boxed(renderer, buffer, at));
+    }
     if let Some((buffer, size)) = inputs.drag_hint {
         let x = (geo.size.w - size.0) / 2;
         elements.extend(boxed(renderer, buffer, (x, geo.size.h / 2 + 16)));
@@ -260,7 +283,8 @@ where
         || inputs.launcher.is_some()
         || inputs.inventory.is_some()
         || inputs.help.is_some()
-        || inputs.menu.is_some();
+        || inputs.menu.is_some()
+        || inputs.dock_cursor;
     if !covered || !three_d {
         elements.extend(mode_overlay(renderer, inputs, Some(geo)));
     }
@@ -352,6 +376,9 @@ macro_rules! overlay_inputs {
             launching: $state.desktop.launching.image.as_ref(),
             menu: $state.menu.as_ref().and_then(|m| m.image.as_ref().map(|i| (i, m.origin))),
             drag_hint: $state.drag_hint.as_ref().map(|(_, i)| i),
+            dock: $state.dock.image.as_ref().map(|i| (i, $state.dock.origin)),
+            dock_tooltip: $state.dock.tooltip.as_ref().map(|t| (t, $state.dock.tooltip_at)),
+            dock_cursor: $state.dock.cursor && $state.dock.cursor_moved,
             fullscreen_cursor: $state.fullscreen.map(|_| $state.virtual_cursor),
         }
     };

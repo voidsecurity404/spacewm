@@ -151,7 +151,29 @@ impl SpaceState {
         Block::PLACEABLE.iter().position(|b| *b == self.voxels.selected).unwrap_or(0)
     }
 
+    /// The hotbar shows instead of the dock for a few seconds after building.
+    pub fn building_recently(&self) -> bool {
+        self.building_until.is_some_and(|t| std::time::Instant::now() < t)
+    }
+
+    pub fn note_building(&mut self) {
+        const SHOW: std::time::Duration = std::time::Duration::from_secs(4);
+        self.building_until = Some(std::time::Instant::now() + SHOW);
+        // Swap back to the dock when the time is up.
+        let _ = self.loop_handle.insert_source(
+            smithay::reexports::calloop::timer::Timer::from_duration(
+                SHOW + std::time::Duration::from_millis(50),
+            ),
+            |_, _, state| {
+                state.queue_redraw();
+                smithay::reexports::calloop::timer::TimeoutAction::Drop
+            },
+        );
+        self.queue_redraw();
+    }
+
     pub fn select_slot(&mut self, slot: usize) {
+        self.note_building();
         if let Some(&b) = Block::PLACEABLE.get(slot) {
             self.voxels.selected = b;
             tracing::info!(block = ?b, "block selected");
@@ -187,6 +209,7 @@ impl SpaceState {
             return;
         }
         tracing::info!("inventory opened");
+        self.note_building();
         self.inventory = Some(Inventory::default());
         // Walking stops; an ordinary arrow cursor starts in the middle of the screen.
         self.view.controls.clear();
@@ -252,7 +275,9 @@ impl SpaceState {
         let show_bar = self.render_mode == crate::cli::RenderMode::Scene3D
             && self.hud.visible
             && self.mode == crate::input::mode::InputMode::Walk
-            && self.fullscreen.is_none();
+            && self.fullscreen.is_none()
+            // The dock takes the bottom unless you are building.
+            && (self.building_recently() || !self.config.dock.enabled);
         if !show_bar {
             self.hotbar = Hotbar::default();
         } else if self.hotbar.drawn != Some((selected, scale)) {

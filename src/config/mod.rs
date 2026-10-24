@@ -32,6 +32,7 @@ pub struct Config {
     pub render: Render,
     pub panels: Panels,
     pub desktop: Desktop,
+    pub dock: Dock,
     /// `[[output]]` tables: per-monitor mode and scale (DRM backend).
     #[serde(rename = "output")]
     pub outputs: Vec<OutputConfig>,
@@ -70,6 +71,22 @@ impl Default for General {
             world_seed: crate::world::terrain::DEFAULT_SEED,
             ipc_allow_shell: false,
         }
+    }
+}
+
+/// The dock along the bottom (hold Mod for a cursor to click it).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Dock {
+    pub enabled: bool,
+    /// Favorite apps, by .desktop file name, program or name; missing ones are skipped.
+    pub apps: Vec<String>,
+}
+
+impl Default for Dock {
+    fn default() -> Self {
+        let apps = ["foot", "firefox", "org.telegram.desktop", "code", "org.gnome.Nautilus"];
+        Self { enabled: true, apps: apps.iter().map(|s| s.to_string()).collect() }
     }
 }
 

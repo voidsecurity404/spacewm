@@ -18,12 +18,17 @@ pub struct DesktopEntry {
     pub exec: String,
     /// Needs a terminal (htop, vim).
     pub terminal: bool,
+    /// Icon name ("firefox") or an absolute path.
+    pub icon: Option<String>,
+    /// The app_id / X11 class its windows have, when it differs from the file name.
+    pub wm_class: Option<String>,
 }
 
 /// Parse one file's text. None for entries that should not be listed.
 pub fn parse(id: &str, text: &str) -> Option<DesktopEntry> {
     let mut in_main = false;
     let (mut name, mut exec, mut terminal) = (None, None, false);
+    let (mut icon, mut wm_class) = (None, None);
     let (mut kind, mut hidden, mut try_exec) = (None, false, None);
     for line in text.lines() {
         let line = line.trim();
@@ -45,6 +50,8 @@ pub fn parse(id: &str, text: &str) -> Option<DesktopEntry> {
             "Terminal" => terminal = value == "true",
             "NoDisplay" | "Hidden" => hidden |= value == "true",
             "TryExec" => try_exec = Some(value.to_string()),
+            "Icon" => icon = Some(value.to_string()),
+            "StartupWMClass" => wm_class = Some(value.to_string()),
             _ => {}
         }
     }
@@ -60,7 +67,7 @@ pub fn parse(id: &str, text: &str) -> Option<DesktopEntry> {
     if exec.trim().is_empty() {
         return None;
     }
-    Some(DesktopEntry { id: id.to_string(), name: name?, exec, terminal })
+    Some(DesktopEntry { id: id.to_string(), name: name?, exec, terminal, icon, wm_class })
 }
 
 /// Values may contain \s \n \t \r \\ escapes.

@@ -71,6 +71,14 @@ dim_unfocused = true
 # back to where you stood.
 focus_zoom = true
 
+[dock]
+# Favorite apps and open apps along the bottom while walking. Hold Mod (Alt when
+# nested) for a cursor: left click brings an open app's window to you (again: the
+# next one) or starts it; right click starts a new one.
+enabled = true
+# By .desktop file name, program or name; apps that aren't installed are skipped.
+apps = ["foot", "firefox", "org.telegram.desktop", "code", "org.gnome.Nautilus"]
+
 [desktop]
 # Commands run without a shell; "" switches a feature off.
 # Mod+L, and after lock_after_minutes without input (0: never; not while a video plays).

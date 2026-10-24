@@ -241,6 +241,7 @@ pub fn break_block(state: &mut SpaceState) {
     let Some(hit) = state.target_block else {
         return;
     };
+    state.note_building();
     state.voxels.set_block(hit.block, Block::Air);
     state.layout.record_block(hit.block, Block::Air);
     state.layout_changed();
@@ -261,6 +262,7 @@ pub fn place_block(state: &mut SpaceState) {
         return;
     }
     let block = state.voxels.selected;
+    state.note_building();
     state.voxels.set_block(pos, block);
     state.layout.record_block(pos, block);
     state.layout_changed();

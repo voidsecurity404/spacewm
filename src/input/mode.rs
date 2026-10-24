@@ -120,6 +120,7 @@ pub fn set_mode(state: &mut SpaceState, new_mode: InputMode, hit: Option<&PanelH
     }
     if new_mode != InputMode::Walk {
         state.close_inventory();
+        state.set_dock_cursor(false);
     }
 
     // Deactivate the window we are leaving (clients draw unfocused decorations).

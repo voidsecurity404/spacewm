@@ -219,6 +219,8 @@ mod tests {
             name: name.into(),
             exec: name.into(),
             terminal: false,
+            icon: None,
+            wm_class: None,
         }
     }
 

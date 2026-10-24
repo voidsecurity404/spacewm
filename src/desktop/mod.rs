@@ -14,6 +14,7 @@
 //! tool must never freeze the desktop. Every command has a timeout; results come back to
 //! the event loop through a calloop channel.
 
+pub mod icons;
 pub mod launching;
 pub mod osd;
 pub mod restore;

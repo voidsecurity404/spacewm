@@ -146,7 +146,8 @@ sleep 0.3
 panel() { kc --json list | python3 -c "import json,sys; p=json.load(sys.stdin)['panels'][0]; print(*p['position'], p['yaw_deg'], *p['size_px'], p['pixels_per_unit'])"; }
 # Stand 1 m in front of the window, then aim at a spot given in window pixels.
 aim() {
-    read -r PX PY PZ PYAW W H PPU < <(panel)
+    local AX AY AZ PYAW W H PPU
+    read -r AX AY AZ PYAW W H PPU < <(panel)
     read -r CX CY CZ CYAW CPITCH < <(python3 -c "
 import math
 y = math.radians($PYAW)
@@ -154,8 +155,8 @@ nx, nz = math.sin(y), math.cos(y)          # the window's front
 rx, rz = math.cos(y), -math.sin(y)         # its right (window +x)
 u = ($1 - $W / 2) / $PPU                   # metres right of the center
 v = ($H / 2 - $2) / $PPU                   # metres above it
-cx, cy, cz = $PX + nx, $PY, $PZ + nz
-tx, ty, tz = $PX + rx * u, $PY + v, $PZ + rz * u
+cx, cy, cz = $AX + nx, $AY, $AZ + nz
+tx, ty, tz = $AX + rx * u, $AY + v, $AZ + rz * u
 dx, dy, dz = tx - cx, ty - cy, tz - cz
 print(cx, cy, cz, math.degrees(math.atan2(dx, -dz)), math.degrees(math.atan2(dy, math.hypot(dx, dz))))")
     kc teleport "$CX" "$CY" "$CZ" --yaw "$CYAW" --pitch "$CPITCH"
@@ -195,6 +196,47 @@ for _ in $(seq 30); do read -r _ _ _ _ W1 H1 _ < <(panel); [ "$W1" -gt "$((W0 + 
 grep -q "drag resize done" "$OUT/spacewm.log" || fail "no resize log"
 pass "dragging the corner resizes the window (${W0}x$H0 -> ${W1}x$H1)"
 
+space_stop || fail "unclean exit"
+
+# ---- Dock: along the bottom; hold Mod for a cursor; click starts an app, or brings its
+# window in front of you when it is open.
+space_start --render 3d --log-level debug
+sleep 1
+D0=$(shot s10-dock)
+# Favorites: foot, firefox, Telegram, VS Code, Files (those installed). Slot 0 is foot.
+# How many apps the dock shows (from its log line), to find slot 0.
+NFAV=$(grep 'spacewm::render::dock: dock items=' "$OUT/spacewm.log" | tail -1 | grep -o '("' | wc -l)
+read -r SX SY < <(python3 -c "
+w = 12 + $NFAV * 52
+print((1280 - w) // 2 + 6 + 26, 720 - 14 - (52 + 12 + 6) + 6 + 26)")
+grep -q 'spacewm::render::dock: dock items=\[("Foot", false)' "$OUT/spacewm.log" || fail "no dock with foot first: $(grep 'render::dock' "$OUT/spacewm.log" | tail -1)"
+pass "the dock is shown along the bottom ($NFAV favorites)"
+kc input key Super_L --state press
+kc input move-to "$SX" "$SY"
+sleep 0.2
+D1=$(shot s10-dock-cursor)
+python3 -c "exit(0 if $($PX diff "$D0" "$D1") > 0.002 else 1)" || fail "holding Mod showed no cursor / hover"
+kc input click
+kc input key Super_L --state release
+for _ in $(seq 50); do [ "$(count)" -ge 1 ] && break; sleep 0.1; done
+[ "$(count)" -ge 1 ] || fail "clicking foot in the dock started nothing"
+grep -q 'dock: launching app="Foot"' "$OUT/spacewm.log" || grep -q 'dock: launching app="foot"' "$OUT/spacewm.log" ||
+    fail "no dock launch log"
+pass "Mod + click on a dock app starts it"
+sleep 0.8
+kc mode walk
+kc teleport 0.5 30 0.5 --yaw 180 --pitch 0
+sleep 0.4
+kc input key Super_L --state press
+kc input move-to "$SX" "$SY"
+kc input click
+kc input key Super_L --state release
+sleep 0.6
+grep -q "dock: window brought here" "$OUT/spacewm.log" || fail "clicking an open app did not bring its window"
+[ "$(focused)" != "[]" ] || fail "the brought window is not in use"
+read -r BX BY BZ < <(kc --json list | python3 -c "import json,sys; print(*json.load(sys.stdin)['panels'][0]['position'])")
+python3 -c "exit(0 if $BZ > 0.5 and abs($BY - 30) < 0.5 else 1)" || fail "window not in front of the view ($BX $BY $BZ)"
+pass "Mod + click on an open app brings its window in front of you"
 space_stop || fail "unclean exit"
 grep -E "panicked" "$OUT/spacewm.log" && fail "panic in log"
 pass "clean exit"

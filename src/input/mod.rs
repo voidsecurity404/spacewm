@@ -99,6 +99,17 @@ pub enum Action {
     Hardware(crate::desktop::Hw),
 }
 
+/// Is `sym` the key that acts as Mod? (Nested with mod_key = super, Alt does too.)
+fn is_mod_key(mod_key: crate::config::ModKey, nested: bool, sym: Option<Keysym>) -> bool {
+    let Some(sym) = sym else { return false };
+    let alt = matches!(sym, Keysym::Alt_L | Keysym::Alt_R);
+    let sup = matches!(sym, Keysym::Super_L | Keysym::Super_R);
+    match mod_key {
+        crate::config::ModKey::Alt => alt,
+        crate::config::ModKey::Super => sup || (nested && alt),
+    }
+}
+
 /// The nested-only escape hatch: Ctrl+Alt+G gives the mouse back to the host desktop
 /// (like a VM window). Fixed, not configurable, so it can't be lost to a config typo.
 fn is_release_pointer(nested: bool, mods: &ModifiersState, sym: Option<Keysym>) -> bool {
@@ -239,6 +250,12 @@ pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState,
     let serial = SERIAL_COUNTER.next_serial();
     let nested = state.backend.is_nested();
     let outcome = keyboard.input(state, keycode, key_state, serial, time, |state, mods, handle| {
+        // The Mod key held while walking frees a cursor for the dock.
+        let mod_key = state.config.general.mod_key;
+        let is_mod = is_mod_key(mod_key, nested, handle.raw_latin_sym_or_raw_current_sym());
+        if is_mod && key_state == KeyState::Released {
+            state.set_dock_cursor(false);
+        }
         if key_state == KeyState::Released {
             let ours = state.input.suppressed_keys.remove(&keycode);
             let camera = state.view.controls.release(keycode);
@@ -326,6 +343,13 @@ pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState,
                 return FilterResult::Intercept(Some(KeyOutcome::DismissLayer));
             }
             return FilterResult::Forward;
+        }
+        if is_mod
+            && state.mode == InputMode::Walk
+            && state.config.dock.enabled
+            && pointer_is_3d(state)
+        {
+            state.set_dock_cursor(true);
         }
         let route = route_key(state.render_mode, state.mode, &state.keybinds, combo_mods, sym);
         if route != KeyRoute::Forward {
@@ -478,6 +502,7 @@ pub fn before_frame(state: &mut SpaceState) {
     state.refresh_inventory();
     state.refresh_launching();
     state.refresh_menu();
+    state.refresh_dock();
     if state.render_mode != RenderMode::Scene3D {
         return;
     }
@@ -564,6 +589,10 @@ pub fn handle_pointer_motion_absolute(
         state.menu_pointer(pos);
         return;
     }
+    if pointer_is_3d(state) && state.dock.cursor && state.mode == InputMode::Walk {
+        state.dock_pointer(pos);
+        return;
+    }
     if pointer_is_3d(state) {
         match state.mode {
             // The inventory has an ordinary cursor.
@@ -604,6 +633,10 @@ pub fn handle_pointer_motion(
     state.input_activity();
     if pointer_is_3d(state) && state.menu.is_some() {
         state.menu_pointer(state.pointer_location + delta);
+        return;
+    }
+    if pointer_is_3d(state) && state.dock.cursor && state.mode == InputMode::Walk {
+        state.dock_pointer(state.pointer_location + delta);
         return;
     }
     if pointer_is_3d(state) {
@@ -758,6 +791,11 @@ pub fn handle_pointer_button(
             // In Walk mode buttons never reach clients (press AND release are ours).
             if button_state == ButtonState::Pressed {
                 state.input.suppressed_buttons.insert(button);
+                // Holding Mod: the click is for the dock (or nothing).
+                if state.dock.cursor && state.dock.cursor_moved {
+                    state.dock_click(button == BTN_RIGHT);
+                    return;
+                }
                 let mods =
                     state.seat.get_keyboard().map(|k| k.modifier_state()).unwrap_or_default();
                 let modkey = Mods::from_state(
