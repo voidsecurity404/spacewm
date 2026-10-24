@@ -92,6 +92,7 @@ pub fn help_columns(
         row(&keys(&binds.close), "close window"),
         row(&keys(&binds.fullscreen), "fullscreen (Esc leaves it)"),
         row(&keys(&binds.next_window), "go to next window"),
+        row(&keys(&binds.seated), "seated: windows around me"),
         row(&keys(&binds.grab), "carry / put down a window"),
         row(&keys(&binds.rotate), "turn a window"),
         row(&keys(&binds.reset_rotation), "face me again"),

@@ -246,6 +246,8 @@ pub struct KeybindsConfig {
     pub next_window: Binding,
     /// Show every key on screen.
     pub help: Binding,
+    /// Seated mode: windows around you, no walking.
+    pub seated: Binding,
     /// Lock the screen (`desktop.lock_command`).
     pub lock: Binding,
     /// Whole screen to ~/Pictures/Screenshots and the clipboard; a dragged region.
@@ -291,6 +293,7 @@ impl Default for KeybindsConfig {
             // itself, Mod+Tab never reaches us.
             next_window: Binding::many(&["Mod+Tab", "Mod+grave"]),
             help: Binding::one("Mod+K"),
+            seated: Binding::one("Mod+S"),
             lock: Binding::one("Mod+L"),
             screenshot: Binding::one("Print"),
             screenshot_region: Binding::one("Shift+Print"),
@@ -333,6 +336,7 @@ impl KeybindsConfig {
             ("fullscreen", &self.fullscreen, Action::ToggleFullscreen),
             ("next_window", &self.next_window, Action::NextWindow),
             ("help", &self.help, Action::Help),
+            ("seated", &self.seated, Action::ToggleSeated),
             ("lock", &self.lock, Action::Lock),
             ("screenshot", &self.screenshot, Action::Screenshot),
             ("screenshot_region", &self.screenshot_region, Action::ScreenshotRegion),

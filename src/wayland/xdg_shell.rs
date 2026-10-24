@@ -59,6 +59,7 @@ impl XdgShellHandler for SpaceState {
         self.view.dirty = true;
         crate::ipc::broadcast(self, Event::PanelOpened { id, app_id: None });
         self.launch_window_opened(&window);
+        self.arrange_seated();
 
         if self.render_mode == RenderMode::Scene3D {
             // 3D: only a window the user just asked for takes focus (no focus stealing).

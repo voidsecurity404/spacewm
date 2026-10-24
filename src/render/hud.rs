@@ -55,6 +55,7 @@ impl SpaceState {
             "2D"
         } else {
             match self.mode {
+                crate::input::mode::InputMode::Walk if self.seated.active => "Seated",
                 crate::input::mode::InputMode::Walk => "Walk",
                 crate::input::mode::InputMode::Window { .. } => "Window",
             }

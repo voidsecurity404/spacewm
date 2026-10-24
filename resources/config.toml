@@ -141,6 +141,8 @@ fullscreen = "Mod+F"
 next_window = ["Mod+Tab", "Mod+grave"]
 # Every key on screen (Escape or a click closes it).
 help = "Mod+K"
+# Seated mode: all windows on an arc around you at reading distance, no walking.
+seated = "Mod+S"
 lock = "Mod+L"
 screenshot = "Print"
 screenshot_region = "Shift+Print"

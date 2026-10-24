@@ -251,6 +251,8 @@ pub fn on_panel_removed(state: &mut SpaceState, panel: PanelId) {
     if state.mode == (InputMode::Window { panel }) {
         set_mode(state, InputMode::Walk, None);
     }
+    // Seated: close the gap on the arc.
+    state.arrange_seated();
 }
 
 /// Mod+Tab: turn the view to the next window (by id, wrapping around) and enter it when

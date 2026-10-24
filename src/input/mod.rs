@@ -14,6 +14,7 @@ pub mod fullscreen;
 pub mod inject;
 pub mod mode;
 pub mod raycast;
+pub mod seated;
 pub mod world_ops;
 
 use std::collections::HashSet;
@@ -91,6 +92,8 @@ pub enum Action {
     NextWindow,
     /// Show / hide every key on screen.
     Help,
+    /// Windows on an arc around you, no walking (and back).
+    ToggleSeated,
     /// Lock the screen now.
     Lock,
     Screenshot,
@@ -426,6 +429,7 @@ pub fn run_action(state: &mut SpaceState, action: Action) {
         Action::NextWindow => mode::next_window(state),
         Action::Help => state.toggle_help(),
         Action::Lock => state.lock_now(),
+        Action::ToggleSeated => state.toggle_seated(),
         Action::Screenshot => state.screenshot(false),
         Action::ScreenshotRegion => state.screenshot(true),
         Action::Hardware(hw) => state.hardware_key(hw),
@@ -523,8 +527,9 @@ pub fn before_frame(state: &mut SpaceState) {
     };
     state.last_tick = Some(now);
     let intent = match state.mode {
-        InputMode::Walk => state.view.controls.intent(),
-        InputMode::Window { .. } => Default::default(),
+        // Seated: only looking around.
+        InputMode::Walk if !state.seated.active => state.view.controls.intent(),
+        _ => Default::default(),
     };
     let forward = state.view.camera.forward_flat();
     state.player.walk_speed = state.input_settings.walk_speed;
@@ -542,6 +547,7 @@ pub fn before_frame(state: &mut SpaceState) {
         state.view.dirty = true;
     }
     state.focus_view_apply();
+    state.apply_panel_glides();
     world_ops::update_grab(state);
     mode::update_hover(state);
     // Needs this frame's hover.

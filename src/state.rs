@@ -175,6 +175,8 @@ pub struct SpaceState {
     pub drag: Option<crate::input::drag::Drag>,
     /// "drag: move" under the crosshair, and which spot it was drawn for.
     pub drag_hint: Option<(crate::input::drag::Zone, crate::inventory::Image)>,
+    /// Seated mode: windows on an arc around you (input/seated.rs).
+    pub seated: crate::input::seated::Seated,
     /// The dock along the bottom (render/dock.rs).
     pub dock: crate::render::dock::Dock,
     /// The hotbar replaces the dock until then (just built something).
@@ -410,6 +412,7 @@ impl SpaceState {
             help: None,
             menu: None,
             dock: Default::default(),
+            seated: Default::default(),
             building_until: None,
             drag: None,
             drag_hint: None,
@@ -480,7 +483,8 @@ impl SpaceState {
                 || self.player.vel.length_squared() > 1e-6
                 // A pulsing border (xdg-activation) is an animation too.
                 || self.world.panels().iter().any(|p| p.attention_until.is_some_and(|t| t > now))
-                || self.focus_view.is_some_and(|f| f.moving()))
+                || self.focus_view.is_some_and(|f| f.moving())
+                || self.panels_gliding())
     }
 
     /// Ask the backend for a new frame (something on screen changed).
@@ -604,6 +608,13 @@ impl SpaceState {
     /// A panel's app is now known: put it where it was last time, if we remember.
     pub fn restore_placement(&mut self, window: &Window) {
         self.remember_names(window);
+        // Seated: new windows join the arc instead of going to an old spot.
+        if self.seated.active {
+            if let Some(p) = self.world.panels_mut().iter_mut().find(|p| &p.window == window) {
+                p.placement_pending = false;
+            }
+            return;
+        }
         let Some(panel) = self.world.panel_for_window(window) else {
             return;
         };

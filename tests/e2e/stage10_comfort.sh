@@ -238,5 +238,63 @@ read -r BX BY BZ < <(kc --json list | python3 -c "import json,sys; print(*json.l
 python3 -c "exit(0 if $BZ > 0.5 and abs($BY - 30) < 0.5 else 1)" || fail "window not in front of the view ($BX $BY $BZ)"
 pass "Mod + click on an open app brings its window in front of you"
 space_stop || fail "unclean exit"
+
+# ---- Seated mode: windows on an arc around you, no walking; back where they were.
+space_start --render 3d --log-level debug
+sleep 1
+for _ in 1 2 3; do kc spawn foot >/dev/null; sleep 0.5; done
+wait_windows 3
+sleep 0.8
+kc mode walk
+sleep 0.3
+positions() { kc --json list | python3 -c "import json,sys; print(json.dumps({p['id']: p['position'] for p in json.load(sys.stdin)['panels']}))"; }
+BEFORE=$(positions)
+kc input key Super+s
+sleep 0.8
+grep -q "seated mode on" "$OUT/spacewm.log" || fail "Mod+S did not start seated mode"
+check_arc() {
+    python3 - "$(kc --json camera)" "$(kc --json list)" "$1" <<'PY'
+import json, math, sys
+cam = json.loads(sys.argv[1])["position"]
+panels = json.loads(sys.argv[2])["panels"]
+want = int(sys.argv[3])
+assert len(panels) == want, (len(panels), want)
+d = [math.dist(cam, p["position"]) for p in panels]
+assert max(d) - min(d) < 0.01, d
+for p in panels:
+    dx, dz = cam[0] - p["position"][0], cam[2] - p["position"][2]
+    # The panel's front faces the camera: yaw = atan2(dx, dz).
+    face = math.degrees(math.atan2(dx, dz))
+    assert abs((p["yaw_deg"] - face + 180) % 360 - 180) < 1.0, (p["yaw_deg"], face)
+print(round(d[0], 3))
+PY
+}
+R=$(check_arc 3) || fail "windows not on an arc facing the view"
+read -r C0 _ < <(kc camera)
+kc input key w --state press; sleep 0.5; kc input key w --state release; sleep 0.3
+read -r C1 _ < <(kc camera)
+[ "$C0" = "$C1" ] || fail "W walked while seated ($C0 -> $C1)"
+pass "Mod+S: windows on an arc (radius $R m) facing you; W doesn't walk"
+kc spawn foot >/dev/null
+wait_windows 4
+sleep 0.6
+# It was entered right away (focus zoom moved the view): back to the seat first.
+kc mode walk
+sleep 0.6
+check_arc 4 >/dev/null || fail "a new window did not join the arc"
+pass "a new window joins the arc"
+kc input key Super+s
+sleep 0.8
+python3 - "$BEFORE" "$(positions)" <<'PY' || fail "windows not back where they were"
+import json, math, sys
+before, after = json.loads(sys.argv[1]), json.loads(sys.argv[2])
+for k, pos in before.items():
+    assert math.dist(pos, after[k]) < 0.01, (k, pos, after[k])
+PY
+kc input key w --state press; sleep 0.5; kc input key w --state release; sleep 0.3
+read -r C2 _ < <(kc camera)
+[ "$C2" != "$C1" ] || fail "walking not back after seated mode"
+pass "Mod+S again: windows back where they were, walking works"
+space_stop || fail "unclean exit"
 grep -E "panicked" "$OUT/spacewm.log" && fail "panic in log"
 pass "clean exit"
