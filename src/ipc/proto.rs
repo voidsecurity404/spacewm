@@ -44,6 +44,8 @@ pub enum Request {
     },
     /// Re-read the config file now (it is also reloaded automatically when saved).
     ReloadConfig,
+    /// Performance numbers (spacectl stats).
+    Stats,
     Screenshot {
         path: String,
         #[serde(default)]
@@ -203,6 +205,24 @@ pub enum Response {
     Screenshot { path: String, width: u32, height: u32 },
     Event { event: Event },
     Block { block: String },
+    Stats { stats: Stats },
+}
+
+/// Performance over the last seconds (frame times: CPU ms per rendered frame).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Stats {
+    pub fps: f64,
+    pub frame_ms_p50: f64,
+    pub frame_ms_p95: f64,
+    pub frame_ms_p99: f64,
+    pub frame_ms_max: f64,
+    pub panel_updates_per_s: f64,
+    pub chunk_uploads_per_s: f64,
+    /// Estimate: our render targets, panel textures, chunk meshes, block textures.
+    pub gpu_memory_mib: f64,
+    pub panels: usize,
+    /// Panels inside the view (others are not re-rendered and get throttled callbacks).
+    pub visible_panels: usize,
 }
 
 impl Response {

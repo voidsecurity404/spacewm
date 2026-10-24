@@ -55,6 +55,11 @@ png = "0.18"
 bytemuck = { version = "1", features = ["derive"] }
 notify = { version = "8", default-features = false }
 fontdue = "0.9"
+tracing-tracy = { version = "0.12.0", optional = true }
+
+[features]
+# Profiling with tracy (https://github.com/wolfpld/tracy): cargo run --features profile
+profile = ["dep:tracing-tracy"]
 
 [[bin]]
 name = "spacewm"
@@ -81,3 +86,4 @@ debug = 1
 [dev-dependencies]
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+

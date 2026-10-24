@@ -12,6 +12,7 @@ pub mod gl;
 pub mod hud;
 pub mod notice;
 pub mod panel_texture;
+pub mod perf;
 pub mod scene;
 pub mod screenshot;
 pub mod text;
@@ -460,12 +461,26 @@ pub fn monotonic_now() -> smithay::utils::Time<smithay::utils::Monotonic> {
 
 /// Tell clients they may draw their next frame. Without frame callbacks a client draws
 /// one frame and then waits forever — the classic "frozen window" beginner bug.
+/// Panels whose apps get only throttled frame callbacks: 3D panels out of view (or
+/// hidden with Mod+H). They keep running, slowly, without drawing frames nobody sees.
+pub fn hidden_panels(
+    render_mode: RenderMode,
+    world: &crate::world::World,
+    visible: &std::collections::HashSet<crate::world::panel::PanelId>,
+) -> std::collections::HashSet<crate::world::panel::PanelId> {
+    if render_mode != RenderMode::Scene3D {
+        return Default::default();
+    }
+    world.panels().iter().map(|p| p.id).filter(|id| !visible.contains(id)).collect()
+}
+
 pub fn send_frame_callbacks(
     output: &Output,
     space: &Space<Window>,
     cursor_status: &CursorImageStatus,
     dnd_icon: Option<&DndIcon>,
     lock: &crate::wayland::session_lock::LockState,
+    hidden: &std::collections::HashSet<crate::world::panel::PanelId>,
     time: Duration,
 ) {
     if let Some(surface) = lock.surface_for(output) {
@@ -477,7 +492,10 @@ pub fn send_frame_callbacks(
     // so hidden clients keep running slowly instead of freezing.
     let throttle = Some(Duration::from_secs(1));
     for window in space.elements() {
-        window.send_frame(output, time, throttle, |_, _| Some(output.clone()));
+        // `None` = "not shown on any output": smithay then only sends a callback once per
+        // `throttle`.
+        let shown = !hidden.contains(&crate::state::window_id(window));
+        window.send_frame(output, time, throttle, |_, _| shown.then(|| output.clone()));
     }
     // Bars and launchers too, or they would draw one frame and freeze.
     for layer in smithay::desktop::layer_map_for_output(output).layers() {

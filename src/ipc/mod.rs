@@ -475,6 +475,25 @@ fn handle_request(state: &mut SpaceState, id: ConnectionId, request: Request) ->
             crate::input::mode::set_mode(state, target, None);
             Response::Ok
         }
+        Request::Stats => {
+            let s = state.perf.snapshot(std::time::Instant::now());
+            let gpu = state.view.scene.as_ref().map_or(0, |sc| sc.gpu_bytes())
+                + state.view.panel_textures.as_ref().map_or(0, |t| t.gpu_bytes());
+            Response::Stats {
+                stats: proto::Stats {
+                    fps: s.fps,
+                    frame_ms_p50: s.frame_ms_p50,
+                    frame_ms_p95: s.frame_ms_p95,
+                    frame_ms_p99: s.frame_ms_p99,
+                    frame_ms_max: s.frame_ms_max,
+                    panel_updates_per_s: s.panel_updates_per_s,
+                    chunk_uploads_per_s: s.chunk_uploads_per_s,
+                    gpu_memory_mib: gpu as f64 / (1024.0 * 1024.0),
+                    panels: state.world.panels().len(),
+                    visible_panels: state.view.visible_panels.len(),
+                },
+            }
+        }
         Request::ReloadConfig => match state.reload_config() {
             Ok(()) => Response::Ok,
             Err(e) => Response::error(e),

@@ -190,6 +190,7 @@ enum KeyOutcome {
 }
 
 pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState, time: InputTime) {
+    let _span = tracing::trace_span!("input").entered();
     state.input_activity();
     let Some(keyboard) = state.seat.get_keyboard() else {
         return;
@@ -379,6 +380,7 @@ pub fn release_all_keys(state: &mut SpaceState) {
 
 /// Per-frame input work in 3D: walking (held keys) and the hover highlight.
 pub fn before_frame(state: &mut SpaceState) {
+    let _span = tracing::trace_span!("physics").entered();
     state.refresh_hud();
     if state.render_mode != RenderMode::Scene3D {
         return;

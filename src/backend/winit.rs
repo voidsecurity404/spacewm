@@ -654,6 +654,7 @@ fn render(state: &mut SpaceState) {
             return;
         }
     };
+    let composite = tracing::trace_span!("composite").entered();
     let result = if locked {
         // Locked: the locker's surface and nothing else (see wayland/session_lock.rs).
         let (elements, clear) = render::lock_elements(&mut b.renderer, &state.lock, &output, scale);
@@ -695,6 +696,7 @@ fn render(state: &mut SpaceState) {
             ),
         }
     };
+    drop(composite);
     let damage = match result {
         Ok(result) => result.damage.cloned(),
         Err(e) => {
@@ -750,6 +752,7 @@ fn render(state: &mut SpaceState) {
             &state.cursor_status,
             state.dnd_icon.as_ref(),
             &state.lock,
+            &render::hidden_panels(state.render_mode, &state.world, &state.view.visible_panels),
             time,
         );
     } else if b.frame_callback_timer.is_none() {
@@ -769,6 +772,11 @@ fn render(state: &mut SpaceState) {
                         &state.cursor_status,
                         state.dnd_icon.as_ref(),
                         &state.lock,
+                        &render::hidden_panels(
+                            state.render_mode,
+                            &state.world,
+                            &state.view.visible_panels,
+                        ),
                         time,
                     );
                 }

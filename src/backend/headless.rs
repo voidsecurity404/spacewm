@@ -190,6 +190,7 @@ fn render(state: &mut SpaceState) {
             return;
         }
     };
+    let composite = tracing::trace_span!("composite").entered();
     let result = if locked {
         // Locked: the locker's surface and nothing else (see wayland/session_lock.rs).
         let (elements, clear) = render::lock_elements(&mut b.renderer, &state.lock, &output, scale);
@@ -231,6 +232,7 @@ fn render(state: &mut SpaceState) {
             ),
         }
     };
+    drop(composite);
     let presented = match &result {
         Ok(r) => r.damage.is_some(),
         Err(err) => {
@@ -281,6 +283,7 @@ fn render(state: &mut SpaceState) {
         &state.cursor_status,
         state.dnd_icon.as_ref(),
         &state.lock,
+        &render::hidden_panels(state.render_mode, &state.world, &state.view.visible_panels),
         time,
     );
 
@@ -295,6 +298,9 @@ pub fn finish_frame(
     prepared: Option<render::view::Prepared>,
 ) {
     let scene_rendered = prepared.as_ref().is_some_and(|p| p.scene_rendered);
+    let (panel_updates, chunk_uploads) =
+        prepared.as_ref().map_or((0, 0), |p| (p.panel_updates, p.chunk_uploads));
+    state.perf.record_frame(frame_start, frame_start.elapsed(), panel_updates, chunk_uploads);
     state.last_frame = Some(frame_start);
     // A lock waiting for confirmation was just drawn: tell the locker it is in charge.
     state.confirm_lock();

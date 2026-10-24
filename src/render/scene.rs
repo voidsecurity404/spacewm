@@ -469,6 +469,17 @@ impl SceneRenderer {
         n
     }
 
+    /// GPU memory of our render targets and voxel data.
+    pub fn gpu_bytes(&self) -> usize {
+        let targets = self.targets.as_ref().map_or(0, |t| {
+            let px = (t.size.w * t.size.h) as usize;
+            let msaa = if t.msaa.is_some() { px * self.samples as usize * 8 } else { 0 };
+            let depth = if t.resolve_depth.is_some() { px * 4 } else { 0 };
+            msaa + px * 4 + depth
+        });
+        targets + self.voxels.gpu_bytes()
+    }
+
     /// The element showing the last rendered scene, covering the output.
     pub fn element(&self) -> Option<TextureRenderElement<GlesTexture>> {
         self.element_sized(None)

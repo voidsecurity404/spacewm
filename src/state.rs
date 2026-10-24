@@ -225,6 +225,8 @@ pub struct SpaceState {
     pub config_reload_timer: Option<smithay::reexports::calloop::RegistrationToken>,
     /// Message box on screen (config errors).
     pub notice: Option<crate::render::notice::Notice>,
+    /// Frame times and per-frame work, for `spacectl stats`.
+    pub perf: crate::render::perf::Perf,
     /// When the last frame started (for `render.max_fps_idle`).
     pub last_frame: Option<Instant>,
     /// A delayed redraw waiting for the idle frame cap.
@@ -421,6 +423,7 @@ impl SpaceState {
             config_reload_timer: None,
             notice: None,
             last_frame: None,
+            perf: Default::default(),
             capped_redraw: None,
             input: InputState::default(),
             ipc: None,

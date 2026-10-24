@@ -26,6 +26,12 @@ impl Frustum {
         Self { planes }
     }
 
+    /// Is any part of the sphere inside the frustum? (Planes are normalized, so the signed
+    /// distance of the center to each plane can be compared with the radius.)
+    pub fn sphere_visible(&self, center: Vec3, radius: f32) -> bool {
+        self.planes.iter().all(|p| p.truncate().dot(center) + p.w >= -radius)
+    }
+
     /// Is any part of the axis-aligned box [min, max] inside the frustum?
     pub fn aabb_visible(&self, min: Vec3, max: Vec3) -> bool {
         self.planes.iter().all(|p| {
