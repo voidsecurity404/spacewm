@@ -282,8 +282,7 @@ impl SpaceState {
     pub fn remove_window(&mut self, window: &Window) {
         self.space.unmap_elem(window);
         // Remember where it was, so it comes back to the same spot next time.
-        if let Some(saved) = self.world.panel_for_window(window).and_then(crate::state::saved_panel)
-        {
+        if let Some(saved) = self.world.panel_for_window(window).and_then(|p| self.saved_panel(p)) {
             self.layout.remember(saved);
             self.layout_changed();
         }

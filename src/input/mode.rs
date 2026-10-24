@@ -243,6 +243,7 @@ pub fn on_new_window(state: &mut SpaceState, panel: PanelId) {
 /// The focused panel went away: back to walking.
 pub fn on_panel_removed(state: &mut SpaceState, panel: PanelId) {
     state.ws_remove_window(panel);
+    state.mru.retain(|p| *p != panel);
     if state.drag.is_some_and(|d| d.panel == panel) {
         state.drag = None;
     }
@@ -254,46 +255,6 @@ pub fn on_panel_removed(state: &mut SpaceState, panel: PanelId) {
     }
     // Seated: close the gap on the arc.
     state.arrange_seated();
-}
-
-/// Mod+Tab: turn the view to the next window (by id, wrapping around) and enter it when
-/// it is within reach and seen from the front; otherwise just look at it, so a window
-/// lost somewhere in the world is easy to find.
-pub fn next_window(state: &mut SpaceState) {
-    if state.render_mode != crate::cli::RenderMode::Scene3D || state.lock.is_locked() {
-        return;
-    }
-    let current = match state.mode {
-        InputMode::Window { panel } => Some(panel),
-        InputMode::Walk => state.highlight.hovered,
-    };
-    let mut ids: Vec<PanelId> =
-        state.world.panels().iter().filter(|p| p.visible).map(|p| p.id).collect();
-    ids.sort_unstable();
-    let Some(&next) = current.and_then(|c| ids.iter().find(|&&id| id > c)).or_else(|| ids.first())
-    else {
-        return;
-    };
-    let Some(p) = state.world.panels().iter().find(|p| p.id == next) else { return };
-    let (target, normal) = (p.position, p.normal());
-    if state.fullscreen.is_some() {
-        state.exit_fullscreen();
-    }
-    set_mode(state, InputMode::Walk, None);
-    // We set the view ourselves: no glide back to the old spot.
-    state.focus_view_cancel();
-    let camera = &mut state.view.camera;
-    let d = target - camera.position;
-    // Yaw 0 looks along -Z (see Camera::forward); pitch up is positive.
-    camera.yaw = (d.x).atan2(-d.z).rem_euclid(std::f32::consts::TAU);
-    camera.pitch = d.y.atan2(d.x.hypot(d.z)).clamp(-1.5, 1.5);
-    let in_reach = d.length() <= state.input_settings.reach_distance && normal.dot(-d) > 0.0;
-    tracing::debug!(panel = next, in_reach, "next window");
-    state.view.dirty = true;
-    state.queue_redraw();
-    if in_reach {
-        set_mode(state, InputMode::Window { panel: next }, None);
-    }
 }
 
 /// Window mode: relative mouse motion moves the cursor across the panel. The speed is

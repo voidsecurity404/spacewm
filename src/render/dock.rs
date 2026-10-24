@@ -229,11 +229,7 @@ impl SpaceState {
             return;
         }
         // The app list is re-read now and then (newly installed apps).
-        let stale = self.dock.entries_loaded.is_none_or(|t| t.elapsed().as_secs() > 120);
-        if self.dock.entries.is_none() || stale {
-            self.dock.entries = Some(crate::launcher::desktop::load_all());
-            self.dock.entries_loaded = Some(Instant::now());
-        }
+        self.ensure_entries();
         let windows: Vec<(PanelId, String)> = self
             .world
             .panels()
@@ -337,6 +333,36 @@ impl SpaceState {
             None,
         );
         Some((buffer, (w, h)))
+    }
+
+    /// Load (or refresh) the installed apps' .desktop entries.
+    pub fn ensure_entries(&mut self) {
+        let stale = self.dock.entries_loaded.is_none_or(|t| t.elapsed().as_secs() > 120);
+        if self.dock.entries.is_none() || stale {
+            self.dock.entries = Some(crate::launcher::desktop::load_all());
+            self.dock.entries_loaded = Some(Instant::now());
+        }
+    }
+
+    /// An app's icon (premultiplied RGBA, `px` square) from its app_id, if it has one.
+    pub fn app_icon(&mut self, app_id: &str, px: u32) -> Option<Vec<u8>> {
+        self.ensure_entries();
+        let icon =
+            entry_for_app(self.dock.entries.as_deref().unwrap_or(&[]), app_id)?.icon.clone()?;
+        self.dock
+            .icons
+            .entry(format!("{icon}@{px}"))
+            .or_insert_with(|| crate::desktop::icons::load(&icon, px))
+            .clone()
+    }
+
+    /// The name people know an app by ("Visual Studio Code" for "Code").
+    pub fn app_display_name(&self, app_id: &str) -> String {
+        self.dock
+            .entries
+            .as_deref()
+            .and_then(|e| entry_for_app(e, app_id))
+            .map_or_else(|| app_id.to_string(), |e| e.name.clone())
     }
 
     /// Mod went down / up while walking.

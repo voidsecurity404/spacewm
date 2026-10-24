@@ -90,6 +90,7 @@ impl SessionLockHandler for SpaceState {
         self.close_help();
         self.close_menu();
         self.close_settings();
+        self.switcher_cancel();
         self.overlay = crate::state::Overlay::None;
         self.view.controls.clear();
         if let Some(keyboard) = self.seat.get_keyboard() {
@@ -160,6 +161,13 @@ impl SpaceState {
                 if self.lock.first_surface().is_some_and(|l| l.wl_surface() == s));
             if !allowed {
                 return;
+            }
+        }
+        // Most recently used first, for the window switcher.
+        if let Some(KeyboardFocusTarget::Window(w)) = &target {
+            if let Some(id) = self.world.panel_for_window(w).map(|p| p.id) {
+                self.mru.retain(|p| *p != id);
+                self.mru.insert(0, id);
             }
         }
         if let Some(keyboard) = self.seat.get_keyboard() {

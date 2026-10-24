@@ -4,7 +4,22 @@
 # to 3D gives windows their 3D sizes back.
 source "$(dirname "$0")/lib.sh"
 PX="python3 $(dirname "$0")/pixel.py"
-space_start --render 3d --log-level debug
+# Fake volume tools: the wheel on the bar must never touch the real volume.
+FAKE="$OUT/fake-2d-$$"
+rm -rf "$FAKE"; mkdir -p "$FAKE"
+cat >"$FAKE/vol.sh" <<SH
+#!/bin/sh
+f="$FAKE/vol"; [ -f "\$f" ] || echo 50 >"\$f"
+read -r v <"\$f"
+case "\$1" in up) v=\$((v + 5)) ;; down) v=\$((v - 5)) ;; get) echo "Volume: \$v%"; exit 0 ;; esac
+echo "\$v" >"\$f"
+SH
+chmod +x "$FAKE/vol.sh"
+LAYOUT="$FAKE/layout.json"
+printf '[desktop]\nvolume_up = "%s up"\nvolume_down = "%s down"\nvolume_get = "%s get"\nvolume_mute = "true"\n' \
+    "$FAKE/vol.sh" "$FAKE/vol.sh" "$FAKE/vol.sh" >"$FAKE/config.toml"
+trap 'rm -rf "$FAKE"; space_stop >/dev/null 2>&1 || true' EXIT
+space_start --render 3d --config "$FAKE/config.toml" --layout "$LAYOUT" --log-level debug
 sleep 1
 info() { kc --json list | python3 -c "
 import json,sys
@@ -116,6 +131,38 @@ XT=$(kc --json list | python3 -c "import json,sys; print([p['id'] for p in json.
 read -r XX XY XW XH < <(rect "$XT")
 [ "$XX" != "-" ] && [ "$XX" -ge 8 ] && [ "$XY" -ge 38 ] && [ "$XW" -lt 1264 ] || fail "xterm does not tile: $XX $XY $XW $XH"
 pass "an X11 window (xterm) tiles with the others ($XX,$XY ${XW}x$XH)"
+
+# The wheel on the bar changes the volume (fake tool: 50% -> 55%).
+kc input move-to 1000 15
+kc input scroll -1
+for _ in $(seq 30); do [ "$(cat "$FAKE/vol" 2>/dev/null)" = 55 ] && break; sleep 0.1; done
+[ "$(cat "$FAKE/vol" 2>/dev/null)" = 55 ] || fail "the wheel on the bar did not raise the volume ($(cat "$FAKE/vol" 2>/dev/null))"
+pass "the wheel on the bar changes the volume"
+
+# Window switcher (hold Mod, press grave, let go): goes to the last used other window,
+# on its workspace.
+kc input key Super+1
+sleep 0.3
+kc input key Super+grave
+sleep 0.5
+grep -q "window switcher windows=" "$OUT/spacewm.log" || fail "Mod+grave did not open the switcher"
+grep -q "switcher: go to window" "$OUT/spacewm.log" || fail "letting go of Mod did not pick a window"
+FOC=$(info | awk '$3 == "True" {print $1, $2}')
+[ -n "$FOC" ] || fail "no window focused after the switcher"
+pass "the window switcher (Mod+grave) goes to a window ($FOC: id workspace)"
+
+# Workspaces are remembered: restart, the reopened apps go back to theirs.
+WS_BEFORE=$(info | awk '{print $2}' | sort | tr '\n' ' ')
+space_stop || fail "unclean exit"
+python3 -c "
+import json,sys; d=json.load(open('$LAYOUT')); ws=[p.get('workspace',0) for p in d['panels'][:3]]
+assert any(w == 2 for w in ws), ws" || fail "workspaces not saved in the layout: $(python3 -c "import json; print([p.get('workspace') for p in json.load(open('$LAYOUT'))['panels']])")"
+space_start --render 2d --config "$FAKE/config.toml" --layout "$LAYOUT" --log-level debug
+for _ in $(seq 100); do [ "$(info | wc -l)" -ge 3 ] && break; sleep 0.1; done
+sleep 1
+WS_AFTER=$(info | awk '{print $2}' | sort | tr '\n' ' ')
+info | awk '{print $2}' | grep -qx 2 || fail "no reopened window is back on workspace 2 (before: $WS_BEFORE after: $WS_AFTER)"
+pass "after a restart the reopened apps are back on their workspaces ($WS_AFTER)"
 
 space_stop || fail "unclean exit"
 grep -E "panicked|ERROR" "$OUT/spacewm.log" && fail "errors in log"

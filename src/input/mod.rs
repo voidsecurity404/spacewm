@@ -255,6 +255,8 @@ enum KeyOutcome {
     Menu(Keysym),
     /// A key while the settings box is open.
     Settings(Keysym),
+    /// A key while the window switcher is open.
+    Switcher(Keysym),
 }
 
 pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState, time: InputTime) {
@@ -271,6 +273,10 @@ pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState,
         let is_mod = is_mod_key(mod_key, nested, handle.raw_latin_sym_or_raw_current_sym());
         if is_mod && key_state == KeyState::Released {
             state.set_dock_cursor(false);
+            // Holding Mod while picking in the switcher: letting go picks.
+            if state.switcher.is_some() {
+                state.switcher_commit();
+            }
         }
         if key_state == KeyState::Released {
             let ours = state.input.suppressed_keys.remove(&keycode);
@@ -313,6 +319,12 @@ pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState,
         }
         let combo_mods = Mods::from_state(mods, state.config.general.mod_key, nested);
         let mod_escape = combo_mods.mod_ && sym == Some(Keysym::Escape);
+        // The window switcher takes the keys while open.
+        if state.switcher.is_some() {
+            state.input.suppressed_keys.insert(keycode);
+            let sym = if mod_escape { Keysym::Escape } else { sym.unwrap_or(Keysym::NoSymbol) };
+            return FilterResult::Intercept(Some(KeyOutcome::Switcher(sym)));
+        }
         // The settings box takes the keys while open (its own key closes it too).
         if state.settings.is_some() {
             state.input.suppressed_keys.insert(keycode);
@@ -412,6 +424,7 @@ pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState,
         Some(Some(KeyOutcome::CloseHelp)) => state.close_help(),
         Some(Some(KeyOutcome::Menu(sym))) => state.menu_key(sym),
         Some(Some(KeyOutcome::Settings(sym))) => state.settings_key(sym),
+        Some(Some(KeyOutcome::Switcher(sym))) => state.switcher_key(sym),
         _ => {}
     }
 }
@@ -456,7 +469,7 @@ pub fn run_action(state: &mut SpaceState, action: Action) {
             let target = world_ops::target_panel(state);
             state.toggle_fullscreen(target);
         }
-        Action::NextWindow => mode::next_window(state),
+        Action::NextWindow => state.switcher_next(false),
         Action::Help => state.toggle_help(),
         Action::Lock => state.lock_now(),
         Action::ToggleSeated => state.toggle_seated(),
@@ -551,6 +564,7 @@ pub fn before_frame(state: &mut SpaceState) {
     state.refresh_launching();
     state.refresh_menu();
     state.refresh_settings();
+    state.refresh_switcher();
     state.refresh_dock();
     if state.render_mode != RenderMode::Scene3D {
         return;
@@ -637,6 +651,10 @@ pub fn handle_pointer_motion_absolute(
     time: InputTime,
 ) {
     state.input_activity();
+    if state.switcher.is_some() {
+        state.switcher_pointer(pos);
+        return;
+    }
     if state.settings.is_some() {
         state.settings_pointer(pos);
         return;
@@ -691,6 +709,10 @@ pub fn handle_pointer_motion(
     time: InputTime,
 ) {
     state.input_activity();
+    if state.switcher.is_some() {
+        state.switcher_pointer(state.pointer_location + delta);
+        return;
+    }
     if state.settings.is_some() {
         state.settings_pointer(state.pointer_location + delta);
         return;
@@ -828,6 +850,14 @@ pub fn handle_pointer_button(
     if button_state == ButtonState::Released && state.input.suppressed_buttons.remove(&button) {
         return;
     }
+    // The window switcher: a click picks a window (or cancels).
+    if state.switcher.is_some() {
+        if button_state == ButtonState::Pressed {
+            state.input.suppressed_buttons.insert(button);
+            state.switcher_click();
+        }
+        return;
+    }
     // The settings box: a click changes a row (right button: back) or closes it.
     if state.settings.is_some() {
         if button_state == ButtonState::Pressed {
@@ -937,6 +967,17 @@ pub fn handle_pointer_button(
 
 pub fn handle_pointer_axis(state: &mut SpaceState, frame: AxisFrame) {
     state.input_activity();
+    // 2D: the wheel over the top bar changes the volume.
+    if state.render_mode == RenderMode::Flat2D && state.desktop2d.fullscreen.is_none() {
+        let on_bar = state.primary_output_geometry().is_some_and(|g| {
+            (state.pointer_location.y - g.loc.y as f64) < crate::desktop2d::bar::HEIGHT as f64
+        });
+        if on_bar {
+            let notches = frame.v120.map(|(_, v)| v as f64 / 120.0).unwrap_or(frame.axis.1 / 15.0);
+            state.bar_scroll(notches);
+            return;
+        }
+    }
     if pointer_is_3d(state) && state.mode == InputMode::Walk {
         let notches = frame.v120.map(|(_, v)| v as f64 / 120.0).unwrap_or(frame.axis.1 / 15.0);
         if notches == 0.0 {

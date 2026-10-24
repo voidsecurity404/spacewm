@@ -19,6 +19,7 @@ pub mod perf;
 pub mod scene;
 pub mod screenshot;
 pub mod settings;
+pub mod switcher;
 pub mod text;
 pub mod view;
 pub mod voxels;
@@ -132,6 +133,8 @@ pub struct OverlayInputs<'a> {
     /// 2D desktop: the top bar, and the focused window's frame (rectangle, 1x1 color).
     pub bar: Option<&'a crate::inventory::Image>,
     pub focus_frame: Option<(crate::desktop2d::tiling::Rect, &'a MemoryRenderBuffer)>,
+    /// The window switcher (centered) and its top-left corner.
+    pub switcher: Option<(&'a crate::inventory::Image, (i32, i32))>,
     /// The settings box (centered), with its own cursor.
     pub settings: Option<&'a crate::inventory::Image>,
     /// The window menu and its top-left corner (output-relative).
@@ -222,6 +225,18 @@ where
                 }
             }
         }
+    }
+    if let Some(((buffer, _), at)) = inputs.switcher {
+        elements.extend(pointer_elements(
+            renderer,
+            inputs.cursor_status,
+            inputs.cursor_theme,
+            None,
+            inputs.pointer - geo.loc.to_f64(),
+            scale,
+            inputs.time,
+        ));
+        elements.extend(boxed(renderer, buffer, at));
     }
     if let Some((buffer, _)) = inputs.settings {
         elements.extend(pointer_elements(
@@ -335,6 +350,7 @@ where
         || inputs.help.is_some()
         || inputs.menu.is_some()
         || inputs.settings.is_some()
+        || inputs.switcher.is_some()
         || inputs.dock_cursor;
     if !covered || !three_d {
         elements.extend(mode_overlay(renderer, inputs, Some(geo)));
@@ -435,6 +451,13 @@ macro_rules! overlay_inputs {
                 .image
                 .as_ref()
                 .filter(|_| $state.desktop2d.fullscreen.is_none()),
+            switcher: $state.switcher.as_ref().and_then(|s| {
+                let geo =
+                    $state.space.outputs().next().and_then(|o| $state.space.output_geometry(o))?;
+                let at =
+                    $crate::render::switcher::box_origin(s.entries.len(), (geo.size.w, geo.size.h));
+                s.image.as_ref().map(|i| (i, at))
+            }),
             focus_frame: $state
                 .desktop2d
                 .border

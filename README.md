@@ -41,7 +41,7 @@ Mod is Super on a real session and Alt when nested (`general.mod_key`).
 | 1-5, scroll wheel, E | hotbar and inventory (only with building on) |
 | Mod+Escape | back to walking (always works; also leaves fullscreen) |
 | Mod+F | the panel fills the screen, and back |
-| Mod+Tab, Mod+\` | turn to the next window (entered when it is near) |
+| Mod+Tab, Mod+\` (hold Mod) | window list, most recent first; let go of Mod to go there |
 | Mod+G / Mod+R / Mod+= / Mod+- | carry / rotate / grow / shrink a panel |
 | Mod+Ctrl+= / Mod+Ctrl+- | resize the window itself |
 | Mod+Return, Mod+Space | terminal, launcher |

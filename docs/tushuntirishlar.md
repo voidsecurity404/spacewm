@@ -561,3 +561,21 @@ Alt+D endi Hyprland'ga o'xshash to'liq tiling desktop'ni ochadi:
 - Eski config'dagi `select_block` kaliti endi `workspace` deb ataladi, eski nomi ham
   qabul qilinadi. `spacectl --json list` har bir oyna uchun `workspace` va `rect_2d` ni
   ko'rsatadi.
+
+### Qo'shimcha qulayliklar
+
+- **Oynalar ro'yxati (Mod+Tab / Mod+`)**: Mod'ni bosib turib ` (yoki Tab) bosing.
+  Barcha oynalar ikonka, nom, sarlavha va workspace bilan ro'yxat bo'lib chiqadi.
+  Oxirgi ishlatilgan oyna tepada turadi, kursor esa oldingi oynada bo'ladi. ` ni
+  takror bossangiz pastga tushasiz, Mod'ni qo'yib yuborsangiz tanlangan oynaga
+  o'tasiz. 3D'da oyna oldingizga keladi, 2D'da uning workspace'i ochiladi va fokus
+  unga o'tadi. Strelkalar, Enter, sichqoncha va Esc (bekor qilish) ham ishlaydi.
+  Avvalgi "keyingi oynaga burilish" o'rnini shu egalladi.
+- **Xush kelibsiz**: spacewm haqiqiy foydalanishda birinchi marta ochilganda tugmalar
+  ro'yxati (Alt+K oynasi) "Welcome to spacewm!" sarlavhasi bilan o'zi chiqadi. Bu bir
+  marta bo'ladi: `~/.local/state/spacewm/welcomed` belgisi yaratiladi. Testlarda chiqmaydi.
+- **Paneldagi ovoz (2D)**: panel ustida g'ildirakni aylantirsangiz ovoz o'zgaradi,
+  ovoz yozuvini bossangiz ovoz o'chadi yoki yoqiladi.
+- **Workspace'lar eslab qolinadi**: har bir oynaning workspace'i layout faylida
+  saqlanadi. spacewm qayta ishga tushganda avtomatik qayta ochilgan dasturlar o'z
+  workspace'lariga qaytadi.

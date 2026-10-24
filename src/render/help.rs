@@ -94,7 +94,7 @@ pub fn help_columns(
         row(&keys(&binds.launcher), "app launcher"),
         row(&keys(&binds.close), "close window"),
         row(&keys(&binds.fullscreen), "fullscreen (Esc leaves it)"),
-        row(&keys(&binds.next_window), "go to next window"),
+        row(&keys(&binds.next_window), "window list (hold Mod)"),
         row(&keys(&binds.seated), "seated: windows around me"),
         row(&keys(&binds.toggle_2d), "3D world / plain 2D desktop"),
         row(&keys(&binds.grab), "carry / put down a window"),
@@ -172,6 +172,15 @@ impl SpaceState {
             self.close_help();
             return;
         }
+        self.show_help("spacewm keys");
+    }
+
+    /// The very first start: the same list, as a welcome.
+    pub fn show_welcome(&mut self) {
+        self.show_help("Welcome to spacewm!  This list is always on Mod+K");
+    }
+
+    fn show_help(&mut self, title: &str) {
         let scale = self
             .space
             .outputs()
@@ -185,7 +194,7 @@ impl SpaceState {
             self.backend.is_nested(),
             self.config.general.building,
         );
-        self.help = render_help(&left, &right, scale);
+        self.help = render_help(title, &left, &right, scale);
         if self.help.is_some() {
             tracing::info!("key help shown");
             // Walking stops while reading.
@@ -204,11 +213,11 @@ impl SpaceState {
     }
 }
 
-fn render_help(left: &[Line], right: &[Line], scale: i32) -> Option<Image> {
+fn render_help(title: &str, left: &[Line], right: &[Line], scale: i32) -> Option<Image> {
     let s = scale;
     let style = Style { size: SIZE, fg: TEXT, bg: [0.0; 4], padding: 0, max_width: 4000 };
     let title = text::render_lines(
-        &[Line { text: "spacewm keys".into(), fg: Some(TITLE), bg: None }],
+        &[Line { text: title.into(), fg: Some(TITLE), bg: None }],
         Style { size: 19.0, ..style },
         s,
         0,
@@ -287,7 +296,7 @@ mod tests {
     #[test]
     fn renders() {
         let (l, r) = help_columns(&KeybindsConfig::default(), "Alt", true, true);
-        let (_, size) = render_help(&l, &r, 1).expect("font");
+        let (_, size) = render_help("spacewm keys", &l, &r, 1).expect("font");
         assert!(size.0 > 600 && size.1 > 300 && size.1 < 700, "{size:?}");
     }
 }

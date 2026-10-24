@@ -19,6 +19,9 @@ pub struct Bar {
     drawn: Option<Content>,
     /// Workspace buttons: (workspace, x from, x to) in logical px.
     buttons: Vec<(u8, i32, i32)>,
+    /// The volume item's x range (click: mute; the wheel anywhere on the bar: louder /
+    /// quieter).
+    volume_at: Option<(i32, i32)>,
 }
 
 /// Everything the bar shows; a change means a redraw.
@@ -82,7 +85,10 @@ fn speaker_icon(c: &mut Canvas, x: i32, y: i32, s: i32, muted: bool) {
     }
 }
 
-fn draw(content: &Content) -> (Option<Image>, Vec<(u8, i32, i32)>) {
+/// The image, the workspace buttons and the volume item's x range.
+type Drawn = (Option<Image>, Vec<(u8, i32, i32)>, Option<(i32, i32)>);
+
+fn draw(content: &Content) -> Drawn {
     let s = content.scale;
     let w = content.width;
     let mut c = Canvas::new(w * s, HEIGHT * s);
@@ -130,13 +136,16 @@ fn draw(content: &Content) -> (Option<Image>, Vec<(u8, i32, i32)>) {
         wifi_icon(&mut c, rx, 8 * s, s, level);
         rx -= 16 * s;
     }
+    let mut volume_at = None;
     if let Some((vol, muted)) = content.volume {
         let label = if muted { "mute".to_string() } else { format!("{vol}%") };
         let tw = Canvas::text_width(&label, 14.0, s);
+        let end = rx;
         rx -= tw;
         c.text(&label, 14.0, if muted { DIM } else { FG }, rx, text_y, s);
         rx -= 16 * s;
         speaker_icon(&mut c, rx, 8 * s, s, muted);
+        volume_at = Some((rx / s - 4, end / s + 4));
         rx -= 16 * s;
     }
     if let Some(tag) = &content.layout {
@@ -152,7 +161,7 @@ fn draw(content: &Content) -> (Option<Image>, Vec<(u8, i32, i32)>) {
         smithay::utils::Transform::Normal,
         None,
     );
-    (Some((buffer, (w, HEIGHT))), buttons)
+    (Some((buffer, (w, HEIGHT))), buttons, volume_at)
 }
 
 impl SpaceState {
@@ -198,10 +207,11 @@ impl SpaceState {
         if !self.desktop2d.bar.dirty && self.desktop2d.bar.drawn.as_ref() == Some(&content) {
             return;
         }
-        let (image, buttons) = draw(&content);
+        let (image, buttons, volume_at) = draw(&content);
         let bar = &mut self.desktop2d.bar;
         bar.image = image;
         bar.buttons = buttons;
+        bar.volume_at = volume_at;
         bar.drawn = Some(content);
         bar.dirty = false;
     }
@@ -217,6 +227,17 @@ impl SpaceState {
             .map(|(ws, _, _)| *ws);
         if let Some(ws) = hit {
             self.switch_workspace(ws);
+        } else if self.desktop2d.bar.volume_at.is_some_and(|(a, b)| x >= a as f64 && x < b as f64) {
+            self.hardware_key(crate::desktop::Hw::VolumeMute);
+        }
+    }
+
+    /// The wheel on the bar: volume up (wheel up) / down.
+    pub fn bar_scroll(&mut self, notches: f64) {
+        if notches < 0.0 {
+            self.hardware_key(crate::desktop::Hw::VolumeUp);
+        } else if notches > 0.0 {
+            self.hardware_key(crate::desktop::Hw::VolumeDown);
         }
     }
 }
@@ -238,8 +259,10 @@ mod tests {
             wifi: Some(80),
             battery: Some(crate::desktop::status::Battery { percent: 87, charging: false }),
         };
-        let (image, buttons) = draw(&content);
+        let (image, buttons, volume_at) = draw(&content);
         let (_, size) = image.expect("drawn");
+        let (a, b) = volume_at.expect("volume shown");
+        assert!(a > 900 && b > a && b < 1280, "{a}..{b}");
         assert_eq!(size, (1280, HEIGHT));
         assert_eq!(buttons.iter().map(|b| b.0).collect::<Vec<_>>(), vec![1, 2, 5]);
         assert!(buttons.windows(2).all(|p| p[0].2 <= p[1].1), "buttons don't overlap");

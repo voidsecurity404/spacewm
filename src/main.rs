@@ -222,6 +222,16 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         }
     }
 
+    // A real (not test) start for the first time: show the keys as a welcome.
+    if !state.cli.allow_input_injection && state.cli.backend != cli::BackendKind::Headless {
+        if let Ok(dir) = logging::state_dir() {
+            let marker = dir.join("welcomed");
+            if !marker.exists() {
+                state.show_welcome();
+                let _ = std::fs::write(&marker, "");
+            }
+        }
+    }
     state.queue_redraw();
     while state.running {
         event_loop.dispatch(None, &mut state).context("event loop dispatch failed")?;

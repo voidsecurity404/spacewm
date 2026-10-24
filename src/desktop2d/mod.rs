@@ -289,6 +289,16 @@ impl SpaceState {
         }
     }
 
+    /// Put a window on workspace `n` quietly (restoring a saved session).
+    pub fn ws_assign(&mut self, panel: PanelId, n: u8) {
+        for list in self.desktop2d.order.values_mut() {
+            list.retain(|p| *p != panel);
+        }
+        self.desktop2d.order.entry(n).or_default().push(panel);
+        self.desktop2d.bar.dirty = true;
+        self.apply_layout();
+    }
+
     /// Mod+Shift+1..9: the focused window (3D: the one looked at) to workspace `n`.
     pub fn move_to_workspace(&mut self, n: u8) {
         let n = n.clamp(1, WORKSPACES);
