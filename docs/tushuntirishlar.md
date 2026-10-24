@@ -474,3 +474,46 @@ Barcha buyruqlar `[desktop]` bo'limida, masalan wpctl o'rniga pactl qo'yish mumk
 Buyruqlar alohida thread'da, 4 soniyalik timeout bilan bajariladi: osilib qolgan
 vosita desktop'ni qotira olmaydi. Testlar (`stage9_desktop.sh`) soxta skriptlardan
 foydalanadi va haqiqiy ovoz yoki yorug'likni o'zgartirmaydi.
+
+## Qulaylik paketi
+
+Maqsad: spacewm'ni tugma yodlamasdan, sichqoncha bilan va adashmasdan ishlatish.
+
+- **"Starting Firefox …"**: siz ochgan dastur (launcher, terminal tugmasi, dock, o'z
+  tugmalaringiz) oynasi chiqquncha tepada ko'k qatorda yoziladi. Qator 0.4 soniyadan
+  keyin chiqadi, shuning uchun foot kabi tez dasturlarda miltillamaydi. Dastur xato kodi
+  bilan yopilsa ("could not start (exit code 3)") yoki umuman topilmasa, qizil xabar
+  chiqadi. Yolg'on ogohlantirish bo'lmaydi: oynasiz normal yopilgan dastur jimgina
+  ro'yxatdan chiqadi.
+- **Kirganda avtomatik tiniqlik**: uzoqdagi oynaga kirsangiz, kamera 0.35 soniyada uning
+  ro'parasiga silliq keladi. Masofa matn piksel-aniq ko'rinadigan qilib tanlanadi.
+  Chiqqanda kamera aynan siz turgan joyga qaytadi. O'yinchining o'zi joyidan
+  qimirlamaydi. Agar siz oynaga o'zingiz yaqin kelgan bo'lsangiz, kamera sizni orqaga
+  tortmaydi. Sozlama: `panels.focus_zoom`.
+- **Oyna menyusi**: oynaga qarab o'ng klik qilsangiz menyu chiqadi (oyna ichida:
+  Alt+o'ng klik). Undagi bandlar: ishlatish, fullscreen, ko'chirish, kattaroq/kichikroq
+  ko'rsatish, qator ko'proq/kamroq, burish, "menga qara", yashirish, yopish. Har bandning
+  yonida tugmasi yozilgan, shunda tugmalar o'z-o'zidan o'rganiladi.
+- **Sichqoncha bilan surish va cho'zish**: oynaning tepa chetini ushlab torting, oyna
+  ko'chadi. Devorga qaratsangiz, devorga yopishadi. Pastki o'ng burchakni tortsangiz,
+  oyna o'lchami o'zgaradi. Shu joylarni shunchaki bossangiz, avvalgidek oynaga kirasiz.
+  Kursor shu joyga kelganda crosshair ostida "drag: move" yoki "drag: resize" chiqadi.
+- **Dock**: pastda sevimli dasturlar (`[dock] apps`) va hozir ochiq dasturlar turadi,
+  ochiqlari ostida nuqta bo'ladi. Ikonkalar tizim ikonka mavzusidan olinadi. Alt'ni
+  bosib turing, oddiy kursor chiqadi (o'yinlardagidek). Chap klik: ochiq dasturning oynasi
+  oldingizga keladi (takror bossangiz keyingi oynasi), yopiq bo'lsa ishga tushadi.
+  O'ng klik har doim yangi nusxa ochadi. Blok bilan ishlaganda pastda 4 soniya
+  hotbar chiqadi, keyin yana dock qaytadi.
+- **O'tirgan rejim (Alt+S)**: barcha oynalar atrofingizga yoy shaklida, o'qish
+  masofasida, sizga qaragan holda silliq teriladi. Chap-o'ng tartibi saqlanadi.
+  Yurish o'chadi, faqat boshingizni burasiz. Yangi oyna yoyga qo'shiladi, yopilgan oyna
+  o'rnida bo'sh joy qolmaydi. Alt+S yana bosilsa, oynalar eski joylariga qaytadi.
+- **2D/3D (Alt+D)**: ish paytida oddiy 2D desktop'ga o'tish va qaytish mumkin. Har bir
+  oyna doim 2D joyiga ham ega, shuning uchun hech narsa yopilmaydi va siljimaydi. 2D'da
+  oynalarning sarlavha qatori yo'q, shuning uchun Alt+tortish oynani suradi, Alt+o'ng
+  tugma bilan tortish esa o'lchamini o'zgartiradi.
+- **Sozlamalar (Alt+,)**: eng ko'p o'zgartiriladigan 14 ta sozlama. Bosish (o'ng tugma:
+  orqaga) yoki strelkalar bilan o'zgartiriladi. Qiymat config fayliga `toml_edit` orqali
+  yoziladi: faqat o'sha qator o'zgaradi, izohlar va tartib saqlanadi. Yozishdan oldin
+  tekshiriladi, atomar yoziladi va darhol qo'llanadi.
+- `spacectl camera`: kamera qayerda turgani va qayerga qarayotgani.

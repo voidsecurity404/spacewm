@@ -48,6 +48,12 @@ Mod is Super on a real session and Alt when nested (`general.mod_key`).
 | Mod+Return, Mod+Space | terminal, launcher |
 | Mod+Shift+Q, Mod+Shift+E | close window, quit |
 | Mod+K | every key on screen (Escape closes) |
+| right click on a window | window menu (each entry shows its key) |
+| drag a window's top edge / corner | move it / resize it |
+| hold Mod | a cursor for the dock (open apps, favorites) |
+| Mod+S | seated: all windows on an arc around you, no walking |
+| Mod+D | the 3D world or a plain 2D desktop (there: Mod+drag moves, Mod+right-drag resizes) |
+| Mod+, | settings (saved to the config file, comments kept) |
 | Mod+L | lock the screen (also after 10 min idle on a real session) |
 | Print / Shift+Print | screenshot of the screen / a region, saved and copied |
 | media keys | volume, mic, brightness, play/pause, with an on-screen level |
