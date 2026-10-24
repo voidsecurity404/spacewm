@@ -72,6 +72,9 @@ pub enum Action {
     WalkMode,
     /// Run `[[keybinds.spawn]]` entry n.
     Spawn(usize),
+    /// Open/close the built-in launcher.
+    Launcher,
+    ToggleHud,
 }
 
 /// The nested-only escape hatch: Ctrl+Alt+G gives the mouse back to the host desktop
@@ -180,6 +183,10 @@ enum KeyOutcome {
     Action(Action),
     Emergency,
     SwitchVt(i32),
+    /// A key for the open launcher: its symbol with modifiers applied, and Ctrl.
+    Launcher(Keysym, bool),
+    /// Mod+Escape while a layer surface holds the keyboard.
+    DismissLayer,
 }
 
 pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState, time: InputTime) {
@@ -217,6 +224,29 @@ pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState,
             return FilterResult::Intercept(Some(KeyOutcome::Action(Action::ReleasePointer)));
         }
         let combo_mods = Mods::from_state(mods, state.config.general.mod_key, nested);
+        let mod_escape = combo_mods.mod_ && sym == Some(Keysym::Escape);
+        // The launcher takes every key while it is open.
+        if state.launcher.is_some() {
+            state.input.suppressed_keys.insert(keycode);
+            let bound = sym.and_then(|s| state.keybinds.get(combo_mods, s));
+            if mod_escape || bound == Some(Action::Launcher) {
+                return FilterResult::Intercept(Some(KeyOutcome::Action(Action::Launcher)));
+            }
+            return FilterResult::Intercept(Some(KeyOutcome::Launcher(
+                handle.modified_sym(),
+                mods.ctrl,
+            )));
+        }
+        // An exclusive layer surface (fuzzel...) has the keyboard: everything goes to it,
+        // except Mod+Escape, which takes the keyboard back — a stuck overlay must never
+        // trap you.
+        if matches!(state.overlay, crate::state::Overlay::Layer(_)) {
+            if mod_escape {
+                state.input.suppressed_keys.insert(keycode);
+                return FilterResult::Intercept(Some(KeyOutcome::DismissLayer));
+            }
+            return FilterResult::Forward;
+        }
         let route = route_key(state.render_mode, state.mode, &state.keybinds, combo_mods, sym);
         if route != KeyRoute::Forward {
             state.input.suppressed_keys.insert(keycode);
@@ -245,6 +275,8 @@ pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState,
             state.quit();
         }
         Some(Some(KeyOutcome::SwitchVt(vt))) => state.backend.change_vt(vt),
+        Some(Some(KeyOutcome::Launcher(sym, ctrl))) => state.launcher_key(sym, ctrl),
+        Some(Some(KeyOutcome::DismissLayer)) => state.dismiss_layer(),
         _ => {}
     }
 }
@@ -283,6 +315,11 @@ pub fn run_action(state: &mut SpaceState, action: Action) {
         Action::TogglePanelHidden => world_ops::toggle_hidden(state),
         Action::SelectBlock(i) => world_ops::select_block(state, i as usize),
         Action::WalkMode => mode::set_mode(state, InputMode::Walk, None),
+        Action::Launcher => state.toggle_launcher(),
+        Action::ToggleHud => {
+            let visible = !state.hud.visible;
+            state.set_hud_visible(visible);
+        }
         Action::Spawn(i) => {
             if let Some(bind) = state.config.keybinds.spawn.get(i) {
                 let command = bind.command.clone();
@@ -336,6 +373,7 @@ pub fn release_all_keys(state: &mut SpaceState) {
 
 /// Per-frame input work in 3D: walking (held keys) and the hover highlight.
 pub fn before_frame(state: &mut SpaceState) {
+    state.refresh_hud();
     if state.render_mode != RenderMode::Scene3D {
         return;
     }
@@ -407,7 +445,7 @@ pub fn handle_pointer_motion_absolute(
     pos: Point<f64, Logical>,
     time: InputTime,
 ) {
-    if state.render_mode == RenderMode::Scene3D {
+    if pointer_is_3d(state) {
         match state.mode {
             InputMode::Walk => {
                 // An absolute device can only turn by how far it moved since last time.
@@ -440,7 +478,7 @@ pub fn handle_pointer_motion(
     delta_unaccel: Point<f64, Logical>,
     time: InputTime,
 ) {
-    if state.render_mode == RenderMode::Scene3D {
+    if pointer_is_3d(state) {
         match state.mode {
             InputMode::Walk => look(state, delta),
             InputMode::Window { .. } => {
@@ -470,6 +508,13 @@ pub fn handle_pointer_motion(
     pointer.relative_motion(state, under, &RelativeMotionEvent { delta, delta_unaccel, time });
     pointer.frame(state);
     state.queue_redraw();
+}
+
+/// The pointer works in 3D (camera, or the cursor on a panel) — unless a layer surface
+/// has the keyboard, in which case an ordinary 2D cursor clicks layer surfaces.
+fn pointer_is_3d(state: &SpaceState) -> bool {
+    state.render_mode == RenderMode::Scene3D
+        && !matches!(state.overlay, crate::state::Overlay::Layer(_))
 }
 
 /// Linux evdev codes of the mouse buttons.
@@ -511,7 +556,7 @@ pub fn handle_pointer_button(
         return;
     };
     let serial = SERIAL_COUNTER.next_serial();
-    if state.render_mode == RenderMode::Scene3D {
+    if pointer_is_3d(state) {
         if state.mode == InputMode::Walk {
             // In Walk mode buttons never reach clients (press AND release are ours).
             if button_state == ButtonState::Pressed {
@@ -520,7 +565,10 @@ pub fn handle_pointer_button(
             }
             return;
         }
-    } else if button_state == ButtonState::Pressed && !pointer.is_grabbed() {
+    } else if button_state == ButtonState::Pressed
+        && !pointer.is_grabbed()
+        && state.render_mode == RenderMode::Flat2D
+    {
         // 2D click-to-focus. Not while a grab (popup menu, drag) is active: the grab decides.
         let window = state.space.element_under(pointer.current_location()).map(|(w, _)| w.clone());
         state.focus_window(window.as_ref(), serial);
@@ -531,7 +579,7 @@ pub fn handle_pointer_button(
 }
 
 pub fn handle_pointer_axis(state: &mut SpaceState, frame: AxisFrame) {
-    if state.render_mode == RenderMode::Scene3D && state.mode == InputMode::Walk {
+    if pointer_is_3d(state) && state.mode == InputMode::Walk {
         // Scrolling while carrying a panel moves it nearer/farther.
         let notches = frame.v120.map(|(_, v)| v as f64 / 120.0).unwrap_or(frame.axis.1 / 15.0);
         if notches != 0.0 {

@@ -64,6 +64,7 @@ impl CompositorHandler for SpaceState {
         }
 
         crate::wayland::xdg_shell::handle_commit(self, surface);
+        self.layer_commit(surface);
         self.mark_surface_dirty(surface);
         // First content from a window whose app we never learned: keep the default spot.
         if let Some(window) = self.window_for_surface(surface) {

@@ -236,3 +236,17 @@ bo'lsa. Screenshot faqat `$HOME` ichiga, symlink orqali emas (O_NOFOLLOW), mavju
 faqat `force` bilan. Topilgan xato: spacewm o'z muhitini (`setenv`) Mesa thread'lari ishlab
 turganda o'zgartirar edi — bu data race; endi o'zgaruvchilar bolalarga aniq beriladi.
 Protokol: docs/ipc.md.
+
+## 7.4-bosqich: layer-shell, HUD, launcher
+
+Layer surface — oyna emas: mijoz monitorning chetiga yopishishni so'raydi (waybar: tepada,
+to'liq kenglikda, 30 px) va to'rt qatlamdan biriga tushadi. 3D'da ular sahna ustidan tekis
+2D qatlam bo'lib chiziladi (overlay > top > HUD > bottom); background chizilmaydi — fonimiz
+olamning o'zi. Exclusive zone ekranda joy band qiladi: HUD va 2D'da kattalashtirilgan
+oynalar bar ostidan boshlanadi. Klaviaturani "exclusive" so'ragan qatlam (fuzzel) uni
+oladi, yurish to'xtaydi va oddiy 2D kursor paydo bo'ladi; Mod+Escape klaviaturani har doim
+qaytarib oladi. Frame callback'lar qatlamlarga ham yuboriladi — aks holda waybar bir marta
+chizib qotib qolardi. O'rnatilgan launcher .desktop fayllarni har ochilganda qayta o'qiydi
+(field code'lar olib tashlanadi, NoDisplay/Hidden/TryExec hisobga olinadi) va fuzzy
+qidiradi: harflar tartib bilan kelishi kerak, so'z boshi va ketma-ket harflar ko'proq ball
+oladi ("ffx" → Firefox, "gc" → GNOME Calculator).

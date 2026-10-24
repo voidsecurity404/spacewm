@@ -40,6 +40,9 @@ impl SeatHandler for SpaceState {
             _ => None,
         };
         crate::ipc::broadcast(self, crate::ipc::proto::Event::FocusChanged { id });
+        if self.hud.visible {
+            self.queue_redraw(); // the HUD shows the focused title
+        }
     }
 
     /// A client asked for a cursor image: hidden, a named shape, or its own surface.

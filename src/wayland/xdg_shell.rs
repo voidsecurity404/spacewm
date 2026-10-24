@@ -161,9 +161,15 @@ impl XdgShellHandler for SpaceState {
     }
 
     fn maximize_request(&mut self, surface: ToplevelSurface) {
-        let Some(output_geo) = self.primary_output_geometry() else {
+        // Maximized windows leave the strips that bars reserved (exclusive zones) free.
+        let Some(output) = self.space.outputs().next().cloned() else {
             return;
         };
+        let Some(full) = self.space.output_geometry(&output) else {
+            return;
+        };
+        let zone = smithay::desktop::layer_map_for_output(&output).non_exclusive_zone();
+        let output_geo = smithay::utils::Rectangle::new(full.loc + zone.loc, zone.size);
         if let Some(window) = self.window_for_surface(surface.wl_surface()) {
             surface.with_pending_state(|state| {
                 state.states.set(xdg_toplevel::State::Maximized);

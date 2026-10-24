@@ -92,6 +92,9 @@ impl SpaceState {
         if !new.render.vsync && (initial || old.render.vsync) {
             tracing::warn!("render.vsync = false is not supported yet; frames stay in sync");
         }
+        if initial || old.render.hud != new.render.hud {
+            self.set_hud_visible(new.render.hud);
+        }
         let r = &self.config.render;
         self.view.camera.fov_y_deg = r.fov;
         self.view.settings = crate::render::view::RenderSettings::from_config(&self.config);

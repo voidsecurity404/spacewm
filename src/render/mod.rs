@@ -9,6 +9,7 @@ pub mod crosshair;
 pub mod cursor;
 pub mod frustum;
 pub mod gl;
+pub mod hud;
 pub mod notice;
 pub mod panel_texture;
 pub mod scene;
@@ -23,7 +24,7 @@ use smithay::{
     backend::renderer::{
         damage::{Error as DamageError, OutputDamageTracker, RenderOutputResult},
         element::{
-            memory::MemoryRenderBufferRenderElement,
+            memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
             surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
             texture::TextureRenderElement,
             Kind,
@@ -35,6 +36,8 @@ use smithay::{
     output::Output,
     utils::{Logical, Point, Scale},
 };
+
+use smithay::{backend::renderer::element::AsRenderElements, wayland::shell::wlr_layer::Layer};
 
 use crate::{cli::RenderMode, input::mode::InputMode, state::DndIcon};
 
@@ -100,6 +103,11 @@ pub struct OverlayInputs<'a> {
     pub time: Duration,
     /// Message box on top of everything (config errors).
     pub notice: Option<&'a notice::Notice>,
+    /// The launcher box and the HUD line, with their size in logical px.
+    pub launcher: Option<&'a (MemoryRenderBuffer, (i32, i32))>,
+    pub hud: Option<&'a (MemoryRenderBuffer, (i32, i32))>,
+    /// A layer surface has the keyboard: show a 2D cursor instead of the 3D one.
+    pub layer_focus: bool,
 }
 
 /// 2D things drawn on top of the output, front-most first:
@@ -112,26 +120,85 @@ where
     R: Renderer + ImportAll + ImportMem,
     R::TextureId: Texture + Clone + Send + 'static,
 {
-    let geo = inputs.space.output_geometry(inputs.output);
+    let Some(geo) = inputs.space.output_geometry(inputs.output) else {
+        return Vec::new();
+    };
+    let scale = inputs.scale;
+    let three_d = inputs.render_mode == RenderMode::Scene3D;
     let mut elements = Vec::new();
-    if let (Some(notice), Some(geo)) = (inputs.notice, geo) {
-        // Centered, a bit above the middle (below the crosshair would look odd).
-        let x = (geo.size.w - notice.size.0) / 2;
-        let y = ((geo.size.h - notice.size.1) / 2 - geo.size.h / 8).max(0);
-        let pos = Point::<f64, Logical>::from((x as f64, y as f64)).to_physical(inputs.scale);
-        if let Ok(e) = MemoryRenderBufferRenderElement::from_buffer(
+    let boxed = |renderer: &mut R, buffer: &MemoryRenderBuffer, at: (i32, i32)| {
+        let pos = Point::<f64, Logical>::from((at.0 as f64, at.1 as f64)).to_physical(scale);
+        MemoryRenderBufferRenderElement::from_buffer(
             renderer,
             pos,
-            &notice.buffer,
+            buffer,
             None,
             None,
             None,
             Kind::Unspecified,
-        ) {
-            elements.push(SpaceRenderElement::Memory(e));
-        }
+        )
+        .ok()
+        .map(SpaceRenderElement::Memory)
+    };
+    if let Some(notice) = inputs.notice {
+        // Centered, a bit above the middle (below the crosshair would look odd).
+        let x = (geo.size.w - notice.size.0) / 2;
+        let y = ((geo.size.h - notice.size.1) / 2 - geo.size.h / 8).max(0);
+        elements.extend(boxed(renderer, &notice.buffer, (x, y)));
     }
-    elements.extend(mode_overlay(renderer, inputs, geo));
+    if let Some((buffer, size)) = inputs.launcher {
+        let x = (geo.size.w - size.0) / 2;
+        let y = (geo.size.h / 5).min((geo.size.h - size.1).max(0));
+        elements.extend(boxed(renderer, buffer, (x, y)));
+    }
+
+    // Layer surfaces, front to back. In 2D the space renderer draws them itself.
+    let map = smithay::desktop::layer_map_for_output(inputs.output);
+    let zone = map.non_exclusive_zone();
+    let layer_elements = |renderer: &mut R, layer: Layer| -> Vec<SpaceRenderElement<R>> {
+        map.layers_on(layer)
+            .rev()
+            .filter_map(|l| Some((l, map.layer_geometry(l)?)))
+            .flat_map(|(l, g)| {
+                AsRenderElements::<R>::render_elements::<WaylandSurfaceRenderElement<R>>(
+                    l,
+                    renderer,
+                    g.loc.to_physical_precise_round(scale),
+                    scale,
+                    1.0,
+                )
+            })
+            .map(SpaceRenderElement::Surface)
+            .collect()
+    };
+    if three_d {
+        if inputs.layer_focus {
+            // A launcher-like layer is open: an ordinary 2D cursor clicks it.
+            elements.extend(pointer_elements(
+                renderer,
+                inputs.cursor_status,
+                inputs.cursor_theme,
+                None,
+                inputs.pointer - geo.loc.to_f64(),
+                scale,
+                inputs.time,
+            ));
+        }
+        elements.extend(layer_elements(renderer, Layer::Overlay));
+        elements.extend(layer_elements(renderer, Layer::Top));
+    }
+    if let Some((buffer, _)) = inputs.hud {
+        // Inside the area bars leave free, so it never hides under waybar.
+        elements.extend(boxed(renderer, buffer, (zone.loc.x + 12, zone.loc.y + 10)));
+    }
+    if three_d {
+        elements.extend(layer_elements(renderer, Layer::Bottom));
+    }
+    drop(map);
+    // The crosshair only while actually walking.
+    if !(inputs.layer_focus || inputs.launcher.is_some()) || !three_d {
+        elements.extend(mode_overlay(renderer, inputs, Some(geo)));
+    }
     elements
 }
 
@@ -198,6 +265,9 @@ macro_rules! overlay_inputs {
             scale: $scale,
             time: $time,
             notice: $state.notice.as_ref(),
+            launcher: $state.launcher.as_ref().and_then(|l| l.image.as_ref()),
+            hud: $state.hud.image.as_ref(),
+            layer_focus: matches!($state.overlay, $crate::state::Overlay::Layer(_)),
         }
     };
 }
@@ -286,6 +356,10 @@ pub fn send_frame_callbacks(
     for window in space.elements() {
         window.send_frame(output, time, throttle, |_, _| Some(output.clone()));
     }
+    // Bars and launchers too, or they would draw one frame and freeze.
+    for layer in smithay::desktop::layer_map_for_output(output).layers() {
+        layer.send_frame(output, time, throttle, |_, _| Some(output.clone()));
+    }
     if let CursorImageStatus::Surface(surface) = cursor_status {
         send_frames_surface_tree(surface, output, time, throttle, |_, _| Some(output.clone()));
     }
@@ -308,7 +382,6 @@ where
     R: Renderer + ImportAll + ImportMem,
     R::TextureId: Texture + Clone + Send + 'static,
 {
-    use smithay::backend::renderer::element::AsRenderElements;
     let origin = space.output_geometry(output).map(|g| g.loc).unwrap_or_default();
     let windows: Vec<Window> = space.elements().rev().cloned().collect();
     windows

@@ -82,9 +82,36 @@ pub fn wrap(lines: &[String], max_chars: usize) -> Vec<String> {
     out
 }
 
+/// One line of text with optional colors of its own (straight RGBA).
+#[derive(Debug, Clone, Default)]
+pub struct Line {
+    pub text: String,
+    pub fg: Option<[f32; 4]>,
+    /// Background of the whole row (a highlighted list entry).
+    pub bg: Option<[f32; 4]>,
+}
+
+impl Line {
+    pub fn plain(text: impl Into<String>) -> Self {
+        Self { text: text.into(), ..Self::default() }
+    }
+}
+
 /// Render text lines into a box. `scale` is the output's integer scale, so text is sharp
 /// on HiDPI screens.
 pub fn render(lines: &[String], style: Style, scale: i32) -> Option<TextImage> {
+    let lines: Vec<Line> = lines.iter().map(|l| Line::plain(l.clone())).collect();
+    render_lines(&lines, style, scale, 0)
+}
+
+/// Like `render`, with per-line colors and at least `min_cols` characters wide (so a box
+/// whose text changes as you type keeps its size).
+pub fn render_lines(
+    lines: &[Line],
+    style: Style,
+    scale: i32,
+    min_cols: usize,
+) -> Option<TextImage> {
     let font = font()?;
     let scale = scale.max(1);
     let px = style.size * scale as f32;
@@ -95,18 +122,38 @@ pub fn render(lines: &[String], style: Style, scale: i32) -> Option<TextImage> {
     let line_height = line_metrics.new_line_size.ceil() as i32;
 
     let max_chars = ((style.max_width * scale - 2 * pad) / advance).max(8) as usize;
-    let lines = wrap(lines, max_chars);
-    let cols = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0) as i32;
-    let width = (cols * advance + 2 * pad).max(1);
-    let height = (lines.len() as i32 * line_height + 2 * pad).max(1);
+    // Wrap each line on its own, keeping its colors on every piece.
+    let rows: Vec<(String, &Line)> = lines
+        .iter()
+        .flat_map(|l| {
+            wrap(std::slice::from_ref(&l.text), max_chars).into_iter().map(move |t| (t, l))
+        })
+        .collect();
+    let cols =
+        rows.iter().map(|(t, _)| t.chars().count()).max().unwrap_or(0).max(min_cols.min(max_chars));
+    let width = (cols as i32 * advance + 2 * pad).max(1);
+    let height = (rows.len() as i32 * line_height + 2 * pad).max(1);
 
     let premul = |c: [f32; 4]| [c[0] * c[3], c[1] * c[3], c[2] * c[3], c[3]];
-    let (fg, bg) = (premul(style.fg), premul(style.bg));
-    let mut coverage = vec![0u8; (width * height) as usize];
+    let mut rgba = vec![0u8; (width * height * 4) as usize];
     let mut cache: HashMap<char, (fontdue::Metrics, Vec<u8>)> = HashMap::new();
-    for (row, line) in lines.iter().enumerate() {
+    let row_of =
+        |y: i32| ((y - pad).max(0) / line_height).min(rows.len().max(1) as i32 - 1) as usize;
+    // Background first: the box color, or a row's own color across the full width.
+    for y in 0..height {
+        let row_bg =
+            rows.get(row_of(y)).and_then(|(_, l)| l.bg).filter(|_| y >= pad && y < height - pad);
+        let bg = premul(row_bg.unwrap_or(style.bg));
+        let px_bg: [u8; 4] = std::array::from_fn(|i| (bg[i] * 255.0).round() as u8);
+        for x in 0..width {
+            let i = ((y * width + x) * 4) as usize;
+            rgba[i..i + 4].copy_from_slice(&px_bg);
+        }
+    }
+    for (row, (text, line)) in rows.iter().enumerate() {
+        let fg = premul(line.fg.unwrap_or(style.fg));
         let baseline = pad + row as i32 * line_height + ascent;
-        for (col, ch) in line.chars().enumerate() {
+        for (col, ch) in text.chars().enumerate() {
             if ch == ' ' {
                 continue;
             }
@@ -120,23 +167,17 @@ pub fn render(lines: &[String], style: Style, scale: i32) -> Option<TextImage> {
                     if x < 0 || y < 0 || x >= width || y >= height {
                         continue;
                     }
-                    let c = mask[(gy * m.width as i32 + gx) as usize];
-                    let dst = &mut coverage[(y * width + x) as usize];
-                    *dst = (*dst).max(c);
+                    let a = mask[(gy * m.width as i32 + gx) as usize] as f32 / 255.0;
+                    let i = ((y * width + x) * 4) as usize;
+                    // "Over": text on top of whatever background is there (premultiplied).
+                    for c in 0..4 {
+                        let dst = rgba[i + c] as f32 / 255.0;
+                        rgba[i + c] = ((fg[c] * a + dst * (1.0 - a)) * 255.0).round() as u8;
+                    }
                 }
             }
         }
     }
-    let rgba = coverage
-        .iter()
-        .flat_map(|&c| {
-            let a = c as f32 / 255.0;
-            // "Over": text on top of the background, both premultiplied.
-            std::array::from_fn::<u8, 4, _>(|i| {
-                ((fg[i] * a + bg[i] * (1.0 - a)) * 255.0).round() as u8
-            })
-        })
-        .collect();
     Some(TextImage { rgba, width, height, scale })
 }
 
