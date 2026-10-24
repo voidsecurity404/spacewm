@@ -208,6 +208,12 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         state.restore_apps();
     }
     let autostart = state.config.general.autostart.clone();
+    // `--spawn` names what to open now, like a key press would: it opens in front of
+    // you and is ready to use (not at a spot saved for it).
+    if !state.cli.spawn.is_empty() {
+        state.expect_window_until =
+            Some(std::time::Instant::now() + input::mode::SPAWN_FOCUS_WINDOW);
+    }
     // Autostart is mostly daemons without windows: no "Starting ..." line for them.
     for command in state.cli.spawn.clone().into_iter().chain(autostart) {
         if let Err(err) = state.launch_untracked(&command) {
