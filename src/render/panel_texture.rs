@@ -38,8 +38,17 @@ use crate::world::{panel::PanelId, World};
 const TEXTURE_MAX_ANISOTROPY_EXT: u32 = 0x84FE;
 const MAX_TEXTURE_MAX_ANISOTROPY_EXT: u32 = 0x84FF;
 
+/// Panels farther than this get a half-resolution texture: at that distance a 1:1
+/// texture would be minified 4x anyway, and it costs a quarter of the GPU work and memory.
+const LOD_DISTANCE: f32 = 10.0;
+/// Panel textures re-rendered per frame at most; the rest wait for the next frames, so a
+/// burst (all terminals redrawing at once) can't cause one long frame.
+pub const UPDATES_PER_FRAME: usize = 8;
+
 pub struct PanelTarget {
     pub texture: GlesTexture,
+    /// Resolution factor this texture was rendered at (1 or 0.5, see LOD_DISTANCE).
+    lod: f64,
     /// Texture size in pixels (the window bbox, possibly scaled down to fit GPU limits).
     pub size: Size<i32, Physical>,
     damage_tracker: OutputDamageTracker,
@@ -95,18 +104,46 @@ impl PanelTextureCache {
         self.targets.clear();
     }
 
+    /// GPU memory of all panel textures (mip chains add about a third).
+    pub fn gpu_bytes(&self) -> usize {
+        let mip = if self.mipmaps { 4.0 / 3.0 } else { 1.0 };
+        self.targets.values().map(|t| ((t.size.w * t.size.h * 4) as f64 * mip) as usize).sum()
+    }
+
     pub fn get(&self, id: PanelId) -> Option<&PanelTarget> {
         self.targets.get(&id)
     }
 
-    /// Re-render the textures of panels whose client committed new content. Returns true
-    /// if any texture changed (the scene must then be redrawn).
-    pub fn update(&mut self, renderer: &mut GlowRenderer, world: &mut World) -> bool {
+    /// Re-render the textures of visible panels whose client committed new content (or
+    /// whose distance crossed the LOD threshold). Panels outside the view keep their
+    /// `content_dirty` and are updated once they come into view.
+    ///
+    /// Returns (a texture changed, so the scene must be redrawn; updates are still
+    /// waiting because of the per-frame budget).
+    pub fn update(
+        &mut self,
+        renderer: &mut GlowRenderer,
+        world: &mut World,
+        visible: &std::collections::HashSet<PanelId>,
+        camera_pos: glam::Vec3,
+    ) -> (bool, bool) {
         // Drop textures of panels that no longer exist.
         self.targets.retain(|id, _| world.panels().iter().any(|p| p.id == *id));
 
         let mut changed = false;
-        for panel in world.panels_mut().iter_mut().filter(|p| p.content_dirty) {
+        let mut budget = UPDATES_PER_FRAME;
+        let mut waiting = false;
+        for panel in world.panels_mut().iter_mut().filter(|p| visible.contains(&p.id)) {
+            let lod = if panel.position.distance(camera_pos) > LOD_DISTANCE { 0.5 } else { 1.0 };
+            let lod_changed = self.targets.get(&panel.id).is_some_and(|t| t.lod != lod);
+            if !(panel.content_dirty || lod_changed) {
+                continue;
+            }
+            if budget == 0 {
+                waiting = true;
+                continue;
+            }
+            budget -= 1;
             panel.content_dirty = false;
             let geo = panel.window.geometry();
             // X11 menus hang off the window like popups: the texture grows to hold them.
@@ -129,7 +166,14 @@ impl PanelTextureCache {
                 panel.bbox_px = bbox_rel;
                 changed = true;
             }
-            match self.render_panel(renderer, panel.id, &panel.window, &panel.x11_children, bbox) {
+            match self.render_panel(
+                renderer,
+                panel.id,
+                &panel.window,
+                &panel.x11_children,
+                bbox,
+                lod,
+            ) {
                 Ok(true) => {
                     self.updates += 1;
                     changed = true;
@@ -138,7 +182,7 @@ impl PanelTextureCache {
                 Err(err) => tracing::warn!(panel = panel.id, "panel texture update failed: {err}"),
             }
         }
-        changed
+        (changed, waiting)
     }
 
     /// Returns Ok(true) if the texture content changed.
@@ -149,14 +193,17 @@ impl PanelTextureCache {
         window: &Window,
         children: &[crate::xwayland::X11Child],
         bbox: Rectangle<i32, smithay::utils::Logical>,
+        lod: f64,
     ) -> Result<bool, String> {
-        // Very large windows are scaled down to the GPU's texture size limit.
-        let fit = (self.max_size as f64 / bbox.size.w.max(bbox.size.h) as f64).min(1.0);
+        // Very large windows are scaled down to the GPU's texture size limit; far panels
+        // to half resolution.
+        let fit = (self.max_size as f64 / bbox.size.w.max(bbox.size.h) as f64).min(1.0) * lod;
         let scale = Scale::from(fit);
         let size: Size<i32, Physical> = bbox.size.to_f64().to_physical(scale).to_i32_round();
 
         if self.targets.get(&id).is_none_or(|t| t.size != size) {
-            let target = self.create_target(renderer, size)?;
+            let mut target = self.create_target(renderer, size)?;
+            target.lod = lod;
             self.targets.insert(id, target);
         }
         let Some(target) = self.targets.get_mut(&id) else {
@@ -167,6 +214,7 @@ impl PanelTextureCache {
         let origin: Point<i32, smithay::utils::Logical> = Point::from((-bbox.loc.x, -bbox.loc.y));
         let location: Point<i32, Physical> = origin.to_f64().to_physical(scale).to_i32_round();
         // Front-most first: X11 menus (newest on top), then the window with its popups.
+        let elements_span = tracing::trace_span!("panel_elements").entered();
         let mut elements: Vec<WaylandSurfaceRenderElement<GlowRenderer>> = Vec::new();
         for child in children.iter().rev() {
             let at = (origin + child.offset).to_f64().to_physical(scale).to_i32_round();
@@ -177,8 +225,10 @@ impl PanelTextureCache {
         elements.extend(AsRenderElements::<GlowRenderer>::render_elements::<
             WaylandSurfaceRenderElement<GlowRenderer>,
         >(window, renderer, location, scale, 1.0));
+        drop(elements_span);
         // The texture keeps its previous contents, so after the first frame its "age" is 1.
         let age = if target.rendered_once { 1 } else { 0 };
+        let render_span = tracing::trace_span!("panel_render").entered();
         let damaged = {
             let mut fb = renderer.bind(&mut target.texture).map_err(|e| e.to_string())?;
             let result = target
@@ -188,7 +238,9 @@ impl PanelTextureCache {
             result.damage.is_some()
         };
         target.rendered_once = true;
+        drop(render_span);
 
+        let _mip_span = tracing::trace_span!("panel_mipmap").entered();
         if damaged && self.mipmaps {
             let tex = glow::NativeTexture(non_zero(target.texture.tex_id())?);
             renderer
@@ -249,6 +301,7 @@ impl PanelTextureCache {
         };
         Ok(PanelTarget {
             texture,
+            lod: 1.0,
             size,
             damage_tracker: OutputDamageTracker::new(size, 1.0, Transform::Normal),
             rendered_once: false,

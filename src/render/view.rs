@@ -78,6 +78,8 @@ pub struct View3D {
     pub scene: Option<SceneRenderer>,
     pub panel_textures: Option<PanelTextureCache>,
     pub settings: RenderSettings,
+    /// Panels inside the view frustum at the last scene render.
+    pub visible_panels: std::collections::HashSet<PanelId>,
     /// The cursor drawn on the focused panel in Window mode.
     cursor_target: Option<CursorTarget>,
     /// The scene must be re-rendered (camera moved, resized, shaders reloaded, ...).
@@ -96,6 +98,9 @@ pub struct Prepared {
     pub scene_rendered: bool,
     /// Something is animating (keys held): render again next frame.
     pub continuous: bool,
+    /// Work done this frame (spacectl stats).
+    pub panel_updates: u32,
+    pub chunk_uploads: u32,
 }
 
 /// The client's cursor, drawn on a panel (Window mode).
@@ -182,6 +187,7 @@ impl View3D {
             scene: None,
             panel_textures: None,
             settings: RenderSettings::default(),
+            visible_panels: Default::default(),
             cursor_target: None,
             dirty: true,
             shader_dir,
@@ -223,10 +229,37 @@ impl View3D {
         }
         let continuous = self.controls.is_moving();
         let Some(scene) = self.scene.as_mut() else {
-            return Prepared { element: None, scene_rendered: false, continuous };
+            return Prepared {
+                element: None,
+                scene_rendered: false,
+                continuous,
+                panel_updates: 0,
+                chunk_uploads: 0,
+            };
         };
         if std::mem::take(&mut self.pending_shader_reload) {
             scene.reload_shaders(renderer);
+        }
+
+        // Which panels the camera can see. Only those get their textures updated (the
+        // others catch up when they come into view) and full-rate frame callbacks.
+        let frustum = super::frustum::Frustum::from_matrix(
+            self.camera.projection_matrix() * self.camera.view_matrix(),
+        );
+        let visible: std::collections::HashSet<PanelId> = world
+            .panels()
+            .iter()
+            .filter(|p| {
+                // A sphere around the whole bbox (popups included): conservative.
+                let r =
+                    (p.bbox_px.size.w as f32).hypot(p.bbox_px.size.h as f32) / p.pixels_per_unit;
+                p.visible && frustum.sphere_visible(p.position, r.max(0.1))
+            })
+            .map(|p| p.id)
+            .collect();
+        if visible != self.visible_panels {
+            self.visible_panels = visible;
+            self.dirty = true;
         }
 
         // New window content → new panel textures → the scene must be redrawn.
@@ -237,9 +270,15 @@ impl View3D {
             cache
         });
         textures.updates = 0;
-        if textures.update(renderer, world) {
+        let span = tracing::trace_span!("panel_textures").entered();
+        let (changed, waiting) =
+            textures.update(renderer, world, &self.visible_panels, self.camera.position);
+        drop(span);
+        if changed {
             self.dirty = true;
         }
+        // Over the per-frame budget: the rest are drawn in the next frames.
+        let continuous = continuous || waiting;
         self.stats.panel_updates += textures.updates;
 
         // The cursor on the focused panel: re-render its image if it changed.
@@ -268,7 +307,11 @@ impl View3D {
         };
 
         // Newly meshed chunks (a few per frame).
-        if scene.upload_chunks(renderer, chunk_meshes) > 0 {
+        let chunk_uploads = {
+            let _span = tracing::trace_span!("chunk_upload").entered();
+            scene.upload_chunks(renderer, chunk_meshes) as u32
+        };
+        if chunk_uploads > 0 {
             self.dirty = true;
         }
 
@@ -279,6 +322,7 @@ impl View3D {
             draws.extend(cursor_draw);
             let settings = self.settings;
             let voxel_frame = scene.voxels.visible(&self.camera, settings.render_distance, outline);
+            let _span = tracing::trace_span!("scene_render").entered();
             match scene.render(renderer, &self.camera, size, &draws, &voxel_frame, settings.fog) {
                 Ok(()) => scene_rendered = true,
                 Err(err) => tracing::error!("scene render failed: {err}"),
@@ -287,7 +331,14 @@ impl View3D {
         }
         // More meshes waiting: come back next frame.
         let continuous = continuous || !chunk_meshes.is_empty();
-        Prepared { element: scene.element(), scene_rendered, continuous }
+        let panel_updates = self.panel_textures.as_ref().map_or(0, |t| t.updates);
+        Prepared {
+            element: scene.element(),
+            scene_rendered,
+            continuous,
+            panel_updates,
+            chunk_uploads,
+        }
     }
 }
 

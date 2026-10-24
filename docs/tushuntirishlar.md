@@ -271,3 +271,26 @@ oladi ("ffx" → Firefox, "gc" → GNOME Calculator).
   (DRM'da haqiqiy vblank vaqti), primary selection.
 - **Tekshirilmagan**: portal-wlr kadrni oladi, lekin portal orqali screenshot/Firefox
   ekran ulashish headless'da oxirigacha tasdiqlanmadi (ScreenCast PipeWire talab qiladi).
+
+## 7.6-bosqich: unumdorlik
+
+O'lchov: `tests/perf/bench.sh` (headless, 1920x1080, 5 ta har 50 ms yozadigan terminal +
+Firefox'da 720p video), `spacectl stats` (kadr CPU vaqti persentillari, sekundiga panel
+yangilanishlari, GPU xotirasi bahosi).
+
+| holat | oldin | keyin |
+|---|---|---|
+| bo'sh desktop, CPU | 0.0% | 0.0% |
+| 6 faol panelga qarab: CPU / kadr p95 | 23.3% / 6.3 ms | 22.6% / 7.6 ms (o'lchov shovqini) |
+| panellardan teskari qarab: CPU | 25.6% | **0.0%** |
+| teskari qarab: panel yangilanishlari/s | 122 | **0** |
+
+Nima qilindi: kamera ko'rmaydigan (yoki Mod+H bilan yashirilgan) panellarning teksturasi
+yangilanmaydi — `content_dirty` saqlanib, ko'ringanda yangilanadi — va ilovalari frame
+callback'ni sekundiga 1 marta oladi (ishlashda davom etadi, lekin hech kim ko'rmaydigan
+kadrlarni chizmaydi); 10 m dan uzoqdagi panellar yarim aniqlikda (xotiraning ¼ qismi);
+bir kadrda ko'pi bilan 8 ta panel va 4 ta chunk yangilanadi; kadr bosqichlari uchun
+tracing span'lari (`--features profile` → tracy, yoki `SPACEWM_SPAN_TIMES=1`).
+Profil ko'rsatdi: ko'rinib turgan faol terminalda vaqtning asosiy qismi — client shm
+buferini GPU'ga yuklash (~1 ms/kadr, terminal butun ekranni aylantiradi); sahna 0.5 ms,
+mipmap 0.01 ms. Direct scanout — TODO (drm.rs da izoh).

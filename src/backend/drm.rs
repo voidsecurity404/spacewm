@@ -816,6 +816,11 @@ fn render(state: &mut SpaceState, crtc: crtc::Handle) {
         (elements, clear)
     };
 
+    // TODO(direct scanout): a fullscreen panel seen head-on could skip compositing and
+    // have its client buffer put on the primary plane directly (smithay's DrmCompositor
+    // can do that for elements that cover the output). Not done: our panels are always
+    // drawn through the 3D scene.
+    let composite = tracing::trace_span!("composite").entered();
     let rendered =
         match surface.drm_output.render_frame(renderer, &elements, clear, FrameFlags::DEFAULT) {
             Ok(r) => !r.is_empty,
@@ -824,6 +829,7 @@ fn render(state: &mut SpaceState, crtc: crtc::Handle) {
                 false
             }
         };
+    drop(composite);
 
     if !state.pending_screenshots.is_empty() || state.screencopy.wants(&output) {
         let captured = render::capture_elements(renderer, &elements, size, scale, clear);
@@ -871,6 +877,7 @@ fn render(state: &mut SpaceState, crtc: crtc::Handle) {
         &state.cursor_status,
         state.dnd_icon.as_ref(),
         &state.lock,
+        &render::hidden_panels(state.render_mode, &state.world, &state.view.visible_panels),
         time,
     );
     super::headless::finish_frame(state, frame_start, prepared);

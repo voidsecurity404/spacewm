@@ -36,6 +36,13 @@ start. Saved changes apply live (keybinds, mouse, keyboard layout, fov, fog, ren
 distance...); a mistake keeps the previous settings and shows the error on screen.
 `spacewm --check-config` validates the file.
 
+## Control and debugging
+
+`spacectl` talks to the running spacewm (see docs/ipc.md): `spacectl list`, `spacectl move 3 0 2 -4`,
+`spacectl watch`, `spacectl stats` (fps, frame time percentiles, GPU memory). Profiling:
+`cargo run --features profile` sends spans to tracy; `SPACEWM_SPAN_TIMES=1 RUST_LOG=spacewm=trace`
+logs the time of each frame phase. `tests/perf/bench.sh` measures idle and busy CPU.
+
 ## Stages
 
 0. Project skeleton: CLI, logging, errors, event loop

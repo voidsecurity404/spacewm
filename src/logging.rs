@@ -48,17 +48,35 @@ pub fn init(level: &str) -> anyhow::Result<PathBuf> {
     let file =
         File::create(&log_path).with_context(|| format!("cannot create {}", log_path.display()))?;
 
-    tracing_subscriber::registry()
+    // SPACEWM_SPAN_TIMES=1: log how long each frame phase took (span close events), for
+    // profiling without tracy. Use with RUST_LOG=spacewm=trace.
+    let span_events = if std::env::var_os("SPACEWM_SPAN_TIMES").is_some() {
+        fmt::format::FmtSpan::CLOSE
+    } else {
+        fmt::format::FmtSpan::NONE
+    };
+    let registry = tracing_subscriber::registry();
+    // `--features profile`: every span also goes to the tracy profiler.
+    #[cfg(feature = "profile")]
+    let registry = registry.with(tracing_tracy::TracyLayer::default());
+    registry
         .with(filter)
         // Colors only on a real terminal; piped/redirected logs stay plain text.
         .with(
             fmt::layer()
                 .with_writer(std::io::stderr)
                 .with_ansi(std::io::stderr().is_terminal())
-                .with_target(true),
+                .with_target(true)
+                .with_span_events(span_events.clone()),
         )
         // A Mutex<File> is a valid writer: each event locks, writes a line, unlocks.
-        .with(fmt::layer().with_writer(Mutex::new(file)).with_ansi(false).with_target(true))
+        .with(
+            fmt::layer()
+                .with_writer(Mutex::new(file))
+                .with_ansi(false)
+                .with_target(true)
+                .with_span_events(span_events),
+        )
         .try_init()
         .context("tracing subscriber already installed")?;
 

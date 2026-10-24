@@ -68,6 +68,8 @@ enum Command {
     },
     /// Re-read the config file now and report errors.
     ReloadConfig,
+    /// Performance: fps, frame time percentiles, work per second, GPU memory.
+    Stats,
     /// Save a PNG of the composited screen (path inside $HOME).
     Screenshot {
         path: PathBuf,
@@ -230,6 +232,7 @@ fn to_request(command: Command) -> Request {
             },
         },
         Command::ReloadConfig => Request::ReloadConfig,
+        Command::Stats => Request::Stats,
         Command::Screenshot { path, force } => {
             let path = std::path::absolute(&path).unwrap_or(path);
             Request::Screenshot { path: path.display().to_string(), force }
@@ -296,6 +299,17 @@ fn print_human(response: &Response) {
         }
         Response::Event { event } => println!("{}", describe(event)),
         Response::Block { block } => println!("{block}"),
+        Response::Stats { stats: s } => {
+            println!("fps              {:.1}", s.fps);
+            println!(
+                "frame time       p50 {:.2} ms   p95 {:.2} ms   p99 {:.2} ms   max {:.2} ms",
+                s.frame_ms_p50, s.frame_ms_p95, s.frame_ms_p99, s.frame_ms_max
+            );
+            println!("panel updates/s  {:.1}", s.panel_updates_per_s);
+            println!("chunk uploads/s  {:.1}", s.chunk_uploads_per_s);
+            println!("panels           {} ({} visible)", s.panels, s.visible_panels);
+            println!("GPU memory       ~{:.1} MiB", s.gpu_memory_mib);
+        }
     }
 }
 

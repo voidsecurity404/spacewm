@@ -60,6 +60,8 @@ pub const UPLOADS_PER_FRAME: usize = 4;
 struct ChunkGpu {
     opaque: Option<Mesh>,
     translucent: Option<Mesh>,
+    /// Vertex + index bytes on the GPU (for the memory estimate).
+    bytes: usize,
 }
 
 /// Which chunks to draw this frame.
@@ -117,7 +119,12 @@ impl VoxelRenderer {
                 Mesh::new(gl, &m.vertices, &m.indices, glow::TRIANGLES).map(Some)
             }
         };
-        let gpu = ChunkGpu { opaque: mk(&data.opaque)?, translucent: mk(&data.translucent)? };
+        let bytes = [&data.opaque, &data.translucent]
+            .iter()
+            .map(|m| std::mem::size_of_val(&m.vertices[..]) + std::mem::size_of_val(&m.indices[..]))
+            .sum();
+        let gpu =
+            ChunkGpu { opaque: mk(&data.opaque)?, translucent: mk(&data.translucent)?, bytes };
         if let Some(old) = self.chunks.insert(data.pos, gpu) {
             for m in [old.opaque, old.translucent].into_iter().flatten() {
                 m.destroy(gl);
@@ -125,6 +132,17 @@ impl VoxelRenderer {
         }
         self.uploads += 1;
         Ok(())
+    }
+
+    /// GPU memory held by chunk meshes and the block textures.
+    pub fn gpu_bytes(&self) -> usize {
+        let meshes: usize = self.chunks.values().map(|c| c.bytes).sum();
+        // Texture array: one 16x16 RGBA layer per tile, plus mipmaps (~1/3 more).
+        let atlas = (atlas::TILE * atlas::TILE * 4) as usize
+            * crate::world::block::tile::COUNT as usize
+            * 4
+            / 3;
+        meshes + atlas
     }
 
     /// Chunks within render distance and inside the view frustum.
