@@ -34,9 +34,10 @@ pub enum Setting {
     Layouts,
     LayoutSwitch,
     Terminal,
+    Building,
 }
 
-pub const SETTINGS: [Setting; 14] = [
+pub const SETTINGS: [Setting; 15] = [
     Setting::MouseSpeed,
     Setting::InvertY,
     Setting::Fov,
@@ -51,6 +52,7 @@ pub const SETTINGS: [Setting; 14] = [
     Setting::Layouts,
     Setting::LayoutSwitch,
     Setting::Terminal,
+    Setting::Building,
 ];
 
 const DEFAULT_SENSITIVITY: f64 = 0.0025;
@@ -108,6 +110,7 @@ impl Setting {
             Setting::Layouts => "Keyboard layouts",
             Setting::LayoutSwitch => "Switch layout with",
             Setting::Terminal => "Terminal",
+            Setting::Building => "Building blocks",
         }
     }
 
@@ -143,6 +146,7 @@ impl Setting {
                 .find(|(o, _)| *o == c.input.keyboard_options)
                 .map_or_else(|| c.input.keyboard_options.clone(), |(_, name)| name.to_string()),
             Setting::Terminal => c.general.terminal.clone(),
+            Setting::Building => yes(c.general.building),
         }
     }
 
@@ -191,6 +195,7 @@ impl Setting {
                 let i = pos(&list, &c.general.terminal).unwrap_or(0);
                 ("general", "terminal", Value::from(step(&list, i, dir, true)))
             }
+            Setting::Building => ("general", "building", flip(c.general.building)),
         }
     }
 }

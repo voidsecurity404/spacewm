@@ -62,6 +62,7 @@ pub fn help_columns(
     binds: &KeybindsConfig,
     mod_name: &str,
     nested: bool,
+    building: bool,
 ) -> (Vec<Line>, Vec<Line>) {
     // At most two combos per action, and only as many as fit the key column (scale_up
     // has three; "Mod+Ctrl+Shift+=" is long).
@@ -105,13 +106,18 @@ pub fn help_columns(
         row(&keys(&binds.resize_shrink), "fewer rows/columns"),
         row(&keys(&binds.hide), "hide window (none: show all)"),
     ];
-    let mut right = vec![
-        header("Building"),
-        row("E", "inventory"),
-        row("1-5 / wheel", "pick a block"),
-        row("Right click", "place block"),
-        row("Left click", "break block"),
-        Line::default(),
+    let mut right = Vec::new();
+    if building {
+        right.extend([
+            header("Building"),
+            row("E", "inventory"),
+            row("1-5 / wheel", "pick a block"),
+            row("Right click", "place block"),
+            row("Left click", "break block"),
+            Line::default(),
+        ]);
+    }
+    right.extend([
         header("Desktop"),
         row(&keys(&binds.lock), "lock the screen"),
         row(&keys(&binds.screenshot), "screenshot (+ clipboard)"),
@@ -125,7 +131,7 @@ pub fn help_columns(
         row(&keys(&binds.debug), "fps in the log"),
         row(&keys(&binds.quit), "quit spacewm"),
         row("Ctrl+Alt+Backspace", "emergency exit"),
-    ];
+    ]);
     if nested {
         right.push(row("Ctrl+Alt+G", "give the mouse back"));
     }
@@ -165,8 +171,12 @@ impl SpaceState {
             .map(|o| o.current_scale().fractional_scale().ceil() as i32)
             .unwrap_or(1)
             .max(1);
-        let (left, right) =
-            help_columns(&self.config.keybinds, self.mod_name(), self.backend.is_nested());
+        let (left, right) = help_columns(
+            &self.config.keybinds,
+            self.mod_name(),
+            self.backend.is_nested(),
+            self.config.general.building,
+        );
         self.help = render_help(&left, &right, scale);
         if self.help.is_some() {
             tracing::info!("key help shown");
@@ -247,7 +257,7 @@ mod tests {
             key: "Mod+B".into(),
             command: "firefox".into(),
         });
-        let (left, right) = help_columns(&binds, "Alt", true);
+        let (left, right) = help_columns(&binds, "Alt", true, true);
         assert_eq!(left.len(), right.len());
         let all: Vec<&str> = left.iter().chain(&right).map(|l| l.text.as_str()).collect();
         let has = |s: &str| all.iter().any(|l| l.contains(s));
@@ -261,13 +271,14 @@ mod tests {
             assert_eq!(l.text.chars().nth(KEY_COLS - 1), Some(' '), "{:?}", l.text);
         }
         assert!(has("Alt+B") && has("firefox"), "the user's own spawn keys");
-        let (_, right) = help_columns(&binds, "Super", false);
+        let (_, right) = help_columns(&binds, "Super", false, false);
+        assert!(!right.iter().any(|l| l.text.contains("inventory")), "building off: no block keys");
         assert!(!right.iter().any(|l| l.text.contains("Ctrl+Alt+G")));
     }
 
     #[test]
     fn renders() {
-        let (l, r) = help_columns(&KeybindsConfig::default(), "Alt", true);
+        let (l, r) = help_columns(&KeybindsConfig::default(), "Alt", true, true);
         let (_, size) = render_help(&l, &r, 1).expect("font");
         assert!(size.0 > 600 && size.1 > 300 && size.1 < 700, "{size:?}");
     }

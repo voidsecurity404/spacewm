@@ -273,6 +273,7 @@ impl SpaceState {
         let scale = self.output_scale();
         let selected = self.selected_slot();
         let show_bar = self.render_mode == crate::cli::RenderMode::Scene3D
+            && self.config.general.building
             && self.hud.visible
             && self.mode == crate::input::mode::InputMode::Walk
             && self.fullscreen.is_none()

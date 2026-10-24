@@ -61,6 +61,9 @@ pub struct General {
     /// Let `spacectl spawn --shell` run commands through `sh -c`. Off: any local process of
     /// yours could otherwise run arbitrary shell through spacewm.
     pub ipc_allow_shell: bool,
+    /// Building with blocks: E inventory, hotbar, 1-5 keys, left click breaks and right
+    /// click places blocks. Off: clicks never change the world by accident.
+    pub building: bool,
 }
 
 impl Default for General {
@@ -71,6 +74,7 @@ impl Default for General {
             autostart: Vec::new(),
             world_seed: crate::world::terrain::DEFAULT_SEED,
             ipc_allow_shell: false,
+            building: false,
         }
     }
 }

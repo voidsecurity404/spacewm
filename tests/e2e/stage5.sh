@@ -5,7 +5,11 @@ PX="python3 $(dirname "$0")/pixel.py"
 LAYOUT="$OUT/layout-stage5.json"
 rm -f "$LAYOUT" "$LAYOUT.bad"
 
-space_start --render 3d --layout "$LAYOUT"
+# This test builds: blocks are off by default.
+CFG5="$OUT/config-stage5-$$.toml"
+printf '[general]\nbuilding = true\n' >"$CFG5"
+trap 'rm -f "$CFG5"; space_stop >/dev/null 2>&1 || true' EXIT
+space_start --render 3d --layout "$LAYOUT" --config "$CFG5"
 sleep 1.5
 
 # The ground at spawn: the stone desk platform.
@@ -80,7 +84,7 @@ pass "layout saved (panel placement + block edits)"
 
 # Restart: the terminal comes back on the wall, the blocks are still changed.
 space_stop || fail "unclean exit"
-space_start --render 3d --layout "$LAYOUT" --log-level debug
+space_start --render 3d --layout "$LAYOUT" --config "$CFG5" --log-level debug
 sleep 1
 [ "$(kc get-block 0 "$TOP" 1)" = "glass" ] || fail "glass block lost after restart"
 [ "$(kc get-block 0 $((TOP + 2)) -4)" = "stone" ] || fail "wall lost after restart"
@@ -93,16 +97,18 @@ sleep 0.8
 grep -q "reopening last session's apps count=1" "$OUT/spacewm.log" || fail "last session's foot not reopened"
 python3 -c "exit(0 if abs($(pz) - $PZ) < 0.001 else 1)" || fail "reopened foot not on the wall (z=$(pz), saved $PZ)"
 pass "the terminal open at exit is reopened by itself, on the wall"
-# Closed again, then asked for while facing the wall: back to its saved spot there.
+# Closed again, then asked for while facing the wall: it opens in front of you (a
+# window you ask for now always does), not back on the wall.
 kc close "$(kc --json list | python3 -c "import json,sys; print(json.load(sys.stdin)['panels'][0]['id'])")" >/dev/null
 for _ in $(seq 30); do [ "$(count)" -eq 0 ] && break; sleep 0.1; done
-kc teleport 0.5 "$EYE" 0.5 --yaw 0 --pitch 0
+kc teleport 0.5 "$EYE" 2.5 --yaw 0 --pitch 0
 kc spawn foot >/dev/null
 wait_windows 1
 sleep 0.8
 read -r PZ2 < <(pz)
-python3 -c "exit(0 if abs($PZ2 - $PZ) < 0.001 else 1)" || fail "foot did not reopen on the wall (z=$PZ2, saved $PZ)"
-pass "reopened terminal comes back on the wall"
+python3 -c "exit(0 if $PZ2 > -2.5 else 1)" || fail "an asked-for terminal went back to the wall (z=$PZ2)"
+grep -q "asked for now: opening in front" "$OUT/spacewm.log" || fail "no 'opening in front' log line"
+pass "a terminal asked for now opens in front of you, not at its old spot"
 
 # A terminal asked for while facing away from its saved spot opens in front, not behind
 # the user (who would then type into an invisible window: it looked frozen).
@@ -114,7 +120,7 @@ wait_windows 1
 sleep 0.8
 read -r PZ3 < <(kc --json list | python3 -c "import json,sys; print(json.load(sys.stdin)['panels'][0]['position'][2])")
 python3 -c "exit(0 if $PZ3 > 1.0 else 1)" || fail "terminal opened behind the user (z=$PZ3, saved wall z=$PZ)"
-grep -q "saved placement out of view" "$OUT/spacewm.log" || fail "no out-of-view log line"
+grep -q "asked for now: opening in front" "$OUT/spacewm.log" || fail "no 'opening in front' log line"
 pass "a terminal opened facing away from its saved spot appears in front (z=$PZ3)"
 kc input key Super+Escape
 kc close "$(kc --json list | python3 -c "import json,sys; print(json.load(sys.stdin)['panels'][0]['id'])")" >/dev/null

@@ -439,8 +439,10 @@ pub fn run_action(state: &mut SpaceState, action: Action) {
         Action::ResizeGrow => world_ops::resize_target(state, true),
         Action::ResizeShrink => world_ops::resize_target(state, false),
         Action::TogglePanelHidden => world_ops::toggle_hidden(state),
-        Action::SelectBlock(i) => state.select_slot(i as usize),
-        Action::Inventory => state.toggle_inventory(),
+        // Building is off unless switched on (general.building).
+        Action::SelectBlock(i) if state.config.general.building => state.select_slot(i as usize),
+        Action::Inventory if state.config.general.building => state.toggle_inventory(),
+        Action::SelectBlock(_) | Action::Inventory => {}
         Action::ToggleFullscreen => {
             let target = world_ops::target_panel(state);
             state.toggle_fullscreen(target);
@@ -760,7 +762,7 @@ fn walk_click(state: &mut SpaceState, button: u32) {
     let modkey =
         Mods::from_state(&mods, state.config.general.mod_key, state.backend.is_nested()).mod_;
     match (modkey, button) {
-        (true, BTN_LEFT) => world_ops::break_block(state),
+        (true, BTN_LEFT) if state.config.general.building => world_ops::break_block(state),
         // Right click on a window: its menu. (`hover` is only set when no block is in
         // front of the window.)
         (false, BTN_RIGHT) if state.hover.is_some() => {
@@ -768,10 +770,12 @@ fn walk_click(state: &mut SpaceState, button: u32) {
                 state.open_menu(hit.panel);
             }
         }
-        (_, BTN_RIGHT) => world_ops::place_block(state),
+        (_, BTN_RIGHT) if state.config.general.building => world_ops::place_block(state),
         // Enter the panel under the crosshair; no panel there: break the block instead
         // (`target_block` is only set when no panel is nearer than the block).
-        (false, BTN_LEFT) if !mode::try_enter_hovered(state) => world_ops::break_block(state),
+        (false, BTN_LEFT) if !mode::try_enter_hovered(state) && state.config.general.building => {
+            world_ops::break_block(state)
+        }
         _ => {}
     }
 }
@@ -906,7 +910,7 @@ pub fn handle_pointer_axis(state: &mut SpaceState, frame: AxisFrame) {
         if state.grab.is_some() {
             // Scrolling while carrying a panel moves it nearer/farther.
             world_ops::grab_scroll(state, -notches);
-        } else {
+        } else if state.config.general.building {
             // Otherwise it walks the hotbar (down = next slot). Touchpads send many small
             // steps: one slot per notch's worth.
             let acc = &mut state.input.scroll_accum;

@@ -633,14 +633,13 @@ impl SpaceState {
         };
         let panel_id = panel.id;
         let mut saved = self.layout.take_placement(&app_id, title.as_deref());
-        // A window the user just asked for (a key, the launcher) is entered right away. If
-        // its saved spot is behind them or far off, they would type into a terminal they
-        // can't see, with the mouse no longer turning the view: it looks frozen. Such a
-        // window opens in front of them instead; the spot stays remembered.
+        // A window the user just asked for (a key, the launcher, the dock) opens in front
+        // of them, where they are now: an old spot may be behind them, or far away where
+        // they were standing before. The spot stays remembered for reopening at startup.
         let requested = self.mode == (crate::input::mode::InputMode::Window { panel: panel_id })
             || self.expect_window_until.is_some_and(|until| std::time::Instant::now() < until);
-        if requested && saved.as_ref().is_some_and(|s| !self.placement_in_view(s)) {
-            tracing::info!(app_id, "saved placement out of view: opening in front instead");
+        if requested && saved.is_some() {
+            tracing::info!(app_id, "asked for now: opening in front, not at its saved spot");
             if let Some(s) = saved.take() {
                 self.layout.remember(s);
             }
@@ -662,31 +661,6 @@ impl SpaceState {
             panel.visible = !saved.hidden;
             self.view.dirty = true;
         }
-    }
-
-    /// Would a panel at this saved spot be seen from where the camera is now: in the view,
-    /// front side towards us, close enough to read.
-    fn placement_in_view(&self, saved: &crate::world::layout::SavedPanel) -> bool {
-        /// Farther than this a fresh terminal is too small to read anyway.
-        const MAX_DISTANCE: f32 = 8.0;
-        let camera = &self.view.camera;
-        let pos = saved.position();
-        let to_camera = camera.position - pos;
-        let frustum = crate::render::frustum::Frustum::from_matrix(
-            camera.projection_matrix() * camera.view_matrix(),
-        );
-        tracing::debug!(
-            camera = ?camera.position,
-            ?pos,
-            normal = ?(saved.rotation() * glam::Vec3::Z),
-            in_frustum = frustum.sphere_visible(pos, 0.0),
-            "placement view check"
-        );
-        !saved.hidden
-            && to_camera.length() <= MAX_DISTANCE
-            && (saved.rotation() * glam::Vec3::Z).dot(to_camera) > 0.0
-            // Its middle, not just an edge, is on screen.
-            && frustum.sphere_visible(pos, 0.0)
     }
 
     pub fn window_by_id(&self, id: u64) -> Option<Window> {

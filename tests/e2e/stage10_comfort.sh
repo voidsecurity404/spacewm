@@ -211,6 +211,21 @@ w = 12 + $NFAV * 52
 print((1280 - w) // 2 + 6 + 26, 720 - 14 - (52 + 12 + 6) + 6 + 26)")
 grep -q 'spacewm::render::dock: dock items=\[("Foot", false)' "$OUT/spacewm.log" || fail "no dock with foot first: $(grep 'render::dock' "$OUT/spacewm.log" | tail -1)"
 pass "the dock is shown along the bottom ($NFAV favorites)"
+# Building is off by default: E opens nothing, a click on the ground breaks nothing.
+kc input key e
+sleep 0.2
+grep -q "inventory opened" "$OUT/spacewm.log" && fail "E opened the inventory with building off"
+read -r GX GY GZ _ < <(kc camera)
+GROUND=$(python3 -c "import math; print(math.floor($GY - 1.62 - 0.5))")
+BEFORE_B=$(kc get-block "$(python3 -c "import math; print(math.floor($GX))")" "$GROUND" "$(python3 -c "import math; print(math.floor($GZ - 1))")")
+kc teleport "$GX" "$GY" "$GZ" --yaw 0 --pitch -60
+sleep 0.3
+kc input click
+sleep 0.3
+AFTER_B=$(kc get-block "$(python3 -c "import math; print(math.floor($GX))")" "$GROUND" "$(python3 -c "import math; print(math.floor($GZ - 1))")")
+[ "$BEFORE_B" = "$AFTER_B" ] || fail "a click broke a block with building off ($BEFORE_B -> $AFTER_B)"
+grep -q "spacewm::inventory: block selected\|spacewm::input::world_ops" "$OUT/spacewm.log" && fail "building actions ran"
+pass "building is off by default (E and clicks don't touch blocks)"
 kc input key Super_L --state press
 kc input move-to "$SX" "$SY"
 sleep 0.2
@@ -357,8 +372,8 @@ kc input key Super+comma
 sleep 0.3
 grep -q "settings opened" "$OUT/spacewm.log" || fail "Mod+comma did not open settings"
 shot s10-settings >/dev/null
-# Row 2 is the field of view: box 470x532 centered, rows from 50 px, 30 px each.
-kc input move-to 640 $(( (720 - 532) / 2 + 50 + 2 * 30 + 15 ))
+# Row 2 is the field of view: box 470x562 centered, rows from 50 px, 30 px each.
+kc input move-to 640 $(( (720 - 562) / 2 + 50 + 2 * 30 + 15 ))
 kc input click
 sleep 0.4
 grep -q '^fov = 80.0' "$CFGS" || fail "click did not save fov = 80: $(grep '^fov' "$CFGS")"

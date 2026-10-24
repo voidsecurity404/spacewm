@@ -3,7 +3,11 @@
 # Mod+F fullscreen and back, an app's own fullscreen request, Mod+grave next window.
 source "$(dirname "$0")/lib.sh"
 PX="python3 $(dirname "$0")/pixel.py"
-space_start --render 3d --log-level debug
+# Blocks are off by default.
+CFG8="$OUT/config-stage8-$$.toml"
+printf '[general]\nbuilding = true\n' >"$CFG8"
+trap 'rm -f "$CFG8"; space_stop >/dev/null 2>&1 || true' EXIT
+space_start --render 3d --config "$CFG8" --log-level debug
 sleep 1.5
 
 TOP=""

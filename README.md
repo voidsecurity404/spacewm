@@ -36,10 +36,9 @@ Mod is Super on a real session and Alt when nested (`general.mod_key`).
 | key | does |
 |---|---|
 | WASD, mouse, Space | walk, look, jump (double-tap Space: fly) |
-| left click | enter the panel under the crosshair; on a block: break it |
-| right click | place the selected block |
-| 1-5, scroll wheel | pick a hotbar slot |
-| E | inventory (click a block to pick it, E or Escape to close) |
+| left click | enter the panel under the crosshair |
+| right click / left click on a block | place / break blocks (only with `general.building = true`) |
+| 1-5, scroll wheel, E | hotbar and inventory (only with building on) |
 | Mod+Escape | back to walking (always works; also leaves fullscreen) |
 | Mod+F | the panel fills the screen, and back |
 | Mod+Tab, Mod+\` | turn to the next window (entered when it is near) |

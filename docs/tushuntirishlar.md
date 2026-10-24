@@ -517,3 +517,14 @@ Maqsad: spacewm'ni tugma yodlamasdan, sichqoncha bilan va adashmasdan ishlatish.
   yoziladi: faqat o'sha qator o'zgaradi, izohlar va tartib saqlanadi. Yozishdan oldin
   tekshiriladi, atomar yoziladi va darhol qo'llanadi.
 - `spacectl camera`: kamera qayerda turgani va qayerga qarayotgani.
+
+### Foydalanuvchi fikridan keyin
+
+- **Siz ochgan oyna doim ro'parangizda ochiladi.** Avval yopilgan terminalning joyi
+  esda qolardi va yangisi o'sha yerda, ba'zan uzoqda ochilardi. Endi saqlangan joylar
+  faqat spacewm qayta ishga tushganda avtomatik qayta ochiladigan dasturlar uchun
+  ishlatiladi.
+- **Qurilish standart holatda o'chiq** (`general.building = false`). E inventar, hotbar,
+  1–5 tugmalari, blokni buzish va qo'yish ishlamaydi, ya'ni klik dunyoni tasodifan
+  o'zgartira olmaydi. Pastda faqat dock turadi. Xohlasangiz, sozlamalardan (Alt+,)
+  "Building blocks" ni yoqing.

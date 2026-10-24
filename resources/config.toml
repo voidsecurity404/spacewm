@@ -16,6 +16,9 @@ world_seed = 1337
 # Allow `spacectl spawn --shell "..."` to run commands through sh -c. Without it, spacectl
 # can only start a program with arguments, never a shell pipeline.
 ipc_allow_shell = false
+# Building with blocks like Minecraft: E inventory, hotbar, keys 1-5, left click breaks
+# and right click places blocks. Off: clicks never change the world by accident.
+building = false
 
 [input]
 # Camera turn per pixel of mouse movement (radians).
