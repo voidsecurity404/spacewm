@@ -74,6 +74,9 @@ kc input move-by 5 0
 sleep 3.2
 [ -e "$IDLE.idle" ] && fail "swayidle fired although mpv inhibits idle"
 pass "mpv's idle inhibitor keeps the session awake"
+has wp_viewporter
+kc list | grep -q mpv || fail "mpv has no window (it needs wp_viewporter)"
+pass "wp_viewporter: mpv shows its video through a viewport"
 pkill -P "$SPACE_PID" -x mpv || true
 pkill -P "$SPACE_PID" -x swayidle || true
 rm -f "$IDLE".*
@@ -82,6 +85,7 @@ rm -f "$IDLE".*
 # locker is refused while the first one holds the lock.
 has ext_session_lock_manager_v1
 LOCKER="$ROOT/target/debug/examples/test_locker"
+kc focus "$(kc --json list | python3 -c "import json,sys; print(json.load(sys.stdin)['panels'][0]['id'])")"
 before=$(focused)
 [ "$before" != "[]" ] || fail "expected a focused panel before locking"
 WAYLAND_DISPLAY="$WL" "$LOCKER" 00ff00 2.5 >/dev/null &

@@ -141,6 +141,10 @@ pub struct SpaceState {
     #[allow(dead_code)]
     pub idle_inhibit_state: smithay::wayland::idle_inhibit::IdleInhibitManagerState,
     pub idle_inhibitors: Vec<WlSurface>,
+    /// wp_viewporter: a client shows a crop of its buffer scaled to any size (video
+    /// players, browsers). smithay's renderer applies it; holding the state keeps the global.
+    #[allow(dead_code)]
+    pub viewporter_state: smithay::wayland::viewporter::ViewporterState,
     /// zwlr_screencopy_manager_v1 (wf-recorder). Never read: keeps the global.
     #[allow(dead_code)]
     pub wlr_screencopy_global: smithay::reexports::wayland_server::backend::GlobalId,
@@ -255,6 +259,7 @@ impl SpaceState {
             smithay::wayland::idle_notify::IdleNotifierState::new(&dh, loop_handle.clone());
         let idle_inhibit_state =
             smithay::wayland::idle_inhibit::IdleInhibitManagerState::new::<Self>(&dh);
+        let viewporter_state = smithay::wayland::viewporter::ViewporterState::new::<Self>(&dh);
         let session_lock_state =
             smithay::wayland::session_lock::SessionLockManagerState::new::<Self, _>(&dh, |_| true);
         tracing::debug!("global: zwlr_layer_shell_v1");
@@ -338,6 +343,7 @@ impl SpaceState {
             idle_notifier_state,
             idle_inhibit_state,
             idle_inhibitors: Vec::new(),
+            viewporter_state,
             wlr_screencopy_global,
             overlay: Overlay::None,
             launcher: None,
