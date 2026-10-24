@@ -169,7 +169,8 @@ fn render(state: &mut SpaceState) {
     let size = b.size;
     let scale = output.current_scale().fractional_scale().into();
     let time = state.start_time.elapsed();
-    let age = if b.rendered_once && state.pending_screenshots.is_empty() { 1 } else { 0 };
+    let capturing = !state.pending_screenshots.is_empty() || state.screencopy.wants(&output);
+    let age = if b.rendered_once && !capturing { 1 } else { 0 };
 
     let frame_start = Instant::now();
     crate::input::before_frame(state);
@@ -221,17 +222,24 @@ fn render(state: &mut SpaceState) {
     }
     b.rendered_once = true;
 
-    let capture = (!state.pending_screenshots.is_empty()).then(|| {
+    let capture = capturing.then(|| {
         screenshot::start_capture(&mut b.renderer, &framebuffer, b.size, output.current_transform())
     });
     drop(framebuffer);
     if let Some(capture) = capture {
         let captured = capture.and_then(|c| screenshot::finish_capture(&mut b.renderer, c));
-        crate::ipc::finish_screenshots(
-            &mut state.pending_screenshots,
-            captured,
-            &state.screenshot_tx,
+        crate::wayland::screencopy::deliver(
+            &mut state.screencopy,
+            &output,
+            captured.as_ref().map_err(|e| e.as_str()),
         );
+        if !state.pending_screenshots.is_empty() {
+            crate::ipc::finish_screenshots(
+                &mut state.pending_screenshots,
+                captured,
+                &state.screenshot_tx,
+            );
+        }
     }
 
     render::send_frame_callbacks(

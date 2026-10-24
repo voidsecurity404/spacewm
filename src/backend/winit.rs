@@ -624,7 +624,8 @@ fn render(state: &mut SpaceState) {
 
     // Buffer age = how many frames old the back buffer's contents are; the damage tracker
     // only repaints what changed since then. 0 forces a full repaint.
-    let age = if b.full_redraw > 0 || !state.pending_screenshots.is_empty() {
+    let capturing = !state.pending_screenshots.is_empty() || state.screencopy.wants(&output);
+    let age = if b.full_redraw > 0 || capturing {
         b.full_redraw = b.full_redraw.saturating_sub(1);
         0
     } else {
@@ -687,7 +688,7 @@ fn render(state: &mut SpaceState) {
             None
         }
     };
-    let capture = (!state.pending_screenshots.is_empty()).then(|| {
+    let capture = capturing.then(|| {
         screenshot::start_capture(&mut b.renderer, &framebuffer, size, output.current_transform())
     });
     drop(framebuffer);
@@ -699,11 +700,18 @@ fn render(state: &mut SpaceState) {
     }
     if let Some(capture) = capture {
         let captured = capture.and_then(|c| screenshot::finish_capture(&mut b.renderer, c));
-        crate::ipc::finish_screenshots(
-            &mut state.pending_screenshots,
-            captured,
-            &state.screenshot_tx,
+        crate::wayland::screencopy::deliver(
+            &mut state.screencopy,
+            &output,
+            captured.as_ref().map_err(|e| e.as_str()),
         );
+        if !state.pending_screenshots.is_empty() {
+            crate::ipc::finish_screenshots(
+                &mut state.pending_screenshots,
+                captured,
+                &state.screenshot_tx,
+            );
+        }
     }
     if damage.is_some() {
         render::send_frame_callbacks(

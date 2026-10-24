@@ -798,13 +798,20 @@ fn render(state: &mut SpaceState, crtc: crtc::Handle) {
             }
         };
 
-    if !state.pending_screenshots.is_empty() {
+    if !state.pending_screenshots.is_empty() || state.screencopy.wants(&output) {
         let captured = render::capture_elements(renderer, &elements, size, scale, clear);
-        crate::ipc::finish_screenshots(
-            &mut state.pending_screenshots,
-            captured,
-            &state.screenshot_tx,
+        crate::wayland::screencopy::deliver(
+            &mut state.screencopy,
+            &output,
+            captured.as_ref().map_err(|e| e.as_str()),
         );
+        if !state.pending_screenshots.is_empty() {
+            crate::ipc::finish_screenshots(
+                &mut state.pending_screenshots,
+                captured,
+                &state.screenshot_tx,
+            );
+        }
     }
 
     if rendered {

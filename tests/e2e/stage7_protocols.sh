@@ -20,5 +20,39 @@ pass "xdg-decoration: foot uses server-side mode (no title bar)"
 kc close 1 >/dev/null
 
 space_stop || fail "unclean exit"
+
+# ---- ext-image-copy-capture: grim and wf-recorder capture the composited 3D frame.
+space_start --render 3d --log-level debug
+WL=$(space_wayland_display)
+globals=$(WAYLAND_DISPLAY="$WL" wayland-info 2>/dev/null | sed -n "s/.*interface: '\([^']*\)'.*/\1/p")
+has ext_image_copy_capture_manager_v1
+has ext_output_image_capture_source_manager_v1
+sleep 0.5
+rm -f "$OUT/grim.png" "$OUT/grim-region.png" "$OUT/rec.mp4"
+WAYLAND_DISPLAY="$WL" timeout 10 grim "$OUT/grim.png" || fail "grim failed"
+REF=$(shot s7-grim-ref)
+D=$($PX diff "$OUT/grim.png" "$REF")
+python3 -c "exit(0 if $D < 0.02 else 1)" || fail "grim image differs from the screen ($D)"
+pass "grim captures the 3D view (diff to spacewm's own screenshot $D)"
+WAYLAND_DISPLAY="$WL" timeout 10 grim -g "100,80 400x300" "$OUT/grim-region.png" || fail "grim -g failed"
+python3 -c "
+import sys; sys.path.insert(0, '$(dirname "$0")')
+exec(open('$(dirname "$0")/pixel.py').read().replace('\nmain()\n', '\n'))
+w, h, _, _ = read_png('$OUT/grim-region.png'); assert (w, h) == (400, 300), (w, h)" ||
+    fail "grim -g gave the wrong size"
+pass "grim -g captures a region"
+# Something must move: wf-recorder asks for frames "with damage", i.e. only when the
+# screen changes.
+kc spawn weston-simple-egl >/dev/null
+wait_windows 1
+WAYLAND_DISPLAY="$WL" timeout -s INT 3 wf-recorder -f "$OUT/rec.mp4" >/dev/null 2>&1 || true
+size=$(stat -c %s "$OUT/rec.mp4" 2>/dev/null || echo 0)
+[ "$size" -gt 10000 ] || fail "wf-recorder produced no video ($size bytes)"
+frames=$(ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=nb_read_frames \
+    -of csv=p=0 "$OUT/rec.mp4" 2>/dev/null || echo 0)
+[ "${frames:-0}" -gt 20 ] || fail "wf-recorder recorded only ${frames:-0} frames"
+pass "wf-recorder records the screen ($frames frames, $size bytes)"
+
+space_stop || fail "unclean exit"
 grep -E "panicked" "$OUT/spacewm.log" && fail "panic in log"
 pass "clean exit"

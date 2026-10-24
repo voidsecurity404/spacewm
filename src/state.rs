@@ -126,6 +126,16 @@ pub struct SpaceState {
     /// Never read: holding it keeps the global alive.
     #[allow(dead_code)]
     pub decoration_state: smithay::wayland::shell::xdg::decoration::XdgDecorationState,
+    /// ext-image-capture-source + ext-image-copy-capture: screen capture (screencopy.rs).
+    #[allow(dead_code)]
+    pub image_capture_source_state: smithay::wayland::image_capture_source::ImageCaptureSourceState,
+    pub output_capture_source_state:
+        smithay::wayland::image_capture_source::OutputCaptureSourceState,
+    pub image_copy_capture_state: smithay::wayland::image_copy_capture::ImageCopyCaptureState,
+    pub screencopy: crate::wayland::screencopy::Screencopy,
+    /// zwlr_screencopy_manager_v1 (wf-recorder). Never read: keeps the global.
+    #[allow(dead_code)]
+    pub wlr_screencopy_global: smithay::reexports::wayland_server::backend::GlobalId,
     /// Something on top of the view that has the keyboard.
     pub overlay: Overlay,
     /// The built-in launcher, while open (it then gets every key).
@@ -226,6 +236,13 @@ impl SpaceState {
         let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
         let decoration_state =
             smithay::wayland::shell::xdg::decoration::XdgDecorationState::new::<Self>(&dh);
+        let image_capture_source_state =
+            smithay::wayland::image_capture_source::ImageCaptureSourceState::new();
+        let output_capture_source_state =
+            smithay::wayland::image_capture_source::OutputCaptureSourceState::new::<Self>(&dh);
+        let image_copy_capture_state =
+            smithay::wayland::image_copy_capture::ImageCopyCaptureState::new::<Self>(&dh);
+        let wlr_screencopy_global = crate::wayland::screencopy::create_wlr_global(&dh);
         tracing::debug!("global: zwlr_layer_shell_v1");
         tracing::debug!("global: xdg_wm_base");
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
@@ -298,6 +315,11 @@ impl SpaceState {
             xwayland: None,
             layer_shell_state,
             decoration_state,
+            image_capture_source_state,
+            output_capture_source_state,
+            image_copy_capture_state,
+            screencopy: Default::default(),
+            wlr_screencopy_global,
             overlay: Overlay::None,
             launcher: None,
             hud: Default::default(),

@@ -11,6 +11,7 @@ pub mod decoration;
 pub mod dmabuf;
 pub mod layer_shell;
 pub mod output;
+pub mod screencopy;
 pub mod seat;
 pub mod shm;
 pub mod socket;
