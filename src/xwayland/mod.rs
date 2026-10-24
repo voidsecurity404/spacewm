@@ -10,10 +10,10 @@
 //! (`/tmp/.X11-unix/X<n>` plus the Linux abstract socket of the same name) and set
 //! DISPLAY for our children. When the first X client connects, the socket becomes
 //! readable and we launch Xwayland, handing it our listening sockets with `-listenfd`, so
-//! it accepts the connection that is already waiting. When no X11 window has existed for
-//! `idle_stop()` we stop the server again and go back to waiting (Xwayland's own
-//! `-terminate` never fires while a window manager is connected). A crash takes the same
-//! path: the next X client starts a fresh server.
+//! it accepts the connection that is already waiting. Once started it keeps running: it
+//! is NOT stopped when no X11 window is left, because apps (Qt, Electron) often keep an X
+//! connection without any window, and taking the server away from under them freezes
+//! them. If Xwayland crashes, the next X client starts a fresh server.
 
 mod wm;
 
@@ -50,13 +50,6 @@ use crate::state::SpaceState;
 
 pub use wm::X11Child;
 
-/// Stop Xwayland after this long without any X11 window. Tests shorten it with
-/// SPACEWM_TEST_X11_IDLE=<seconds>.
-fn idle_stop() -> Duration {
-    let secs = std::env::var("SPACEWM_TEST_X11_IDLE").ok().and_then(|s| s.parse().ok());
-    Duration::from_secs(secs.unwrap_or(30))
-}
-
 /// Failed starts in a row before X11 support is switched off for this session.
 const MAX_FAILURES: u32 = 5;
 
@@ -84,10 +77,6 @@ pub struct Xwayland {
     starts: u32,
     /// Starts in a row that failed before the server became ready.
     failures: u32,
-    /// X11 windows that exist right now (mapped or not).
-    windows: usize,
-    /// Pending "stop the idle server" timer.
-    idle_timer: Option<RegistrationToken>,
 }
 
 /// A running (or starting) Xwayland process.
@@ -161,8 +150,6 @@ impl Xwayland {
                 retired: Vec::new(),
                 starts: 0,
                 failures: 0,
-                windows: 0,
-                idle_timer: None,
             }),
             Err(e) => {
                 let _ = fs::remove_file(&lock_path);
@@ -338,8 +325,6 @@ fn on_ready(
                 xw.wm = Some(wm);
                 xw.failures = 0;
             }
-            // A client that never creates a window (xprop, xset) must not keep it alive.
-            schedule_idle_check(state);
         }
         Err(e) => {
             tracing::error!("cannot start the X11 window manager: {e}");
@@ -355,10 +340,6 @@ pub fn server_gone(state: &mut SpaceState) {
     if let Some(wm) = xw.wm.take() {
         xw.retired.push(wm);
     }
-    xw.windows = 0;
-    if let Some(token) = xw.idle_timer.take() {
-        state.loop_handle.remove(token);
-    }
     if let Some(server) = xw.server.take() {
         state.loop_handle.remove(server.token);
     }
@@ -370,72 +351,6 @@ pub fn server_gone(state: &mut SpaceState) {
     }
     tracing::info!("Xwayland stopped; it starts again with the next X client");
     rearm_after(state, Duration::ZERO);
-}
-
-pub fn window_created(state: &mut SpaceState) {
-    let Some(xw) = state.xwayland.as_mut() else { return };
-    xw.windows += 1;
-    if let Some(token) = xw.idle_timer.take() {
-        state.loop_handle.remove(token);
-    }
-}
-
-pub fn window_destroyed(state: &mut SpaceState) {
-    let Some(xw) = state.xwayland.as_mut() else { return };
-    xw.windows = xw.windows.saturating_sub(1);
-    if xw.windows == 0 {
-        schedule_idle_check(state);
-    }
-}
-
-fn schedule_idle_check(state: &mut SpaceState) {
-    let Some(xw) = state.xwayland.as_mut() else { return };
-    if xw.idle_timer.is_some() || xw.windows > 0 {
-        return;
-    }
-    xw.idle_timer = state
-        .loop_handle
-        .insert_source(Timer::from_duration(idle_stop()), |_, _, state| {
-            if let Some(xw) = state.xwayland.as_mut() {
-                xw.idle_timer = None;
-                if xw.windows == 0 && xw.wm.is_some() {
-                    let secs = idle_stop().as_secs();
-                    tracing::info!("no X11 windows for {secs} s, stopping Xwayland");
-                    // Dropping our handle only marks its Wayland client dead; the socket
-                    // closes whenever clients are dispatched next, which may be never on an
-                    // idle desktop. So end the process itself. SIGKILL, because Xwayland
-                    // inherits our blocked SIGTERM (smithay spawns it, we can't reset its
-                    // mask) and an idle server has nothing to save. Its wm's
-                    // `disconnected` arrives once the X connection is closed.
-                    for pid in our_xwayland_pids() {
-                        let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
-                    }
-                    server_gone(state);
-                }
-            }
-            TimeoutAction::Drop
-        })
-        .ok();
-}
-
-/// Xwayland processes started by us (our children named "Xwayland"; a desktop we run
-/// nested in has its own, which are not our children).
-fn our_xwayland_pids() -> Vec<rustix::process::Pid> {
-    let me = std::process::id();
-    let Ok(entries) = fs::read_dir("/proc") else { return Vec::new() };
-    entries
-        .filter_map(|e| e.ok()?.file_name().to_str()?.parse::<i32>().ok())
-        .filter(|&pid| {
-            // /proc/<pid>/stat is "pid (comm) state ppid ..."; comm may contain spaces,
-            // so split after the LAST ')'.
-            let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat")) else { return false };
-            let Some((head, tail)) = stat.rsplit_once(')') else { return false };
-            let comm = head.split_once('(').map(|(_, c)| c).unwrap_or_default();
-            let ppid = tail.split_whitespace().nth(1).and_then(|p| p.parse::<u32>().ok());
-            comm == "Xwayland" && ppid == Some(me)
-        })
-        .filter_map(rustix::process::Pid::from_raw)
-        .collect()
 }
 
 /// Xwayland didn't come up. The waiting X client keeps the socket readable, so retrying

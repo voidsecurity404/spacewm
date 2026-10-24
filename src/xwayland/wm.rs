@@ -97,15 +97,8 @@ impl XwmHandler for SpaceState {
         }
     }
 
-    /// Every X11 window counts, mapped or not (xclip keeps an invisible one while it owns
-    /// the clipboard): Xwayland is only stopped when none are left (see `idle_check`).
-    fn new_window(&mut self, _xwm: XwmId, _window: X11Surface) {
-        super::window_created(self);
-    }
-
-    fn new_override_redirect_window(&mut self, _xwm: XwmId, _window: X11Surface) {
-        super::window_created(self);
-    }
+    fn new_window(&mut self, _xwm: XwmId, _window: X11Surface) {}
+    fn new_override_redirect_window(&mut self, _xwm: XwmId, _window: X11Surface) {}
 
     /// An X11 app wants to show a normal window: it becomes a panel.
     fn map_window_request(&mut self, _xwm: XwmId, surface: X11Surface) {
@@ -166,7 +159,6 @@ impl XwmHandler for SpaceState {
 
     fn destroyed_window(&mut self, _xwm: XwmId, surface: X11Surface) {
         self.forget_x11(&surface);
-        super::window_destroyed(self);
     }
 
     /// Size requests are granted; position requests are ignored (positions live in 3D,
@@ -326,8 +318,8 @@ impl XwmHandler for SpaceState {
         }
     }
 
-    /// The X11 connection closed: the last callback of this wm. Either a server we
-    /// stopped finished exiting (drop its retired wm), or the current one died (a crash).
+    /// The X11 connection closed: the last callback of this wm. Either a server that
+    /// failed to start finished exiting (drop its retired wm), or the current one died.
     fn disconnected(&mut self, xwm: XwmId) {
         let Some(xw) = self.xwayland.as_mut() else { return };
         xw.retired.retain(|w| w.id() != xwm);

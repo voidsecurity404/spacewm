@@ -199,8 +199,10 @@ o'zining wl_surface'iga chizadi. Bizning X11 oyna menejerimiz (smithay `X11Wm`, 
 ulanishi) qaysi X oynasi qaysi surface ekanini aytadi — shunda X11 oynalar ham oddiy
 `Window` va panelga aylanadi. Kechiktirilgan ishga tushirish: spacewm `/tmp/.X11-unix/X1`
 soketini o'zi ochadi; birinchi X dastur ulanganda Xwayland'ni shu soketlar bilan
-(`-listenfd`) ishga tushiradi, kutib turgan ulanish yo'qolmaydi. 30 s davomida birorta X
-oynasi qolmasa, server to'xtatiladi (~30 MB qaytadi); crash ham xuddi shu yo'l.
+(`-listenfd`) ishga tushiradi, kutib turgan ulanish yo'qolmaydi. Ishga tushgach to'xtatilmaydi:
+Qt/Electron ilovalari oynasiz ham X ulanishini ushlab turadi (avval "X oynasi yo'q bo'lsa
+to'xtatish" bor edi — u Telegram'ni muzlatib qo'ydi, olib tashlandi). Crash bo'lsa keyingi
+X dastur yangi serverni ishga tushiradi.
 
 **Nega override-redirect oynalar alohida.** X11'da menyu, tooltip, combo ro'yxati WM'dan
 ruxsat so'ramaydi: o'zi *root* (global) koordinatada paydo bo'ladi va sichqonchani ushlaydi.

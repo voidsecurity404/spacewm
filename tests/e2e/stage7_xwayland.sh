@@ -3,7 +3,7 @@
 # on their parent panel, restart after the last client and after a crash.
 source "$(dirname "$0")/lib.sh"
 PX="python3 $(dirname "$0")/pixel.py"
-SPACEWM_TEST_X11_IDLE=2 space_start --render 3d --log-level debug
+space_start --render 3d --log-level debug
 
 XDISP=$(sed -n 's/.*X11 display ready (lazy) display=\(:[0-9]*\).*/\1/p' "$OUT/spacewm.log" | head -1)
 [ -n "$XDISP" ] || fail "no lazy X11 display in the log"
@@ -72,19 +72,17 @@ pass "X11 combo list drawn on its parent panel (diff $D)"
 kc input key Escape
 sleep 0.5
 
-# ---- Last X window gone: spacewm stops Xwayland after an idle delay (SPACEWM_TEST_X11_IDLE
-# shortens it), and the next client starts it again.
+# ---- All X windows closed: Xwayland keeps running, and a client holding an X
+# connection without any window (Qt apps do this) is not cut off. (Regression: stopping
+# an "idle" server froze Telegram.)
+kc spawn xprop -root -spy >/dev/null
 kc --json list | python3 -c "import json,sys; [print(p['id']) for p in json.load(sys.stdin)['panels']]" |
     while read -r id; do kc close "$id" >/dev/null; done
-for _ in $(seq 60); do grep -q "Xwayland stopped" "$OUT/spacewm.log" && break; sleep 0.2; done
-grep -q "Xwayland stopped" "$OUT/spacewm.log" || fail "Xwayland did not stop when idle"
-sleep 0.5
-pgrep -P "$SPACE_PID" -x Xwayland >/dev/null && fail "Xwayland process still running"
-pass "Xwayland stops when no X11 window is left"
-kc spawn xeyes >/dev/null
-wait_windows 1
-grep -q "start=2" "$OUT/spacewm.log" || fail "second start not logged"
-pass "next X client starts Xwayland again"
+sleep 4
+pgrep -P "$SPACE_PID" -x Xwayland >/dev/null || fail "Xwayland stopped although an X client is connected"
+pgrep -P "$SPACE_PID" -x xprop >/dev/null || fail "the windowless X client lost its server"
+pass "without X windows Xwayland stays up; windowless X clients keep working"
+pkill -P "$SPACE_PID" -x xprop || true
 
 # ---- Crash: kill -9 the server; its panels go away and the next client restarts it.
 XPID=$(pgrep -P "$SPACE_PID" -x Xwayland || true)
