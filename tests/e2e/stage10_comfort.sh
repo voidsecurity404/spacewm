@@ -296,5 +296,55 @@ read -r C2 _ < <(kc camera)
 [ "$C2" != "$C1" ] || fail "walking not back after seated mode"
 pass "Mod+S again: windows back where they were, walking works"
 space_stop || fail "unclean exit"
+
+# ---- Mod+D: a plain 2D desktop and back; windows stay where they were.
+space_start --render 3d --log-level debug
+sleep 1
+kc spawn foot >/dev/null
+wait_windows 1
+sleep 0.8
+kc mode walk
+sleep 0.3
+read -r P3 < <(kc --json list | python3 -c "import json,sys; print(json.load(sys.stdin)['panels'][0]['position'])")
+kc input key Super+d
+sleep 0.4
+grep -q "render mode switched to=Flat2D" "$OUT/spacewm.log" || fail "Mod+D did not switch to 2D"
+F=$(shot s10-2d)
+$PX near "$F" 1200 650 135 190 240 40 >/dev/null && fail "still the 3D sky in 2D: $($PX "$F" 1200 650)"
+# foot sits at (20, 20) on the 2D desktop: its dark background around (300, 300).
+$PX near "$F" 300 300 18 18 18 20 >/dev/null || fail "foot not drawn in 2D: $($PX "$F" 300 300)"
+[ "$(focused)" = "[1]" ] || fail "the window has no keyboard in 2D: $(focused)"
+pass "Mod+D: a 2D desktop, the window drawn flat and focused"
+# Mod+drag moves the window (no title bars to grab), Mod+right-drag resizes it.
+kc input move-to 300 300
+kc input key Super_L --state press
+kc input click --state press
+kc input move-to 500 400
+kc input click --state release
+kc input key Super_L --state release
+sleep 0.3
+M=$(shot s10-2d-moved)
+$PX near "$M" 100 300 26 26 31 12 >/dev/null || fail "Mod+drag did not move the window: $($PX "$M" 100 300)"
+$PX near "$M" 400 400 18 18 18 20 >/dev/null || fail "window not at its new place: $($PX "$M" 400 400)"
+read -r SW0 SH0 < <(kc --json list | python3 -c "import json,sys; print(*json.load(sys.stdin)['panels'][0]['size_px'])")
+kc input move-to 700 500
+kc input key Super_L --state press
+kc input click right --state press
+kc input move-to 600 450
+kc input click right --state release
+kc input key Super_L --state release
+for _ in $(seq 30); do read -r SW1 SH1 < <(kc --json list | python3 -c "import json,sys; print(*json.load(sys.stdin)['panels'][0]['size_px'])"); [ "$SW1" -lt "$((SW0 - 60))" ] && break; sleep 0.1; done
+[ "$SW1" -lt "$((SW0 - 60))" ] && [ "$SH1" -lt "$((SH0 - 25))" ] || fail "Mod+right-drag did not resize (${SW0}x$SH0 -> ${SW1}x$SH1)"
+pass "2D: Mod+drag moves a window, Mod+right-drag resizes it (${SW0}x$SH0 -> ${SW1}x$SH1)"
+kc input key Super+d
+sleep 0.5
+grep -q "render mode switched to=Scene3D" "$OUT/spacewm.log" || fail "Mod+D did not switch back"
+G=$(shot s10-3d-again)
+$PX near "$G" 1200 100 135 190 240 40 >/dev/null || fail "no sky after switching back: $($PX "$G" 1200 100)"
+read -r P3b < <(kc --json list | python3 -c "import json,sys; print(json.load(sys.stdin)['panels'][0]['position'])")
+[ "$P3" = "$P3b" ] || fail "the panel moved ($P3 -> $P3b)"
+[ "$(focused)" = "[]" ] || fail "back in 3D the window kept the keyboard"
+pass "Mod+D again: back to the 3D world, the panel where it was"
+space_stop || fail "unclean exit"
 grep -E "panicked" "$OUT/spacewm.log" && fail "panic in log"
 pass "clean exit"

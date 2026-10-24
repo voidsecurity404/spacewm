@@ -9,6 +9,7 @@
 
 pub mod camera_controls;
 pub mod drag;
+pub mod flat;
 pub mod focus_view;
 pub mod fullscreen;
 pub mod inject;
@@ -94,6 +95,8 @@ pub enum Action {
     Help,
     /// Windows on an arc around you, no walking (and back).
     ToggleSeated,
+    /// The 3D world or a plain 2D desktop.
+    Toggle2d,
     /// Lock the screen now.
     Lock,
     Screenshot,
@@ -430,6 +433,7 @@ pub fn run_action(state: &mut SpaceState, action: Action) {
         Action::Help => state.toggle_help(),
         Action::Lock => state.lock_now(),
         Action::ToggleSeated => state.toggle_seated(),
+        Action::Toggle2d => state.toggle_2d(),
         Action::Screenshot => state.screenshot(false),
         Action::ScreenshotRegion => state.screenshot(true),
         Action::Hardware(hw) => state.hardware_key(hw),
@@ -617,6 +621,10 @@ pub fn handle_pointer_motion_absolute(
     }
     let pos = clamp_to_outputs(state, pos);
     state.pointer_location = pos;
+    if state.drag2d.is_some() {
+        state.drag2d_motion();
+        return;
+    }
     let Some(pointer) = state.seat.get_pointer() else {
         return;
     };
@@ -677,6 +685,10 @@ pub fn handle_pointer_motion(
     }
     let pos = clamp_to_outputs(state, state.pointer_location + delta);
     state.pointer_location = pos;
+    if state.drag2d.is_some() {
+        state.drag2d_motion();
+        return;
+    }
     let Some(pointer) = state.seat.get_pointer() else {
         return;
     };
@@ -755,6 +767,12 @@ pub fn handle_pointer_button(
         state.queue_redraw();
         return;
     }
+    // 2D: the end of a Mod+drag.
+    if button_state == ButtonState::Released && state.drag2d.is_some() {
+        state.input.suppressed_buttons.remove(&button);
+        state.drag2d_release();
+        return;
+    }
     if button_state == ButtonState::Released && state.input.suppressed_buttons.remove(&button) {
         return;
     }
@@ -824,6 +842,17 @@ pub fn handle_pointer_button(
         && state.render_mode == RenderMode::Flat2D
         && !state.lock.is_locked()
     {
+        // Mod+drag moves, Mod+right-drag resizes the window under the pointer.
+        let mods = state.seat.get_keyboard().map(|k| k.modifier_state()).unwrap_or_default();
+        let nested = state.backend.is_nested();
+        let modkey = Mods::from_state(&mods, state.config.general.mod_key, nested).mod_;
+        if modkey
+            && (button == BTN_LEFT || button == BTN_RIGHT)
+            && state.drag2d_press(button == BTN_RIGHT)
+        {
+            state.input.suppressed_buttons.insert(button);
+            return;
+        }
         // 2D click-to-focus. Not while a grab (popup menu, drag) is active: the grab decides.
         let window = state.space.element_under(pointer.current_location()).map(|(w, _)| w.clone());
         state.focus_window(window.as_ref(), serial);

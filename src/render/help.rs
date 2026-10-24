@@ -93,6 +93,8 @@ pub fn help_columns(
         row(&keys(&binds.fullscreen), "fullscreen (Esc leaves it)"),
         row(&keys(&binds.next_window), "go to next window"),
         row(&keys(&binds.seated), "seated: windows around me"),
+        row(&keys(&binds.toggle_2d), "3D world / plain 2D desktop"),
+        row(&format!("2D: {mod_name}+drag"), "move (right button: resize)"),
         row(&keys(&binds.grab), "carry / put down a window"),
         row(&keys(&binds.rotate), "turn a window"),
         row(&keys(&binds.reset_rotation), "face me again"),

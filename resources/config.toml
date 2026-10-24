@@ -143,6 +143,8 @@ next_window = ["Mod+Tab", "Mod+grave"]
 help = "Mod+K"
 # Seated mode: all windows on an arc around you at reading distance, no walking.
 seated = "Mod+S"
+# Switch between the 3D world and a plain 2D desktop (windows stay where they are).
+toggle_2d = "Mod+D"
 lock = "Mod+L"
 screenshot = "Print"
 screenshot_region = "Shift+Print"
