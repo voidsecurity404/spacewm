@@ -42,6 +42,7 @@ use smithay::{
             data_device::DataDeviceState, primary_selection::PrimarySelectionState,
             wlr_data_control::DataControlState,
         },
+        shell::wlr_layer::WlrLayerShellState,
         shell::xdg::XdgShellState,
         shm::ShmState,
         xwayland_shell::XWaylandShellState,
@@ -60,6 +61,16 @@ use crate::{
         view::View3D,
     },
 };
+
+/// What has the keyboard besides windows.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum Overlay {
+    #[default]
+    None,
+    /// A layer surface with exclusive keyboard interactivity (fuzzel, wofi...): walking
+    /// is suspended and a 2D cursor clicks layer surfaces until it closes.
+    Layer(smithay::desktop::LayerSurface),
+}
 
 /// A drag-and-drop icon: the surface a client attached to the cursor while dragging.
 pub struct DndIcon {
@@ -109,6 +120,13 @@ pub struct SpaceState {
     pub xwayland_shell_state: XWaylandShellState,
     /// Our X11 display and, while X apps run, the Xwayland server (None: X11 disabled).
     pub xwayland: Option<crate::xwayland::Xwayland>,
+    /// zwlr_layer_shell_v1: bars, launchers, notifications (wayland/layer_shell.rs).
+    pub layer_shell_state: WlrLayerShellState,
+    /// Something on top of the view that has the keyboard.
+    pub overlay: Overlay,
+    /// The built-in launcher, while open (it then gets every key).
+    pub launcher: Option<crate::launcher::Launcher>,
+    pub hud: crate::render::hud::Hud,
 
     /// Menus and tooltips. Popups belong to a parent surface, not to the window list.
     pub popups: PopupManager,
@@ -201,6 +219,8 @@ impl SpaceState {
         tracing::debug!("global: wl_compositor, wl_subcompositor");
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
         let xwayland_shell_state = XWaylandShellState::new::<Self>(&dh);
+        let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
+        tracing::debug!("global: zwlr_layer_shell_v1");
         tracing::debug!("global: xdg_wm_base");
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         tracing::debug!("global: wl_shm");
@@ -270,6 +290,10 @@ impl SpaceState {
             xdg_shell_state,
             xwayland_shell_state,
             xwayland: None,
+            layer_shell_state,
+            overlay: Overlay::None,
+            launcher: None,
+            hud: Default::default(),
             shm_state,
             output_manager_state,
             seat_state,
@@ -473,10 +497,22 @@ impl SpaceState {
         &self,
         pos: Point<f64, Logical>,
     ) -> Option<(PointerFocusTarget, Point<f64, Logical>)> {
+        // Layer surfaces on top of windows first, then windows (only in 2D: in 3D they
+        // are panels, reached through raycasts), then layers below them.
+        use smithay::wayland::shell::wlr_layer::Layer;
+        let windows = self.render_mode == crate::cli::RenderMode::Flat2D;
+        if let Some(hit) = self.layer_surface_under(pos, &[Layer::Overlay, Layer::Top]) {
+            return Some(hit);
+        }
+        let window_hit = if windows { self.space.element_under(pos) } else { None };
+        let Some((window, window_pos)) = window_hit else {
+            let below: &[Layer] =
+                if windows { &[Layer::Bottom, Layer::Background] } else { &[Layer::Bottom] };
+            return self.layer_surface_under(pos, below);
+        };
         // `element_under` returns where the window's buffer origin is drawn (its position
         // minus the geometry offset, e.g. client-side shadows), which is the origin that
         // `surface_under` expects.
-        let (window, window_pos) = self.space.element_under(pos)?;
         window.surface_under(pos - window_pos.to_f64(), WindowSurfaceType::ALL).map(
             |(surface, surface_pos)| {
                 // An X11 window's surface is reported as its wl_surface; route through the
@@ -490,6 +526,31 @@ impl SpaceState {
                 (target, (surface_pos + window_pos).to_f64())
             },
         )
+    }
+
+    /// The topmost layer surface (or one of its popups) at `pos` on the given layers.
+    fn layer_surface_under(
+        &self,
+        pos: Point<f64, Logical>,
+        layers: &[smithay::wayland::shell::wlr_layer::Layer],
+    ) -> Option<(PointerFocusTarget, Point<f64, Logical>)> {
+        let output = self
+            .space
+            .outputs()
+            .find(|o| self.space.output_geometry(o).is_some_and(|g| g.to_f64().contains(pos)))?;
+        let origin = self.space.output_geometry(output)?.loc;
+        let map = smithay::desktop::layer_map_for_output(output);
+        let local = pos - origin.to_f64();
+        for &layer in layers {
+            let Some(surface) = map.layer_under(layer, local) else { continue };
+            let Some(geo) = map.layer_geometry(surface) else { continue };
+            if let Some((s, at)) =
+                surface.surface_under(local - geo.loc.to_f64(), WindowSurfaceType::ALL)
+            {
+                return Some((PointerFocusTarget::Surface(s), (at + geo.loc + origin).to_f64()));
+            }
+        }
+        None
     }
 
     /// Run after every event-loop dispatch: drop dead windows/popups and send everything

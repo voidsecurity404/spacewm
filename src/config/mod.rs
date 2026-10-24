@@ -143,6 +143,8 @@ pub struct Render {
     /// When nothing moves, redraws caused by apps (a blinking cursor, a video) are capped
     /// at this rate. 0: no cap (the monitor's refresh rate).
     pub max_fps_idle: u32,
+    /// The clock/mode/title line in the top-left corner (Mod+F1 toggles it).
+    pub hud: bool,
     /// Frames follow the monitor's refresh (DRM page flips, or the host's pace when
     /// nested), so there is never tearing. `false` (tearing for lower latency) is not
     /// supported yet.
@@ -157,6 +159,7 @@ impl Default for Render {
             fog: true,
             panel_mipmaps: true,
             max_fps_idle: 0,
+            hud: true,
             vsync: true,
         }
     }

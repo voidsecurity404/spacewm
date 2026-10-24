@@ -57,5 +57,7 @@ pub fn create_output(
 pub fn resize_output(output: &Output, size: Size<i32, Physical>, refresh_mhz: i32) {
     let mode = Mode { size, refresh: refresh_mhz };
     output.change_current_state(Some(mode), None, None, None);
+    // Bars and other layer surfaces are laid out relative to the output size.
+    smithay::desktop::layer_map_for_output(output).arrange();
     output.set_preferred(mode);
 }

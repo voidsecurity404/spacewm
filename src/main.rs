@@ -8,6 +8,7 @@ mod error;
 mod focus;
 mod input;
 mod ipc;
+mod launcher;
 mod logging;
 mod render;
 mod spawn;

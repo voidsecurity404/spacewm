@@ -233,6 +233,10 @@ pub struct KeybindsConfig {
     pub hide: Binding,
     pub debug: Binding,
     pub reload_shaders: Binding,
+    /// The built-in app launcher.
+    pub launcher: Binding,
+    /// Show/hide the clock-and-mode line in the corner.
+    pub hud: Binding,
     /// Block types 1..8 for building, in order.
     pub select_block: Binding,
     pub spawn: Vec<SpawnBind>,
@@ -254,6 +258,8 @@ impl Default for KeybindsConfig {
             hide: Binding::one("Mod+H"),
             debug: Binding::one("Mod+F3"),
             reload_shaders: Binding::one("Mod+F5"),
+            launcher: Binding::one("Mod+space"),
+            hud: Binding::one("Mod+F1"),
             select_block: Binding::many(&[
                 "Mod+1", "Mod+2", "Mod+3", "Mod+4", "Mod+5", "Mod+6", "Mod+7", "Mod+8",
             ]),
@@ -279,6 +285,8 @@ impl KeybindsConfig {
             ("hide", &self.hide, Action::TogglePanelHidden),
             ("debug", &self.debug, Action::ToggleDebug),
             ("reload_shaders", &self.reload_shaders, Action::ReloadShaders),
+            ("launcher", &self.launcher, Action::Launcher),
+            ("hud", &self.hud, Action::ToggleHud),
         ];
         for (key, binding, action) in singles {
             for c in &binding.0 {

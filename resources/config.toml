@@ -54,6 +54,8 @@ panel_mipmaps = true
 # When nothing moves, cap redraws caused by apps (blinking cursors, animations) to this
 # many per second. 0: no cap.
 max_fps_idle = 0
+# The clock / mode / window title line in the top-left corner (Mod+F1 toggles it).
+hud = true
 # Frames always follow the monitor's refresh (no tearing); false is not supported yet.
 vsync = true
 
@@ -88,6 +90,9 @@ scale_down = ["Mod+minus", "Mod+KP_Subtract"]
 hide = "Mod+H"
 debug = "Mod+F3"
 reload_shaders = "Mod+F5"
+# The built-in app launcher (type, arrows, Enter; Escape closes).
+launcher = "Mod+space"
+hud = "Mod+F1"
 # Block types for building (Mod+click breaks, Mod+right click places).
 select_block = ["Mod+1", "Mod+2", "Mod+3", "Mod+4", "Mod+5", "Mod+6", "Mod+7", "Mod+8"]
 
