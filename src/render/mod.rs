@@ -11,6 +11,7 @@ pub mod frustum;
 pub mod gl;
 pub mod help;
 pub mod hud;
+pub mod menu;
 pub mod notice;
 pub mod panel_texture;
 pub mod perf;
@@ -119,6 +120,8 @@ pub struct OverlayInputs<'a> {
     pub osd: Option<&'a crate::inventory::Image>,
     /// "Starting Firefox ..." at the top.
     pub launching: Option<&'a crate::inventory::Image>,
+    /// The window menu and its top-left corner (output-relative).
+    pub menu: Option<(&'a crate::inventory::Image, (i32, i32))>,
     /// A fullscreen window is shown: where to draw the 2D cursor (output-relative
     /// logical px). Also hides bars.
     pub fullscreen_cursor: Option<Point<f64, Logical>>,
@@ -154,6 +157,19 @@ where
         .ok()
         .map(SpaceRenderElement::Memory)
     };
+    if let Some(((buffer, _), at)) = inputs.menu {
+        // Its cursor on top of it.
+        elements.extend(pointer_elements(
+            renderer,
+            inputs.cursor_status,
+            inputs.cursor_theme,
+            None,
+            inputs.pointer - geo.loc.to_f64(),
+            scale,
+            inputs.time,
+        ));
+        elements.extend(boxed(renderer, buffer, at));
+    }
     if let Some((buffer, size)) = inputs.help {
         let x = (geo.size.w - size.0) / 2;
         let y = ((geo.size.h - size.1) / 2).max(0);
@@ -237,7 +253,8 @@ where
     let covered = inputs.layer_focus
         || inputs.launcher.is_some()
         || inputs.inventory.is_some()
-        || inputs.help.is_some();
+        || inputs.help.is_some()
+        || inputs.menu.is_some();
     if !covered || !three_d {
         elements.extend(mode_overlay(renderer, inputs, Some(geo)));
     }
@@ -327,6 +344,7 @@ macro_rules! overlay_inputs {
             help: $state.help.as_ref(),
             osd: $state.desktop.osd.as_ref().map(|o| &o.image),
             launching: $state.desktop.launching.image.as_ref(),
+            menu: $state.menu.as_ref().and_then(|m| m.image.as_ref().map(|i| (i, m.origin))),
             fullscreen_cursor: $state.fullscreen.map(|_| $state.virtual_cursor),
         }
     };

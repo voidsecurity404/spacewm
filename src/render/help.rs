@@ -36,7 +36,7 @@ fn pretty_key(name: &str) -> String {
 }
 
 /// "Mod+Shift+equal" -> "Alt+Shift+=".
-fn pretty_combo(combo: &str, mod_name: &str) -> String {
+pub fn pretty_combo(combo: &str, mod_name: &str) -> String {
     combo
         .split('+')
         .map(|part| match part {
@@ -82,6 +82,7 @@ pub fn help_columns(
         row("Space", "jump (twice: fly)"),
         row("Shift / Ctrl", "down (flying) / run"),
         row("Left click", "use the window you look at"),
+        row("Right click", "window menu"),
         row(&keys(&binds.walk_mode), "leave a window, back to walking"),
         Line::default(),
         header("Windows"),
@@ -139,7 +140,7 @@ pub fn help_columns(
 
 impl SpaceState {
     /// How "Mod" is written in the help: the key that really is Mod here.
-    fn mod_name(&self) -> &'static str {
+    pub fn mod_name(&self) -> &'static str {
         match (self.config.general.mod_key, self.backend.is_nested()) {
             (ModKey::Alt, _) | (ModKey::Super, true) => "Alt",
             (ModKey::Super, false) => "Super",

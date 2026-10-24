@@ -96,6 +96,46 @@ import math
 assert math.dist(($X3,$Y3,$Z3),($X1,$Y1,$Z1)) < 0.01, 'position'
 assert abs(($YAW3 - $YAW1 + 180) % 360 - 180) < 0.5, 'yaw'" || fail "leaving did not glide back ($X3 $Y3 $Z3 yaw $YAW3; was $X1 $Y1 $Z1 yaw $YAW1)"
 pass "leaving glides back to where you stood"
+# ---- Window menu: right click on a window; entries do things; keys work too.
+kc mode walk
+kc teleport "$X0" "$Y0" "$Z0" --yaw "$YAW0" --pitch "$PITCH0"
+sleep 0.4
+M0=$(shot s10-before-menu)
+kc input click right
+sleep 0.3
+grep -q "window menu opened" "$OUT/spacewm.log" || fail "right click on a window opened no menu"
+M1=$(shot s10-menu)
+python3 -c "exit(0 if $($PX diff "$M0" "$M1") > 0.02 else 1)" || fail "menu not drawn"
+# "Show bigger" is entry 3: rows start 34 px down, 27 px each, a 7 px gap after entry 2;
+# the menu's corner is 6 px right of / below the screen center.
+read -r MX MY < <(python3 -c "print(640 + 6 + 60, 360 + 6 + 34 + 3*27 + 7 + 13)")
+kc input move-to "$MX" "$MY"
+kc input click
+sleep 0.3
+grep -q 'window menu panel=1 item=Bigger' "$OUT/spacewm.log" || fail "clicking 'Show bigger' did nothing"
+ppu=$(kc --json list | python3 -c "import json,sys; print(json.load(sys.stdin)['panels'][0]['pixels_per_unit'])")
+python3 -c "exit(0 if $ppu < 799 else 1)" || fail "panel not bigger (ppu $ppu)"
+pass "right click opens the window menu; 'Show bigger' works (ppu $ppu)"
+kc input click right
+sleep 0.2
+kc input key Escape
+sleep 0.2
+tail -n 20 "$OUT/spacewm.log" | grep -q "window menu closed" || fail "Escape did not close the menu"
+[ "$(count)" -eq 1 ] || fail "Escape did something besides closing"
+# Mod+right click while using the window opens it too; Up (wraps to "Close") + Enter.
+kc mode window 1
+sleep 0.5
+kc input key Super_L --state press
+kc input click right
+kc input key Super_L --state release
+sleep 0.3
+[ "$(grep -c "window menu opened" "$OUT/spacewm.log")" -ge 3 ] || fail "Mod+right click in a window opened no menu"
+kc input key Up
+kc input key Return
+for _ in $(seq 30); do [ "$(count)" -eq 0 ] && break; sleep 0.1; done
+[ "$(count)" -eq 0 ] || fail "menu 'Close' (Up, Enter) did not close the window"
+pass "Escape closes the menu; Mod+right click in a window; keyboard Up+Enter picks 'Close'"
+
 space_stop || fail "unclean exit"
 grep -E "panicked" "$OUT/spacewm.log" && fail "panic in log"
 pass "clean exit"

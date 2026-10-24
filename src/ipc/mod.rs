@@ -400,11 +400,7 @@ fn handle_request(state: &mut SpaceState, id: ConnectionId, request: Request) ->
         },
         Request::ClosePanel { id: panel } => match state.window_by_id(panel) {
             Some(window) => {
-                if let Some(t) = window.toplevel() {
-                    t.send_close();
-                } else if let Some(x) = window.x11_surface() {
-                    let _ = x.close();
-                }
+                crate::input::world_ops::close_window(&window);
                 Response::Ok
             }
             None => Response::error(format!("no panel {panel}")),

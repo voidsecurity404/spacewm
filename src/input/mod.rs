@@ -225,6 +225,8 @@ enum KeyOutcome {
     /// A key while the inventory is open: its symbol, and whether it was Mod+Escape.
     Inventory(Keysym, bool),
     CloseHelp,
+    /// A key while the window menu is open.
+    Menu(Keysym),
 }
 
 pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState, time: InputTime) {
@@ -277,6 +279,13 @@ pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState,
         }
         let combo_mods = Mods::from_state(mods, state.config.general.mod_key, nested);
         let mod_escape = combo_mods.mod_ && sym == Some(Keysym::Escape);
+        // The window menu takes the keys while open.
+        if state.menu.is_some() {
+            state.input.suppressed_keys.insert(keycode);
+            return FilterResult::Intercept(Some(KeyOutcome::Menu(
+                sym.unwrap_or(Keysym::NoSymbol),
+            )));
+        }
         // The key help is on top of everything: Escape (or its own key) closes it, other
         // keys do nothing while it is shown.
         if state.help.is_some() {
@@ -349,6 +358,7 @@ pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState,
         Some(Some(KeyOutcome::DismissLayer)) => state.dismiss_layer(),
         Some(Some(KeyOutcome::Inventory(sym, mod_escape))) => inventory_key(state, sym, mod_escape),
         Some(Some(KeyOutcome::CloseHelp)) => state.close_help(),
+        Some(Some(KeyOutcome::Menu(sym))) => state.menu_key(sym),
         _ => {}
     }
 }
@@ -360,12 +370,7 @@ pub fn run_action(state: &mut SpaceState, action: Action) {
         Action::CloseWindow => {
             let focus = state.seat.get_keyboard().and_then(|k| k.current_focus());
             if let Some(KeyboardFocusTarget::Window(window)) = focus {
-                if let Some(toplevel) = window.toplevel() {
-                    // Asks the app to close; it may show "unsaved changes?" first.
-                    toplevel.send_close();
-                } else if let Some(x11) = window.x11_surface() {
-                    let _ = x11.close();
-                }
+                world_ops::close_window(&window);
             }
         }
         Action::Quit => state.quit(),
@@ -471,6 +476,7 @@ pub fn before_frame(state: &mut SpaceState) {
     state.refresh_hud();
     state.refresh_inventory();
     state.refresh_launching();
+    state.refresh_menu();
     if state.render_mode != RenderMode::Scene3D {
         return;
     }
@@ -551,6 +557,10 @@ pub fn handle_pointer_motion_absolute(
     time: InputTime,
 ) {
     state.input_activity();
+    if pointer_is_3d(state) && state.menu.is_some() {
+        state.menu_pointer(pos);
+        return;
+    }
     if pointer_is_3d(state) {
         match state.mode {
             // The inventory has an ordinary cursor.
@@ -587,6 +597,10 @@ pub fn handle_pointer_motion(
     time: InputTime,
 ) {
     state.input_activity();
+    if pointer_is_3d(state) && state.menu.is_some() {
+        state.menu_pointer(state.pointer_location + delta);
+        return;
+    }
     if pointer_is_3d(state) {
         match state.mode {
             InputMode::Walk if state.inventory.is_some() => {
@@ -659,6 +673,13 @@ fn walk_click(state: &mut SpaceState, button: u32) {
         Mods::from_state(&mods, state.config.general.mod_key, state.backend.is_nested()).mod_;
     match (modkey, button) {
         (true, BTN_LEFT) => world_ops::break_block(state),
+        // Right click on a window: its menu. (`hover` is only set when no block is in
+        // front of the window.)
+        (false, BTN_RIGHT) if state.hover.is_some() => {
+            if let Some(hit) = state.hover {
+                state.open_menu(hit.panel);
+            }
+        }
         (_, BTN_RIGHT) => world_ops::place_block(state),
         // Enter the panel under the crosshair; no panel there: break the block instead
         // (`target_block` is only set when no panel is nearer than the block).
@@ -676,6 +697,28 @@ pub fn handle_pointer_button(
     state.input_activity();
     if button_state == ButtonState::Released && state.input.suppressed_buttons.remove(&button) {
         return;
+    }
+    // The window menu: a click picks an entry or closes it (and goes nowhere else).
+    if state.menu.is_some() {
+        if button_state == ButtonState::Pressed {
+            state.input.suppressed_buttons.insert(button);
+            state.menu_click();
+        }
+        return;
+    }
+    // Mod+right click while using a window: its menu.
+    if let (InputMode::Window { panel }, ButtonState::Pressed, BTN_RIGHT) =
+        (state.mode, button_state, button)
+    {
+        let mods = state.seat.get_keyboard().map(|k| k.modifier_state()).unwrap_or_default();
+        let nested = state.backend.is_nested();
+        if pointer_is_3d(state)
+            && Mods::from_state(&mods, state.config.general.mod_key, nested).mod_
+        {
+            state.input.suppressed_buttons.insert(button);
+            state.open_menu(panel);
+            return;
+        }
     }
     // A click closes the key help (and goes nowhere else).
     if state.help.is_some() {

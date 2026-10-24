@@ -68,9 +68,13 @@ pub fn toggle_grab(state: &mut SpaceState) {
         state.layout_changed();
         return;
     }
-    let Some(panel) = target_panel(state) else {
-        return;
-    };
+    if let Some(panel) = target_panel(state) {
+        grab_panel(state, panel);
+    }
+}
+
+/// Pick up `panel` (it then follows the view until put down).
+pub fn grab_panel(state: &mut SpaceState, panel: PanelId) {
     if matches!(state.mode, InputMode::Window { .. }) {
         set_mode(state, InputMode::Walk, None);
     }
@@ -145,9 +149,13 @@ pub fn rotate_target(state: &mut SpaceState, reset: bool) {
         state.queue_redraw();
         return;
     }
-    let Some(id) = target_panel(state) else {
-        return;
-    };
+    if let Some(id) = target_panel(state) {
+        rotate_panel(state, id, reset);
+    }
+}
+
+/// Turn `id` by 90°, or (`reset`) make it face the camera again.
+pub fn rotate_panel(state: &mut SpaceState, id: PanelId, reset: bool) {
     let camera = state.view.camera.position;
     if let Some(p) = state.world.panels_mut().iter_mut().find(|p| p.id == id) {
         if reset {
@@ -162,9 +170,13 @@ pub fn rotate_target(state: &mut SpaceState, reset: bool) {
 
 /// Mod+Plus / Mod+Minus: the panel grows/shrinks by 10% (fewer/more pixels per metre).
 pub fn scale_target(state: &mut SpaceState, bigger: bool) {
-    let Some(id) = target_panel(state) else {
-        return;
-    };
+    if let Some(id) = target_panel(state) {
+        scale_panel(state, id, bigger);
+    }
+}
+
+/// `id` looks 10% bigger/smaller (the window keeps its pixel size).
+pub fn scale_panel(state: &mut SpaceState, id: PanelId, bigger: bool) {
     if let Some(p) = state.world.panels_mut().iter_mut().find(|p| p.id == id) {
         let factor = if bigger { 1.0 / 1.1 } else { 1.1 };
         p.pixels_per_unit = (p.pixels_per_unit * factor).clamp(PPU_MIN, PPU_MAX);
@@ -177,17 +189,7 @@ pub fn scale_target(state: &mut SpaceState, bigger: bool) {
 /// Mod+H: hide the target panel; with nothing targeted, show all hidden panels again.
 pub fn toggle_hidden(state: &mut SpaceState) {
     match target_panel(state) {
-        Some(id) => {
-            if state.mode == (InputMode::Window { panel: id }) {
-                set_mode(state, InputMode::Walk, None);
-            }
-            if state.grab.is_some_and(|g| g.panel == id) {
-                state.grab = None;
-            }
-            if let Some(p) = state.world.panels_mut().iter_mut().find(|p| p.id == id) {
-                p.visible = false;
-            }
-        }
+        Some(id) => hide_panel(state, id),
         None => {
             for p in state.world.panels_mut() {
                 p.visible = true;
@@ -196,6 +198,42 @@ pub fn toggle_hidden(state: &mut SpaceState) {
     }
     state.view.dirty = true;
     state.layout_changed();
+}
+
+/// Hide `id` (Mod+H with nothing targeted shows hidden panels again).
+pub fn hide_panel(state: &mut SpaceState, id: PanelId) {
+    if state.mode == (InputMode::Window { panel: id }) {
+        set_mode(state, InputMode::Walk, None);
+    }
+    if state.grab.is_some_and(|g| g.panel == id) {
+        state.grab = None;
+    }
+    if let Some(p) = state.world.panels_mut().iter_mut().find(|p| p.id == id) {
+        p.visible = false;
+    }
+    state.view.dirty = true;
+    state.layout_changed();
+}
+
+/// Ask a window's app to close (it may first ask about unsaved work).
+pub fn close_window(window: &smithay::desktop::Window) {
+    if let Some(toplevel) = window.toplevel() {
+        toplevel.send_close();
+    } else if let Some(x11) = window.x11_surface() {
+        let _ = x11.close();
+    }
+}
+
+/// Make `id`'s window itself bigger/smaller (more/fewer rows and columns).
+pub fn resize_panel(state: &mut SpaceState, id: PanelId, grow: bool) {
+    let Some(window) = state.window_by_id(id) else { return };
+    let size = window.geometry().size;
+    let f = if grow { 1.1 } else { 1.0 / 1.1 };
+    resize_window(
+        &window,
+        ((size.w as f64 * f).round() as i32, (size.h as f64 * f).round() as i32),
+    );
+    state.queue_redraw();
 }
 
 /// Left click on a block (Mod+left click anywhere): break the targeted block.
