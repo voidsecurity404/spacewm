@@ -21,6 +21,8 @@ use crate::state::SpaceState;
 pub struct Hud {
     pub visible: bool,
     text: String,
+    /// See `current_layout_tag`.
+    layout_tag: Option<String>,
     /// The rendered line and its size in logical px.
     pub image: Option<(MemoryRenderBuffer, (i32, i32))>,
     clock_timer: Option<RegistrationToken>,
@@ -65,7 +67,18 @@ impl SpaceState {
             }
             _ => String::new(),
         };
-        let mut s = format!("{h:02}:{m:02}   {mode}");
+        let (_, month, day, weekday, _, _, _) = crate::desktop::status::local_now();
+        let mut s = format!(
+            "{h:02}:{m:02}  {}   {mode}",
+            crate::desktop::status::short_date(weekday, day, month)
+        );
+        if let Some(b) = self.desktop.battery {
+            s.push_str(&format!("   Bat {}%{}", b.percent, if b.charging { "+" } else { "" }));
+        }
+        if let Some(tag) = &self.hud.layout_tag {
+            s.push_str("   ");
+            s.push_str(tag);
+        }
         if !title.is_empty() {
             let short: String = title.chars().take(60).collect();
             s.push_str("   ");
@@ -78,7 +91,20 @@ impl SpaceState {
     }
 
     /// Called before every frame: re-render the HUD if its text changed.
+    /// The active keyboard layout's tag ("EN"), only when there is more than one.
+    fn current_layout_tag(&mut self) -> Option<String> {
+        let keyboard = self.seat.get_keyboard()?;
+        keyboard.with_xkb_state(self, |ctx| {
+            let xkb = ctx.xkb().lock().ok()?;
+            if xkb.layouts().count() < 2 {
+                return None;
+            }
+            Some(crate::desktop::status::layout_tag(xkb.layout_name(xkb.active_layout())))
+        })
+    }
+
     pub fn refresh_hud(&mut self) {
+        self.hud.layout_tag = self.current_layout_tag();
         // Nothing over a fullscreen window.
         if !self.hud.visible || self.fullscreen.is_some() {
             self.hud.image = None;

@@ -85,19 +85,29 @@ sleep 1
 [ "$(kc get-block 0 "$TOP" 1)" = "glass" ] || fail "glass block lost after restart"
 [ "$(kc get-block 0 $((TOP + 2)) -4)" = "stone" ] || fail "wall lost after restart"
 pass "block edits survive a restart"
-# Facing the wall: a terminal asked for now goes back to its saved spot there.
+count() { kc --json list | python3 -c "import json,sys; print(len(json.load(sys.stdin)['panels']))"; }
+pz() { kc --json list | python3 -c "import json,sys; print(json.load(sys.stdin)['panels'][0]['position'][2])"; }
+# The terminal that was open when spacewm exited comes back by itself, on the wall.
+wait_windows 1
+sleep 0.8
+grep -q "reopening last session's apps count=1" "$OUT/spacewm.log" || fail "last session's foot not reopened"
+python3 -c "exit(0 if abs($(pz) - $PZ) < 0.001 else 1)" || fail "reopened foot not on the wall (z=$(pz), saved $PZ)"
+pass "the terminal open at exit is reopened by itself, on the wall"
+# Closed again, then asked for while facing the wall: back to its saved spot there.
+kc close "$(kc --json list | python3 -c "import json,sys; print(json.load(sys.stdin)['panels'][0]['id'])")" >/dev/null
+for _ in $(seq 30); do [ "$(count)" -eq 0 ] && break; sleep 0.1; done
 kc teleport 0.5 "$EYE" 0.5 --yaw 0 --pitch 0
 kc spawn foot >/dev/null
 wait_windows 1
 sleep 0.8
-read -r PZ2 < <(kc --json list | python3 -c "import json,sys; print(json.load(sys.stdin)['panels'][0]['position'][2])")
+read -r PZ2 < <(pz)
 python3 -c "exit(0 if abs($PZ2 - $PZ) < 0.001 else 1)" || fail "foot did not reopen on the wall (z=$PZ2, saved $PZ)"
 pass "reopened terminal comes back on the wall"
 
 # A terminal asked for while facing away from its saved spot opens in front, not behind
 # the user (who would then type into an invisible window: it looked frozen).
-kc close 1 >/dev/null
-for _ in $(seq 30); do [ "$(kc --json list | grep -c '"id":')" -eq 0 ] && break; sleep 0.1; done
+kc close "$(kc --json list | python3 -c "import json,sys; print(json.load(sys.stdin)['panels'][0]['id'])")" >/dev/null
+for _ in $(seq 30); do [ "$(count)" -eq 0 ] && break; sleep 0.1; done
 kc teleport 0.5 "$EYE" 0.5 --yaw 180 --pitch 0
 kc input key Super+Return
 wait_windows 1

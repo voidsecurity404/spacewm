@@ -436,3 +436,35 @@ Har bir siklda quyidagilar bajariladi:
 
 100 sikl (300 ta oyna) natijasi: ochiq fayllar 33 → 33, xotira 83.4 → 85.2 MB (oyna
 boshiga taxminan 6 KB, bu allocator keshlari, oqish emas), panic va xato yo'q.
+
+### Kunlik ishlatish uchun (src/desktop/)
+
+spacewm'ni yagona, asosiy desktop qilib ishlatish uchun:
+
+- **Media tugmalar**: ovoz +/-/mute, mikrofon, ekran yorug'ligi, play/pause/next/prev.
+  Har bosishda pastda kichik OSD chiqadi ("Volume 55%" va chiziq) va 1.6 soniyadan
+  keyin yo'qoladi. Ular har qanday rejimda ishlaydi, qulflangan ekranda ham: musiqani
+  ochmasdan pasaytirish mumkin. Boshqa tugmalar qulf ostida ishlamaydi.
+- **Screenshot**: Print butun ekranni, Shift+Print sichqoncha bilan belgilangan hududni
+  (slurp orqali) oladi. Fayl `~/Pictures/Screenshots/spacewm-SANA_VAQT.png` ga saqlanadi
+  va clipboard'ga ham ko'chiriladi, shuning uchun darhol Telegram'ga Ctrl+V qilish
+  mumkin.
+- **Qulflash**: Mod+L. Haqiqiy sessiyada 10 daqiqa harakatsizlikdan keyin avtomatik
+  qulflanadi. Video ko'rayotganda bunday bo'lmaydi, chunki pleyerlar "idle inhibitor"
+  ushlab turadi. Nested rejimda avto-qulf o'chiq: u yerda qulflashni Hyprland qiladi.
+- **HUD**: "16:49  Sat 24 Oct   Walk   Bat 87%+   EN". "+" quvvat olayotganini bildiradi.
+  Til tegi faqat bir nechta klaviatura tili sozlangan bo'lsa chiqadi. Batareya 10% ga
+  tushsa va zaryadka ulanmagan bo'lsa, bir marta qizil ogohlantirish chiqadi.
+- **Sessiyani tiklash**: spacewm yopilganda qaysi dasturlarning oynasi ochiq bo'lgani
+  layout fayliga yoziladi. Keyingi ishga tushishda ular qayta ochiladi, oynalar esa
+  o'z joylariga qaytadi. Ikkita foot ikkita bo'lib qaytadi, Firefox esa bitta jarayon
+  bo'lgani uchun bir marta ochiladi. Faqat dastur fayli saqlanadi, argumentlar
+  saqlanmaydi: `foot -e buyruq` qayta ochilganda o'sha buyruq yana bajarilmaydi.
+- **Haqiqiy sessiyada**: bildirishnoma daemon'i bo'lmasa (`org.freedesktop.Notifications`
+  egasi yo'q bo'lsa), mako ishga tushadi. Session skripti Electron dasturlarini
+  Wayland'da ishlashga yo'naltiradi.
+
+Barcha buyruqlar `[desktop]` bo'limida, masalan wpctl o'rniga pactl qo'yish mumkin.
+Buyruqlar alohida thread'da, 4 soniyalik timeout bilan bajariladi: osilib qolgan
+vosita desktop'ni qotira olmaydi. Testlar (`stage9_desktop.sh`) soxta skriptlardan
+foydalanadi va haqiqiy ovoz yoki yorug'likni o'zgartirmaydi.

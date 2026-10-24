@@ -11,7 +11,7 @@ use serde::{de, Deserialize, Deserializer};
 use smithay::input::keyboard::{xkb, Keysym, ModifiersState};
 
 use super::{ModKey, Problem};
-use crate::input::Action;
+use crate::{desktop::Hw, input::Action};
 
 /// Modifiers of a combo. `alt` and `super_` mean those keys when they are NOT the Mod key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -246,6 +246,21 @@ pub struct KeybindsConfig {
     pub next_window: Binding,
     /// Show every key on screen.
     pub help: Binding,
+    /// Lock the screen (`desktop.lock_command`).
+    pub lock: Binding,
+    /// Whole screen to ~/Pictures/Screenshots and the clipboard; a dragged region.
+    pub screenshot: Binding,
+    pub screenshot_region: Binding,
+    /// Laptop/keyboard media keys; they work everywhere, also while locked.
+    pub volume_up: Binding,
+    pub volume_down: Binding,
+    pub volume_mute: Binding,
+    pub mic_mute: Binding,
+    pub brightness_up: Binding,
+    pub brightness_down: Binding,
+    pub play_pause: Binding,
+    pub next_track: Binding,
+    pub previous_track: Binding,
     /// Hotbar slots for building, in order (more keys than block types do nothing).
     pub select_block: Binding,
     pub spawn: Vec<SpawnBind>,
@@ -276,6 +291,18 @@ impl Default for KeybindsConfig {
             // itself, Mod+Tab never reaches us.
             next_window: Binding::many(&["Mod+Tab", "Mod+grave"]),
             help: Binding::one("Mod+K"),
+            lock: Binding::one("Mod+L"),
+            screenshot: Binding::one("Print"),
+            screenshot_region: Binding::one("Shift+Print"),
+            volume_up: Binding::one("XF86AudioRaiseVolume"),
+            volume_down: Binding::one("XF86AudioLowerVolume"),
+            volume_mute: Binding::one("XF86AudioMute"),
+            mic_mute: Binding::one("XF86AudioMicMute"),
+            brightness_up: Binding::one("XF86MonBrightnessUp"),
+            brightness_down: Binding::one("XF86MonBrightnessDown"),
+            play_pause: Binding::many(&["XF86AudioPlay", "XF86AudioPause"]),
+            next_track: Binding::one("XF86AudioNext"),
+            previous_track: Binding::one("XF86AudioPrev"),
             select_block: Binding::many(&["Mod+1", "Mod+2", "Mod+3", "Mod+4", "Mod+5"]),
             spawn: Vec::new(),
         }
@@ -306,6 +333,18 @@ impl KeybindsConfig {
             ("fullscreen", &self.fullscreen, Action::ToggleFullscreen),
             ("next_window", &self.next_window, Action::NextWindow),
             ("help", &self.help, Action::Help),
+            ("lock", &self.lock, Action::Lock),
+            ("screenshot", &self.screenshot, Action::Screenshot),
+            ("screenshot_region", &self.screenshot_region, Action::ScreenshotRegion),
+            ("volume_up", &self.volume_up, Action::Hardware(Hw::VolumeUp)),
+            ("volume_down", &self.volume_down, Action::Hardware(Hw::VolumeDown)),
+            ("volume_mute", &self.volume_mute, Action::Hardware(Hw::VolumeMute)),
+            ("mic_mute", &self.mic_mute, Action::Hardware(Hw::MicMute)),
+            ("brightness_up", &self.brightness_up, Action::Hardware(Hw::BrightnessUp)),
+            ("brightness_down", &self.brightness_down, Action::Hardware(Hw::BrightnessDown)),
+            ("play_pause", &self.play_pause, Action::Hardware(Hw::PlayPause)),
+            ("next_track", &self.next_track, Action::Hardware(Hw::NextTrack)),
+            ("previous_track", &self.previous_track, Action::Hardware(Hw::PreviousTrack)),
         ];
         for (key, binding, action) in singles {
             for c in &binding.0 {

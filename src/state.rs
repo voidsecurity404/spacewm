@@ -166,6 +166,8 @@ pub struct SpaceState {
     pub overlay: Overlay,
     /// The built-in launcher, while open (it then gets every key).
     pub launcher: Option<crate::launcher::Launcher>,
+    /// Media keys, screenshots, auto-lock, battery (desktop/).
+    pub desktop: crate::desktop::DesktopState,
     /// The inventory screen (E while walking), while open.
     pub inventory: Option<crate::inventory::Inventory>,
     pub hotbar: crate::inventory::Hotbar,
@@ -390,6 +392,7 @@ impl SpaceState {
             wlr_screencopy_global,
             overlay: Overlay::None,
             launcher: None,
+            desktop: Default::default(),
             inventory: None,
             hotbar: Default::default(),
             help: None,
@@ -562,7 +565,8 @@ impl SpaceState {
             return;
         }
         let open = self.world.panels().iter().filter_map(saved_panel).collect();
-        self.layout.save(open);
+        let apps = self.open_apps();
+        self.layout.save(open, apps);
     }
 
     /// Copy a window's current app_id/title to its panel (see `Panel::names`).
@@ -609,6 +613,11 @@ impl SpaceState {
             return;
         };
         panel.placement_pending = false;
+        // A new app is open: the list of apps to reopen next time changed.
+        self.layout_changed();
+        let Some(panel) = self.world.panels_mut().iter_mut().find(|p| &p.window == window) else {
+            return;
+        };
         if let Some(saved) = saved {
             tracing::info!(app_id, "restored saved placement");
             panel.position = saved.position();

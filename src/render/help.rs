@@ -106,6 +106,12 @@ pub fn help_columns(
         row("Right click", "place block"),
         row("Left click", "break block"),
         Line::default(),
+        header("Desktop"),
+        row(&keys(&binds.lock), "lock the screen"),
+        row(&keys(&binds.screenshot), "screenshot (+ clipboard)"),
+        row(&keys(&binds.screenshot_region), "screenshot of a region"),
+        row("Media keys", "volume, brightness, music"),
+        Line::default(),
         header("spacewm"),
         row(&keys(&binds.help), "this help"),
         row(&keys(&binds.hud), "clock line on/off"),
@@ -241,6 +247,7 @@ mod tests {
         assert!(has("Alt+Enter") && has("terminal"));
         assert!(has("Alt+F ") && has("fullscreen"));
         assert!(has("Alt+K") && has("this help"));
+        assert!(has("Alt+L") && has("Print") && has("Shift+Print"));
         assert!(has("Ctrl+Alt+G"), "nested: how to get the mouse back");
         // Every key fits its column: the description never touches the key.
         for l in left.iter().chain(&right).filter(|l| l.text.chars().count() > KEY_COLS) {

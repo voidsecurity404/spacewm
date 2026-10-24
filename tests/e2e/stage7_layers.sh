@@ -36,7 +36,7 @@ hud() { grep "spacewm::render::hud" "$OUT/spacewm.log" | tail -1 | sed 's/.*text
 
 # ---- HUD: clock + mode in the corner; Mod+F1 toggles it.
 sleep 0.5
-hud | grep -qE '^[0-9]{2}:[0-9]{2}   Walk' || fail "HUD text wrong: $(hud)"
+hud | grep -qE '^[0-9]{2}:[0-9]{2}  [A-Z][a-z]{2} [0-9]{1,2} [A-Z][a-z]{2}   Walk' || fail "HUD text wrong: $(hud)"
 A=$(shot s7-hud)
 kc input key "Super+F1"
 sleep 0.3

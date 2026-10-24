@@ -70,6 +70,9 @@ pub struct LayoutFile {
     pub panels: Vec<SavedPanel>,
     #[serde(default)]
     pub blocks: Vec<SavedBlock>,
+    /// Programs that had windows open (desktop/restore.rs).
+    #[serde(default)]
+    pub apps: Vec<String>,
 }
 
 /// In-memory layout state.
@@ -83,6 +86,8 @@ pub struct Layout {
     pub edits: HashMap<IVec3, Block>,
     /// Something changed since the last save.
     pub dirty: bool,
+    /// Programs open when the file was saved, to reopen at startup.
+    pub apps: Vec<String>,
 }
 
 impl Layout {
@@ -107,8 +112,12 @@ impl Layout {
         };
         let pool: Vec<SavedPanel> = file.panels.into_iter().filter(SavedPanel::is_valid).collect();
         let edits = file.blocks.into_iter().map(|b| (IVec3::from(b.pos), b.block)).collect();
+        // Only absolute program paths (that is all spacewm writes): a hand-edited entry
+        // can't sneak in arguments.
+        let apps =
+            file.apps.into_iter().filter(|a| a.starts_with('/') && !a.contains(' ')).collect();
         tracing::info!(path = %path.display(), panels = pool.len(), "layout loaded");
-        Self { path: Some(path), pool, edits, dirty: false }
+        Self { path: Some(path), pool, edits, dirty: false, apps }
     }
 
     /// The saved placement for a new window of `app_id`, if there is an unused one. With
@@ -137,21 +146,21 @@ impl Layout {
     }
 
     /// Serialize the open panels plus everything still waiting in the pool.
-    pub fn to_file(&self, open: Vec<SavedPanel>) -> LayoutFile {
+    pub fn to_file(&self, open: Vec<SavedPanel>, apps: Vec<String>) -> LayoutFile {
         let mut panels = open;
         panels.extend(self.pool.iter().cloned());
         let mut blocks: Vec<SavedBlock> =
             self.edits.iter().map(|(p, b)| SavedBlock { pos: p.to_array(), block: *b }).collect();
         // Stable order: diffs stay readable and the file doesn't churn.
         blocks.sort_by_key(|b| (b.pos[1], b.pos[2], b.pos[0]));
-        LayoutFile { version: VERSION, panels, blocks }
+        LayoutFile { version: VERSION, panels, blocks, apps }
     }
 
-    pub fn save(&mut self, open: Vec<SavedPanel>) {
+    pub fn save(&mut self, open: Vec<SavedPanel>, apps: Vec<String>) {
         let Some(path) = self.path.clone() else {
             return;
         };
-        match write_atomic(&path, &self.to_file(open)) {
+        match write_atomic(&path, &self.to_file(open, apps)) {
             Ok(()) => {
                 self.dirty = false;
                 tracing::debug!(path = %path.display(), "layout saved");
@@ -207,7 +216,7 @@ mod tests {
         assert!(layout.pool.is_empty());
         layout.record_block(IVec3::new(-3, 7, 2), Block::Glass);
         layout.record_block(IVec3::new(1, 9, 1), Block::Air);
-        layout.save(vec![panel("foot", 1.0, None)]);
+        layout.save(vec![panel("foot", 1.0, None)], vec!["/usr/bin/foot".into()]);
         assert!(!dir.join("layout.json.tmp").exists(), "temp file renamed away");
 
         let mut again = Layout::load(path);
@@ -251,8 +260,12 @@ mod tests {
         let path = dir.join("layout.json");
         let mut bad = panel("foot", 1.0, None);
         bad.pixels_per_unit = 0.0;
-        let mut file =
-            LayoutFile { version: 1, panels: vec![bad, panel("foot", 2.0, None)], blocks: vec![] };
+        let mut file = LayoutFile {
+            version: 1,
+            panels: vec![bad, panel("foot", 2.0, None)],
+            blocks: vec![],
+            apps: vec![],
+        };
         file.panels[1].rotation = [0.0, 0.0, 0.0, 0.0];
         write_atomic(&path, &file).expect("write");
         let mut layout = Layout::load(path);

@@ -16,6 +16,8 @@ export MOZ_ENABLE_WAYLAND=1
 export QT_QPA_PLATFORM="wayland;xcb"
 export SDL_VIDEODRIVER=wayland
 export _JAVA_AWT_WM_NONREPARENTING=1
+# Electron apps (VS Code, Discord, Obsidian...): native Wayland, sharp on any scale.
+export ELECTRON_OZONE_PLATFORM_HINT=auto
 
 # Keyboard layouts are set in ~/.config/spacewm/config.toml ([input] keyboard_layout);
 # when that is empty, xkb falls back to XKB_DEFAULT_LAYOUT and then "us".

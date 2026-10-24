@@ -41,6 +41,7 @@ impl SpaceState {
     /// Any user input: idle timers start over.
     pub fn input_activity(&mut self) {
         self.idle_notifier_state.notify_activity(&self.seat);
+        self.desktop_input();
     }
 
     pub fn update_idle_inhibit(&mut self) {

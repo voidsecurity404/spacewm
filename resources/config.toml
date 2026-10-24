@@ -68,6 +68,34 @@ spawn_distance = "auto"
 # In Window mode, other panels are drawn slightly transparent.
 dim_unfocused = true
 
+[desktop]
+# Commands run without a shell; "" switches a feature off.
+# Mod+L, and after lock_after_minutes without input (0: never; not while a video plays).
+lock_command = "swaylock -f -c 101418"
+lock_after_minutes = 10
+# Reopen the apps that were open when spacewm last exited (their windows go back to
+# where they were).
+restore_apps = true
+# Print: whole screen, Shift+Print: a region you drag (region_selector prints it).
+# Saved here and copied to the clipboard.
+screenshot_dir = "~/Pictures/Screenshots"
+region_selector = "slurp"
+# On a real session with no notification daemon running, start this one.
+notification_daemon = "mako"
+# Media keys. The *_get commands print the level for the on-screen display.
+volume_up = "wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+"
+volume_down = "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"
+volume_mute = "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
+volume_get = "wpctl get-volume @DEFAULT_AUDIO_SINK@"
+mic_mute = "wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle"
+mic_get = "wpctl get-volume @DEFAULT_AUDIO_SOURCE@"
+brightness_up = "brightnessctl -q set 5%+"
+brightness_down = "brightnessctl -q -n set 5%-"
+brightness_get = "brightnessctl -m"
+play_pause = "playerctl play-pause"
+next_track = "playerctl next"
+previous_track = "playerctl previous"
+
 # One section per monitor (names as in `spacewm --drm-probe`). Needs a restart.
 # [[output]]
 # name = "HDMI-A-1"
@@ -102,6 +130,19 @@ fullscreen = "Mod+F"
 next_window = ["Mod+Tab", "Mod+grave"]
 # Every key on screen (Escape or a click closes it).
 help = "Mod+K"
+lock = "Mod+L"
+screenshot = "Print"
+screenshot_region = "Shift+Print"
+# Media keys work everywhere, also on the lock screen.
+volume_up = "XF86AudioRaiseVolume"
+volume_down = "XF86AudioLowerVolume"
+volume_mute = "XF86AudioMute"
+mic_mute = "XF86AudioMicMute"
+brightness_up = "XF86MonBrightnessUp"
+brightness_down = "XF86MonBrightnessDown"
+play_pause = ["XF86AudioPlay", "XF86AudioPause"]
+next_track = "XF86AudioNext"
+previous_track = "XF86AudioPrev"
 # Hotbar slots. While walking, plain 1-5, the scroll wheel and E (inventory) work too;
 # left click breaks a block, right click places the selected one.
 select_block = ["Mod+1", "Mod+2", "Mod+3", "Mod+4", "Mod+5"]

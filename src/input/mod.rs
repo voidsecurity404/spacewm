@@ -89,6 +89,12 @@ pub enum Action {
     NextWindow,
     /// Show / hide every key on screen.
     Help,
+    /// Lock the screen now.
+    Lock,
+    Screenshot,
+    ScreenshotRegion,
+    /// A media key (works while locked too).
+    Hardware(crate::desktop::Hw),
 }
 
 /// The nested-only escape hatch: Ctrl+Alt+G gives the mouse back to the host desktop
@@ -255,6 +261,13 @@ pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState,
         // Locked: every key goes to the locker (keyboard focus can only be its surface).
         // No keybinds — nothing may open, close or show anything behind the lock.
         if state.lock.is_locked() {
+            // Media keys still work (turn the music down without unlocking); nothing
+            // else may run behind the lock.
+            let combo = Mods::from_state(mods, state.config.general.mod_key, nested);
+            if let Some(Action::Hardware(hw)) = sym.and_then(|s| state.keybinds.get(combo, s)) {
+                state.input.suppressed_keys.insert(keycode);
+                return FilterResult::Intercept(Some(KeyOutcome::Action(Action::Hardware(hw))));
+            }
             return FilterResult::Forward;
         }
         if is_release_pointer(nested, mods, sym) {
@@ -381,6 +394,10 @@ pub fn run_action(state: &mut SpaceState, action: Action) {
         }
         Action::NextWindow => mode::next_window(state),
         Action::Help => state.toggle_help(),
+        Action::Lock => state.lock_now(),
+        Action::Screenshot => state.screenshot(false),
+        Action::ScreenshotRegion => state.screenshot(true),
+        Action::Hardware(hw) => state.hardware_key(hw),
         Action::WalkMode => mode::set_mode(state, InputMode::Walk, None),
         Action::Launcher => state.toggle_launcher(),
         Action::ToggleHud => {

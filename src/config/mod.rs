@@ -31,6 +31,7 @@ pub struct Config {
     pub input: Input,
     pub render: Render,
     pub panels: Panels,
+    pub desktop: Desktop,
     /// `[[output]]` tables: per-monitor mode and scale (DRM backend).
     #[serde(rename = "output")]
     pub outputs: Vec<OutputConfig>,
@@ -69,6 +70,89 @@ impl Default for General {
             world_seed: crate::world::terrain::DEFAULT_SEED,
             ipc_allow_shell: false,
         }
+    }
+}
+
+/// Everyday desktop things: locking, screenshots, media keys, restoring apps. Commands
+/// are run without a shell (split like a shell would); "" switches a feature off.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Desktop {
+    /// Started by the lock keybind and after `lock_after_minutes` without input.
+    pub lock_command: String,
+    /// Lock after this many minutes without input (not while a video plays). 0: never.
+    pub lock_after_minutes: u32,
+    /// Start the apps that were open when spacewm last exited.
+    pub restore_apps: bool,
+    /// Where Print saves screenshots ("~" is your home).
+    pub screenshot_dir: String,
+    /// Prints "x,y wxh" for Shift+Print (a region you drag).
+    pub region_selector: String,
+    /// On a real session without a notification daemon, start this one.
+    pub notification_daemon: String,
+    pub volume_up: String,
+    pub volume_down: String,
+    pub volume_mute: String,
+    /// Prints the volume (a 0..1 number or a percentage; "MUTED" if muted).
+    pub volume_get: String,
+    pub mic_mute: String,
+    pub mic_get: String,
+    pub brightness_up: String,
+    pub brightness_down: String,
+    /// Prints the brightness (a percentage somewhere in its output).
+    pub brightness_get: String,
+    pub play_pause: String,
+    pub next_track: String,
+    pub previous_track: String,
+}
+
+impl Default for Desktop {
+    fn default() -> Self {
+        let s = |v: &str| v.to_string();
+        Self {
+            lock_command: s("swaylock -f -c 101418"),
+            lock_after_minutes: 10,
+            restore_apps: true,
+            screenshot_dir: s("~/Pictures/Screenshots"),
+            region_selector: s("slurp"),
+            notification_daemon: s("mako"),
+            volume_up: s("wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+"),
+            volume_down: s("wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"),
+            volume_mute: s("wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"),
+            volume_get: s("wpctl get-volume @DEFAULT_AUDIO_SINK@"),
+            mic_mute: s("wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle"),
+            mic_get: s("wpctl get-volume @DEFAULT_AUDIO_SOURCE@"),
+            brightness_up: s("brightnessctl -q set 5%+"),
+            // -n: never all the way to 0 (a black screen you can't see to fix).
+            brightness_down: s("brightnessctl -q -n set 5%-"),
+            brightness_get: s("brightnessctl -m"),
+            play_pause: s("playerctl play-pause"),
+            next_track: s("playerctl next"),
+            previous_track: s("playerctl previous"),
+        }
+    }
+}
+
+impl Desktop {
+    /// (key, command) for every command setting, to validate them.
+    fn commands(&self) -> [(&'static str, &str); 15] {
+        [
+            ("lock_command", &self.lock_command),
+            ("region_selector", &self.region_selector),
+            ("notification_daemon", &self.notification_daemon),
+            ("volume_up", &self.volume_up),
+            ("volume_down", &self.volume_down),
+            ("volume_mute", &self.volume_mute),
+            ("volume_get", &self.volume_get),
+            ("mic_mute", &self.mic_mute),
+            ("mic_get", &self.mic_get),
+            ("brightness_up", &self.brightness_up),
+            ("brightness_down", &self.brightness_down),
+            ("brightness_get", &self.brightness_get),
+            ("play_pause", &self.play_pause),
+            ("next_track", &self.next_track),
+            ("previous_track", &self.previous_track),
+        ]
     }
 }
 
@@ -591,6 +675,16 @@ impl Config {
         }
         if let Err(e) = check_command(&self.general.terminal) {
             p.push(problem("general.terminal", e));
+        }
+        let d = &self.desktop;
+        check_range(&mut p, "desktop.lock_after_minutes", d.lock_after_minutes, 0, 1440);
+        for (key, cmd) in d.commands() {
+            // "" switches the feature off.
+            if !cmd.trim().is_empty() {
+                if let Err(e) = check_command(cmd) {
+                    p.push(problem(format!("desktop.{key}"), e));
+                }
+            }
         }
         p.extend(self.keybinds.validate());
         p

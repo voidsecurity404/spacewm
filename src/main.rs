@@ -4,6 +4,7 @@
 mod backend;
 mod cli;
 mod config;
+mod desktop;
 mod error;
 mod focus;
 mod input;
@@ -192,12 +193,20 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         // (portals, notification daemons) and systemd user units where our Wayland socket
         // is, or they would start without WAYLAND_DISPLAY and fail.
         spawn::update_activation_environment(&state.socket_name);
+        // Nobody else starts one on a real session.
+        state.start_notification_daemon();
     }
+    desktop::init(&mut state, &loop_handle);
 
     if let Some(e) = config_error {
         state.show_error(e.short());
     }
 
+    // Last session's apps, unless this start was told what to open (--spawn: tests,
+    // trying something out).
+    if state.config.desktop.restore_apps && state.cli.spawn.is_empty() {
+        state.restore_apps();
+    }
     let autostart = state.config.general.autostart.clone();
     for command in state.cli.spawn.clone().into_iter().chain(autostart) {
         if let Err(err) = state.launch(&command) {

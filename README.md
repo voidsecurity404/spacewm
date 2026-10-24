@@ -48,6 +48,13 @@ Mod is Super on a real session and Alt when nested (`general.mod_key`).
 | Mod+Return, Mod+Space | terminal, launcher |
 | Mod+Shift+Q, Mod+Shift+E | close window, quit |
 | Mod+K | every key on screen (Escape closes) |
+| Mod+L | lock the screen (also after 10 min idle on a real session) |
+| Print / Shift+Print | screenshot of the screen / a region, saved and copied |
+| media keys | volume, mic, brightness, play/pause, with an on-screen level |
+
+Daily use: the HUD shows time, date, battery and keyboard layout; apps open when spacewm
+exits are reopened at the next start (`[desktop] restore_apps`). All commands behind
+these features are in the `[desktop]` config section.
 
 Apps already open outside spacewm (on the desktop it is nested in) still open inside it:
 browsers and Telegram then get their own profile in `~/.local/share/spacewm/apps/`

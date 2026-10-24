@@ -60,6 +60,25 @@ pub struct Spawned {
     pub note: Option<String>,
 }
 
+/// A `Command` for a helper tool (wpctl, grim...) with our session environment and a
+/// clean signal mask. Safe to build on any thread.
+pub fn session_command(program: &str, socket: &OsStr) -> Command {
+    let mut command = Command::new(program);
+    session_env(&mut command, socket);
+    // SAFETY: only async-signal-safe libc calls between fork and exec.
+    unsafe {
+        command.pre_exec(|| {
+            // Our blocked SIGINT/SIGTERM would be inherited: the tool (or a daemon it
+            // leaves running, like wl-copy) could then never be stopped.
+            let mut set: libc::sigset_t = std::mem::zeroed();
+            libc::sigemptyset(&mut set);
+            libc::pthread_sigmask(libc::SIG_SETMASK, &set, std::ptr::null_mut());
+            Ok(())
+        });
+    }
+    command
+}
+
 /// Run `cmd` (split like a shell would, but without a shell) as a client of our socket.
 /// Errors are logged, never fatal.
 pub fn spawn(cmd: &str, socket: &OsStr) -> Result<Spawned, String> {
