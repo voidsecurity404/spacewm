@@ -14,6 +14,7 @@
 //! tool must never freeze the desktop. Every command has a timeout; results come back to
 //! the event loop through a calloop channel.
 
+pub mod launching;
 pub mod osd;
 pub mod restore;
 pub mod status;
@@ -55,6 +56,8 @@ pub enum Msg {
     Level { what: osd::Kind, percent: Option<u32>, muted: bool },
     /// Show a message (info or error).
     Note { text: String, error: bool },
+    /// A program spacewm started has exited (`None`: killed by a signal).
+    Exited { pid: u32, code: Option<i32> },
 }
 
 /// Commands that take longer than this are killed.
@@ -76,6 +79,8 @@ pub struct DesktopState {
     low_battery_warned: bool,
     /// Last battery reading for the HUD, refreshed every TICK.
     pub battery: Option<status::Battery>,
+    /// Apps on their way ("Starting Firefox ...").
+    pub launching: launching::Launching,
 }
 
 /// Set up the result channel and the periodic tick. Called once at startup.
@@ -90,6 +95,7 @@ pub fn init(state: &mut SpaceState, handle: &LoopHandle<'static, SpaceState>) {
         tracing::warn!("desktop helper channel: {}", e.error);
         return;
     }
+    crate::spawn::set_exit_sender(tx.clone());
     state.desktop.tx = Some(tx);
     state.desktop.last_input = Some(Instant::now());
     state.desktop.battery = status::battery();
@@ -271,7 +277,7 @@ impl SpaceState {
             return;
         }
         tracing::info!(command = cmd, "locking");
-        if let Err(e) = self.launch(&cmd) {
+        if let Err(e) = self.launch_untracked(&cmd) {
             self.show_error(vec![format!("Locking failed: {e}")]);
         }
     }
@@ -281,6 +287,7 @@ impl SpaceState {
             Msg::Level { what, percent, muted } => self.show_osd(what, percent, muted),
             Msg::Note { text, error: true } => self.show_error(vec![text]),
             Msg::Note { text, error: false } => self.show_info(text),
+            Msg::Exited { pid, code } => self.launch_exited(pid, code),
         }
     }
 

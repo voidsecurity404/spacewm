@@ -360,6 +360,7 @@ impl SpaceState {
         self.restore_placement(window);
         self.view.dirty = true;
         crate::ipc::broadcast(self, Event::PanelOpened { id, app_id });
+        self.launch_window_opened(window);
         if self.render_mode == RenderMode::Scene3D {
             crate::input::mode::on_new_window(self, id);
         } else {

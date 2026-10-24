@@ -35,12 +35,15 @@ space_start() {
 }
 
 space_stop() {
-    rm -f "$OUT/layout-$$.json" "$OUT/config-$$.toml"
-    [ -n "$SPACE_PID" ] || return 0
-    kc quit >/dev/null 2>&1 || kill "$SPACE_PID" 2>/dev/null || true
-    wait "$SPACE_PID" 2>/dev/null
+    if [ -n "$SPACE_PID" ]; then
+        kc quit >/dev/null 2>&1 || kill "$SPACE_PID" 2>/dev/null || true
+        wait "$SPACE_PID" 2>/dev/null
+    fi
     local code=$?
     SPACE_PID=""
+    # After spacewm is gone: it saves the layout as it exits, and a leftover file would
+    # reopen this run's apps in the next start.
+    rm -f "$OUT/layout-$$.json" "$OUT/config-$$.toml"
     return $code
 }
 

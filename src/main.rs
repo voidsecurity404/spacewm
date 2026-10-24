@@ -208,8 +208,9 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         state.restore_apps();
     }
     let autostart = state.config.general.autostart.clone();
+    // Autostart is mostly daemons without windows: no "Starting ..." line for them.
     for command in state.cli.spawn.clone().into_iter().chain(autostart) {
-        if let Err(err) = state.launch(&command) {
+        if let Err(err) = state.launch_untracked(&command) {
             tracing::warn!("{err}");
         }
     }

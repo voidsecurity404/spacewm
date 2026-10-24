@@ -16,7 +16,7 @@ const NEVER: &[&str] = &["spacewm", "spacectl", "Xwayland", "test_locker", "sway
 
 /// The process that owns a window: the Wayland client's pid, or for X11 windows the
 /// pid the app announced (_NET_WM_PID), since the Wayland client there is Xwayland.
-fn window_pid(state: &SpaceState, window: &Window) -> Option<u32> {
+pub fn window_pid(state: &SpaceState, window: &Window) -> Option<u32> {
     if let Some(x11) = window.x11_surface() {
         return x11.pid();
     }

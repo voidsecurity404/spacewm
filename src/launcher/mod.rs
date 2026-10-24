@@ -184,10 +184,8 @@ impl SpaceState {
         tracing::info!(app = entry.name, command, "launching");
         self.expect_window_until =
             Some(std::time::Instant::now() + crate::input::mode::SPAWN_FOCUS_WINDOW);
-        if let Err(e) = self.launch(&command) {
-            tracing::warn!("{e}");
-            self.show_error(vec![format!("Cannot start {}:", entry.name), e]);
-        }
+        // Errors are shown by launch_named.
+        let _ = self.launch_named(&command, &entry.name);
     }
 
     fn redraw_launcher(&mut self) {

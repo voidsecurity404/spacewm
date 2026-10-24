@@ -117,6 +117,8 @@ pub struct OverlayInputs<'a> {
     pub help: Option<&'a crate::inventory::Image>,
     /// Volume/brightness level after a media key.
     pub osd: Option<&'a crate::inventory::Image>,
+    /// "Starting Firefox ..." at the top.
+    pub launching: Option<&'a crate::inventory::Image>,
     /// A fullscreen window is shown: where to draw the 2D cursor (output-relative
     /// logical px). Also hides bars.
     pub fullscreen_cursor: Option<Point<f64, Logical>>,
@@ -212,6 +214,10 @@ where
     if let Some((buffer, _)) = inputs.hud {
         // Inside the area bars leave free, so it never hides under waybar.
         elements.extend(boxed(renderer, buffer, (zone.loc.x + 12, zone.loc.y + 10)));
+    }
+    if let Some((buffer, size)) = inputs.launching {
+        let x = zone.loc.x + (zone.size.w - size.0) / 2;
+        elements.extend(boxed(renderer, buffer, (x, zone.loc.y + 10)));
     }
     if let Some((buffer, size)) = inputs.osd {
         // Low and centered, above the hotbar; also over a fullscreen window.
@@ -320,6 +326,7 @@ macro_rules! overlay_inputs {
             inventory: $state.inventory.as_ref().and_then(|i| i.image.as_ref()),
             help: $state.help.as_ref(),
             osd: $state.desktop.osd.as_ref().map(|o| &o.image),
+            launching: $state.desktop.launching.image.as_ref(),
             fullscreen_cursor: $state.fullscreen.map(|_| $state.virtual_cursor),
         }
     };

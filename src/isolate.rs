@@ -123,7 +123,7 @@ fn parent_of(pid: u32) -> Option<u32> {
     rest.split_whitespace().nth(1)?.parse().ok()
 }
 
-fn is_descendant_of(mut pid: u32, ancestor: u32) -> bool {
+pub fn is_descendant_of(mut pid: u32, ancestor: u32) -> bool {
     // Bounded: a pid chain can't be longer than this, and /proc may change under us.
     for _ in 0..256 {
         if pid == ancestor {

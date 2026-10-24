@@ -409,9 +409,8 @@ pub fn run_action(state: &mut SpaceState, action: Action) {
                 let command = bind.command.clone();
                 state.expect_window_until =
                     Some(std::time::Instant::now() + mode::SPAWN_FOCUS_WINDOW);
-                if let Err(err) = state.launch(&command) {
-                    tracing::warn!("{err}");
-                }
+                // Errors are shown by launch.
+                let _ = state.launch(&command);
             }
         }
     }
@@ -470,6 +469,7 @@ pub fn before_frame(state: &mut SpaceState) {
     let _span = tracing::trace_span!("physics").entered();
     state.refresh_hud();
     state.refresh_inventory();
+    state.refresh_launching();
     if state.render_mode != RenderMode::Scene3D {
         return;
     }

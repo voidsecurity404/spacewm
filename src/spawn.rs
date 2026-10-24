@@ -29,6 +29,16 @@ fn x_display() -> Option<String> {
     }
 }
 
+/// Where the reaper threads report exits (desktop/launching.rs waits for windows).
+static EXITS: Mutex<Option<smithay::reexports::calloop::channel::Sender<crate::desktop::Msg>>> =
+    Mutex::new(None);
+
+pub fn set_exit_sender(tx: smithay::reexports::calloop::channel::Sender<crate::desktop::Msg>) {
+    if let Ok(mut s) = EXITS.lock() {
+        *s = Some(tx);
+    }
+}
+
 /// The IPC socket, exported to children as SPACEWM_SOCKET (spacectl finds spacewm through it).
 static IPC_SOCKET: Mutex<Option<PathBuf>> = Mutex::new(None);
 
@@ -127,9 +137,13 @@ fn spawn_args(
     let pid = child.id();
     tracing::info!(pid, command = label, args = ?args, "spawned");
     // Reap the child when it exits so it doesn't stay a zombie.
+    let exits = EXITS.lock().ok().and_then(|s| s.clone());
     std::thread::spawn(move || {
         if let Ok(status) = child.wait() {
             tracing::debug!(pid, %status, "child exited");
+            if let Some(tx) = exits {
+                let _ = tx.send(crate::desktop::Msg::Exited { pid, code: status.code() });
+            }
         }
     });
     Ok(pid)
@@ -156,16 +170,36 @@ pub fn spawn_terminal(state: &mut SpaceState) {
     };
     state.expect_window_until =
         Some(std::time::Instant::now() + crate::input::mode::SPAWN_FOCUS_WINDOW);
-    if let Err(err) = state.launch(&terminal) {
-        tracing::warn!("{err}");
-    }
+    let _ = state.launch(&terminal);
 }
 
 impl SpaceState {
-    /// Start a program (keybind, launcher, autostart, IPC). When it had to be kept apart
-    /// from a copy open outside spacewm, say so on screen: otherwise a fresh profile (no
-    /// logins, no bookmarks) would be a surprise.
+    /// Start an app the user asked for (launcher, keybind, last session's apps): shown
+    /// as "Starting ..." until its window opens; failures are shown on screen.
     pub fn launch(&mut self, cmd: &str) -> Result<u32, String> {
+        let name = crate::desktop::launching::display_name(cmd);
+        self.launch_named(cmd, &name)
+    }
+
+    /// `launch` with the name the user knows the app by ("Visual Studio Code").
+    pub fn launch_named(&mut self, cmd: &str, name: &str) -> Result<u32, String> {
+        match self.launch_untracked(cmd) {
+            Ok(pid) => {
+                self.launch_started(pid, name.to_string());
+                Ok(pid)
+            }
+            Err(e) => {
+                tracing::warn!("{e}");
+                self.show_error(vec![format!("Cannot start {name}:"), e.clone()]);
+                Err(e)
+            }
+        }
+    }
+
+    /// Start a program without waiting for a window (autostart daemons, the locker,
+    /// IPC scripts). When it had to be kept apart from a copy open outside spacewm, say so
+    /// on screen: otherwise a fresh profile (no logins, no bookmarks) would be a surprise.
+    pub fn launch_untracked(&mut self, cmd: &str) -> Result<u32, String> {
         let spawned = spawn(cmd, &self.socket_name)?;
         if let Some(note) = spawned.note {
             let style = crate::render::text::Style {
