@@ -120,6 +120,8 @@ pub struct OverlayInputs<'a> {
     pub osd: Option<&'a crate::inventory::Image>,
     /// "Starting Firefox ..." at the top.
     pub launching: Option<&'a crate::inventory::Image>,
+    /// "drag: move" under the crosshair.
+    pub drag_hint: Option<&'a crate::inventory::Image>,
     /// The window menu and its top-left corner (output-relative).
     pub menu: Option<(&'a crate::inventory::Image, (i32, i32))>,
     /// A fullscreen window is shown: where to draw the 2D cursor (output-relative
@@ -157,6 +159,10 @@ where
         .ok()
         .map(SpaceRenderElement::Memory)
     };
+    if let Some((buffer, size)) = inputs.drag_hint {
+        let x = (geo.size.w - size.0) / 2;
+        elements.extend(boxed(renderer, buffer, (x, geo.size.h / 2 + 16)));
+    }
     if let Some(((buffer, _), at)) = inputs.menu {
         // Its cursor on top of it.
         elements.extend(pointer_elements(
@@ -345,6 +351,7 @@ macro_rules! overlay_inputs {
             osd: $state.desktop.osd.as_ref().map(|o| &o.image),
             launching: $state.desktop.launching.image.as_ref(),
             menu: $state.menu.as_ref().and_then(|m| m.image.as_ref().map(|i| (i, m.origin))),
+            drag_hint: $state.drag_hint.as_ref().map(|(_, i)| i),
             fullscreen_cursor: $state.fullscreen.map(|_| $state.virtual_cursor),
         }
     };

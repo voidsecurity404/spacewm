@@ -136,6 +136,65 @@ for _ in $(seq 30); do [ "$(count)" -eq 0 ] && break; sleep 0.1; done
 [ "$(count)" -eq 0 ] || fail "menu 'Close' (Up, Enter) did not close the window"
 pass "Escape closes the menu; Mod+right click in a window; keyboard Up+Enter picks 'Close'"
 
+# ---- Drag a window by its top edge (moves), its corner (resizes); a still click on
+# the edge still enters the window.
+kc spawn foot >/dev/null
+wait_windows 1
+sleep 0.8
+kc mode walk
+sleep 0.3
+panel() { kc --json list | python3 -c "import json,sys; p=json.load(sys.stdin)['panels'][0]; print(*p['position'], p['yaw_deg'], *p['size_px'], p['pixels_per_unit'])"; }
+# Stand 1 m in front of the window, then aim at a spot given in window pixels.
+aim() {
+    read -r PX PY PZ PYAW W H PPU < <(panel)
+    read -r CX CY CZ CYAW CPITCH < <(python3 -c "
+import math
+y = math.radians($PYAW)
+nx, nz = math.sin(y), math.cos(y)          # the window's front
+rx, rz = math.cos(y), -math.sin(y)         # its right (window +x)
+u = ($1 - $W / 2) / $PPU                   # metres right of the center
+v = ($H / 2 - $2) / $PPU                   # metres above it
+cx, cy, cz = $PX + nx, $PY, $PZ + nz
+tx, ty, tz = $PX + rx * u, $PY + v, $PZ + rz * u
+dx, dy, dz = tx - cx, ty - cy, tz - cz
+print(cx, cy, cz, math.degrees(math.atan2(dx, -dz)), math.degrees(math.atan2(dy, math.hypot(dx, dz))))")
+    kc teleport "$CX" "$CY" "$CZ" --yaw "$CYAW" --pitch "$CPITCH"
+    sleep 0.3
+}
+aim 500 8
+shot s10-aim-top >/dev/null
+grep -q 'drag hint hint="drag: move"' "$OUT/spacewm.log" || fail "no move hint on the top edge (panel $(panel), camera $(kc camera))"
+read -r MX0 _ MZ0 _ < <(panel)
+kc input click --state press
+kc input move-by 250 0
+kc input click --state release
+sleep 0.4
+read -r MX1 _ MZ1 _ < <(panel)
+grep -q "drag started" "$OUT/spacewm.log" || fail "no drag started"
+python3 -c "import math; exit(0 if math.dist(($MX0,$MZ0),($MX1,$MZ1)) > 0.3 else 1)" ||
+    fail "dragging the top edge did not move the window ($MX0,$MZ0 -> $MX1,$MZ1)"
+[ "$(focused)" = "[]" ] || fail "a drag must not enter the window"
+pass "dragging the top edge moves the window"
+aim 500 8
+kc input click --state press
+kc input click --state release
+sleep 0.3
+[ "$(focused)" != "[]" ] || fail "a still click on the edge did not enter the window"
+pass "a still click on the edge still enters the window"
+kc mode walk
+sleep 0.5
+read -r _ _ _ _ W0 H0 _ < <(panel)
+aim $((W0 - 15)) $((H0 - 15))
+grep -q 'drag hint hint="drag: resize"' "$OUT/spacewm.log" || fail "no resize hint on the corner"
+kc input click --state press
+kc input move-by 120 80
+kc input move-by 120 80
+kc input click --state release
+for _ in $(seq 30); do read -r _ _ _ _ W1 H1 _ < <(panel); [ "$W1" -gt "$((W0 + 40))" ] && break; sleep 0.1; done
+[ "$W1" -gt "$((W0 + 40))" ] && [ "$H1" -gt "$((H0 + 20))" ] || fail "dragging the corner did not resize (${W0}x$H0 -> ${W1}x$H1)"
+grep -q "drag resize done" "$OUT/spacewm.log" || fail "no resize log"
+pass "dragging the corner resizes the window (${W0}x$H0 -> ${W1}x$H1)"
+
 space_stop || fail "unclean exit"
 grep -E "panicked" "$OUT/spacewm.log" && fail "panic in log"
 pass "clean exit"

@@ -171,6 +171,10 @@ pub struct SpaceState {
     /// The inventory screen (E while walking), while open.
     pub inventory: Option<crate::inventory::Inventory>,
     pub hotbar: crate::inventory::Hotbar,
+    /// A left press held on a window's top edge / corner (input/drag.rs).
+    pub drag: Option<crate::input::drag::Drag>,
+    /// "drag: move" under the crosshair, and which spot it was drawn for.
+    pub drag_hint: Option<(crate::input::drag::Zone, crate::inventory::Image)>,
     /// The window menu (right click on a window), while open.
     pub menu: Option<crate::render::menu::PanelMenu>,
     /// The key help box (Mod+K), while shown.
@@ -401,6 +405,8 @@ impl SpaceState {
             hotbar: Default::default(),
             help: None,
             menu: None,
+            drag: None,
+            drag_hint: None,
             fullscreen: None,
             focus_view: None,
             hud: Default::default(),

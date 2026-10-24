@@ -8,6 +8,7 @@
 //! (mode.rs): Walk drives the camera, Window drives one panel's client.
 
 pub mod camera_controls;
+pub mod drag;
 pub mod focus_view;
 pub mod fullscreen;
 pub mod inject;
@@ -518,6 +519,8 @@ pub fn before_frame(state: &mut SpaceState) {
     state.focus_view_apply();
     world_ops::update_grab(state);
     mode::update_hover(state);
+    // Needs this frame's hover.
+    state.refresh_drag_hint();
 }
 
 /// Keep the pointer inside the union of all outputs.
@@ -569,7 +572,9 @@ pub fn handle_pointer_motion_absolute(
                 // An absolute device can only turn by how far it moved since last time.
                 let delta = state.input.last_abs.map(|last| pos - last).unwrap_or_default();
                 state.input.last_abs = Some(pos);
-                look(state, delta);
+                if !state.drag_motion(delta) {
+                    look(state, delta);
+                }
             }
             InputMode::Window { .. } => mode::point_virtual_cursor(state, pos, time),
         }
@@ -608,7 +613,13 @@ pub fn handle_pointer_motion(
             }
             // Reading the key help: the view holds still.
             InputMode::Walk if state.help.is_some() => {}
-            InputMode::Walk => look(state, delta),
+            InputMode::Walk => {
+                // Resizing by the corner uses the mouse; otherwise it turns the view (and
+                // a window dragged by its top edge follows).
+                if !state.drag_motion(delta) {
+                    look(state, delta);
+                }
+            }
             InputMode::Window { .. } => {
                 mode::move_virtual_cursor(state, delta, time);
                 if let Some(pointer) = state.seat.get_pointer() {
@@ -695,6 +706,16 @@ pub fn handle_pointer_button(
     time: InputTime,
 ) {
     state.input_activity();
+    // Releasing a press held on a window's grab spot: a drag ends, or (no movement) it
+    // was a plain click after all.
+    if button_state == ButtonState::Released && button == BTN_LEFT && state.drag.is_some() {
+        state.input.suppressed_buttons.remove(&button);
+        if state.drag_release() == Some(true) {
+            walk_click(state, BTN_LEFT);
+        }
+        state.queue_redraw();
+        return;
+    }
     if button_state == ButtonState::Released && state.input.suppressed_buttons.remove(&button) {
         return;
     }
@@ -737,7 +758,20 @@ pub fn handle_pointer_button(
             // In Walk mode buttons never reach clients (press AND release are ours).
             if button_state == ButtonState::Pressed {
                 state.input.suppressed_buttons.insert(button);
-                walk_click(state, button);
+                let mods =
+                    state.seat.get_keyboard().map(|k| k.modifier_state()).unwrap_or_default();
+                let modkey = Mods::from_state(
+                    &mods,
+                    state.config.general.mod_key,
+                    state.backend.is_nested(),
+                )
+                .mod_;
+                // On a window's top edge / corner: maybe a drag (decided by moving).
+                let plain_left = button == BTN_LEFT && !modkey;
+                let free = state.grab.is_none() && state.inventory.is_none();
+                if !(plain_left && free && state.drag_press()) {
+                    walk_click(state, button);
+                }
             }
             return;
         }
