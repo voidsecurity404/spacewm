@@ -3,7 +3,12 @@
 source "$(dirname "$0")/lib.sh"
 PX="python3 $(dirname "$0")/pixel.py"
 
-space_start --render 3d
+# This test checks 3D geometry from fixed camera spots: entering a window must not glide
+# the view (focus zoom, tested in stage10_comfort.sh).
+CFG4="$OUT/config-stage4-$$.toml"
+printf '[panels]\nfocus_zoom = false\n' >"$CFG4"
+trap 'rm -f "$CFG4"; space_stop >/dev/null 2>&1 || true' EXIT
+space_start --render 3d --config "$CFG4"
 
 # A window the user just started takes focus (Window mode) and gets the keyboard.
 kc spawn foot >/dev/null

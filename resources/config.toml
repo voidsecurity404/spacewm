@@ -67,6 +67,9 @@ default_pixels_per_unit = 800.0
 spawn_distance = "auto"
 # In Window mode, other panels are drawn slightly transparent.
 dim_unfocused = true
+# Entering a window glides the view in front of it, so text is sharp; leaving glides
+# back to where you stood.
+focus_zoom = true
 
 [desktop]
 # Commands run without a shell; "" switches a feature off.

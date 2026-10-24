@@ -72,6 +72,8 @@ enum Command {
     ReloadConfig,
     /// Performance: fps, frame time percentiles, work per second, GPU memory.
     Stats,
+    /// Where the view is (metres) and where it looks (degrees).
+    Camera,
     /// Save a PNG of the composited screen (path inside $HOME).
     Screenshot {
         path: PathBuf,
@@ -236,6 +238,7 @@ fn to_request(command: Command) -> Request {
         },
         Command::ReloadConfig => Request::ReloadConfig,
         Command::Stats => Request::Stats,
+        Command::Camera => Request::Camera,
         Command::Screenshot { path, force } => {
             let path = std::path::absolute(&path).unwrap_or(path);
             Request::Screenshot { path: path.display().to_string(), force }
@@ -302,6 +305,9 @@ fn print_human(response: &Response) {
         }
         Response::Event { event } => println!("{}", describe(event)),
         Response::Block { block } => println!("{block}"),
+        Response::Camera { position: p, yaw_deg, pitch_deg } => {
+            println!("{:.3} {:.3} {:.3} yaw {yaw_deg:.1} pitch {pitch_deg:.1}", p[0], p[1], p[2]);
+        }
         Response::Stats { stats: s } => {
             println!("fps              {:.1}", s.fps);
             println!(

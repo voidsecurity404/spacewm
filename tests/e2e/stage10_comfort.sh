@@ -61,5 +61,41 @@ sleep 0.5
 grep -q "failed to start 'spacewm-no-such-program'" "$OUT/spacewm.log" || fail "missing program not reported"
 pass "a missing program is reported on screen"
 space_stop || fail "unclean exit"
+# ---- Focus zoom: entering a far window glides the view to reading distance; leaving
+# glides back to exactly where you stood.
+space_start --render 3d --log-level debug
+sleep 1
+cam() { kc --json camera | python3 -c "import json,sys; d=json.load(sys.stdin); print(*d['position'], d['yaw_deg'], d['pitch_deg'])"; }
+read -r X0 Y0 Z0 YAW0 PITCH0 < <(cam)
+kc spawn foot >/dev/null
+wait_windows 1
+sleep 0.8
+kc mode walk
+sleep 0.5
+read -r PX0 PY0 PZ0 < <(kc --json list | python3 -c "import json,sys; print(*json.load(sys.stdin)['panels'][0]['position'])")
+D0=$(python3 -c "import math; print(math.dist(($X0,$Y0,$Z0),($PX0,$PY0,$PZ0)))")
+# Step back 3 m along the view and look a bit to the side.
+read -r BX BY BZ < <(python3 -c "
+import math; y=math.radians($YAW0)
+print($X0 - 3*math.sin(y), $Y0, $Z0 + 3*math.cos(y))")
+kc teleport "$BX" "$BY" "$BZ" --yaw "$(python3 -c "print($YAW0 + 8)")" --pitch 0
+sleep 0.3
+read -r X1 Y1 Z1 YAW1 PITCH1 < <(cam)
+kc mode window 1
+sleep 0.6
+read -r X2 Y2 Z2 _ _ < <(cam)
+D2=$(python3 -c "import math; print(math.dist(($X2,$Y2,$Z2),($PX0,$PY0,$PZ0)))")
+python3 -c "exit(0 if abs($D2 - $D0) < 0.05 * $D0 else 1)" || fail "entering did not glide to reading distance ($D2 m, want $D0)"
+grep -q "focus zoom in" "$OUT/spacewm.log" || fail "no focus zoom log"
+pass "entering a far window glides to reading distance (${D2} m)"
+kc mode walk
+sleep 0.6
+read -r X3 Y3 Z3 YAW3 _ < <(cam)
+python3 -c "
+import math
+assert math.dist(($X3,$Y3,$Z3),($X1,$Y1,$Z1)) < 0.01, 'position'
+assert abs(($YAW3 - $YAW1 + 180) % 360 - 180) < 0.5, 'yaw'" || fail "leaving did not glide back ($X3 $Y3 $Z3 yaw $YAW3; was $X1 $Y1 $Z1 yaw $YAW1)"
+pass "leaving glides back to where you stood"
+space_stop || fail "unclean exit"
 grep -E "panicked" "$OUT/spacewm.log" && fail "panic in log"
 pass "clean exit"

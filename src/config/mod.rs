@@ -290,6 +290,8 @@ pub struct Panels {
     pub spawn_distance: SpawnDistance,
     /// In Window mode, other panels are drawn slightly transparent.
     pub dim_unfocused: bool,
+    /// Entering a window glides the view in front of it (sharp text); leaving glides back.
+    pub focus_zoom: bool,
 }
 
 impl Default for Panels {
@@ -298,6 +300,7 @@ impl Default for Panels {
             default_pixels_per_unit: crate::world::panel::DEFAULT_PIXELS_PER_UNIT,
             spawn_distance: SpawnDistance::Auto,
             dim_unfocused: true,
+            focus_zoom: true,
         }
     }
 }

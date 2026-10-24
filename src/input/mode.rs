@@ -151,10 +151,12 @@ pub fn set_mode(state: &mut SpaceState, new_mode: InputMode, hit: Option<&PanelH
             set_activated(&window, true);
             state.set_keyboard_focus(Some(KeyboardFocusTarget::Window(window)));
             send_window_pointer(state, InputTime::now());
+            state.focus_view_enter(panel);
         }
         InputMode::Walk => {
             state.mode = new_mode;
             state.set_keyboard_focus(None);
+            state.focus_view_leave();
             // Pointer leaves every surface.
             if let Some(pointer) = state.seat.get_pointer() {
                 let location = pointer.current_location();
@@ -271,6 +273,8 @@ pub fn next_window(state: &mut SpaceState) {
         state.exit_fullscreen();
     }
     set_mode(state, InputMode::Walk, None);
+    // We set the view ourselves: no glide back to the old spot.
+    state.focus_view_cancel();
     let camera = &mut state.view.camera;
     let d = target - camera.position;
     // Yaw 0 looks along -Z (see Camera::forward); pitch up is positive.

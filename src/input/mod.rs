@@ -8,6 +8,7 @@
 //! (mode.rs): Walk drives the camera, Window drives one panel's client.
 
 pub mod camera_controls;
+pub mod focus_view;
 pub mod fullscreen;
 pub mod inject;
 pub mod mode;
@@ -502,10 +503,13 @@ pub fn before_frame(state: &mut SpaceState) {
     if state.player.pos.y < -40.0 {
         state.player = crate::world::player::Player::new(state.voxels.spawn);
     }
-    if moved || state.view.camera.position != state.player.eye() {
+    // While the view is gliding to / sitting in front of a window, it is not at the
+    // player's eyes (focus_view.rs).
+    if state.focus_view.is_none() && (moved || state.view.camera.position != state.player.eye()) {
         state.view.camera.position = state.player.eye();
         state.view.dirty = true;
     }
+    state.focus_view_apply();
     world_ops::update_grab(state);
     mode::update_hover(state);
 }

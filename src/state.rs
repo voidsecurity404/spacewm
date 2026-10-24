@@ -175,6 +175,8 @@ pub struct SpaceState {
     pub help: Option<crate::inventory::Image>,
     /// A panel shown flat over the whole screen instead of the 3D world (Mod+F).
     pub fullscreen: Option<crate::input::fullscreen::Fullscreen>,
+    /// The view gliding to / standing in front of the window in use.
+    pub focus_view: Option<crate::input::focus_view::FocusView>,
     pub hud: crate::render::hud::Hud,
 
     /// Menus and tooltips. Popups belong to a parent surface, not to the window list.
@@ -397,6 +399,7 @@ impl SpaceState {
             hotbar: Default::default(),
             help: None,
             fullscreen: None,
+            focus_view: None,
             hud: Default::default(),
             shm_state,
             output_manager_state,
@@ -461,7 +464,8 @@ impl SpaceState {
                 || (!self.player.on_ground && !self.player.flying)
                 || self.player.vel.length_squared() > 1e-6
                 // A pulsing border (xdg-activation) is an animation too.
-                || self.world.panels().iter().any(|p| p.attention_until.is_some_and(|t| t > now)))
+                || self.world.panels().iter().any(|p| p.attention_until.is_some_and(|t| t > now))
+                || self.focus_view.is_some_and(|f| f.moving()))
     }
 
     /// Ask the backend for a new frame (something on screen changed).

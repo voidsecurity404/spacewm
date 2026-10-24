@@ -26,6 +26,7 @@ Field names are snake_case; unknown fields are an error.
 | `close_panel` | `id` | `ok` (asks the app to close; it may ask to save first) |
 | `move_panel` | `id`, `position: [x, y, z]` (m), `yaw_deg?` | `ok` |
 | `scale_panel` | `id`, `pixels_per_unit` (200..3000) | `ok` |
+| `camera` | — | `camera`: `position`, `yaw_deg`, `pitch_deg` |
 | `resize_panel` | `id`, `width`, `height` (100..8000 px; the app may round) | `ok` |
 | `spawn` | `command`, `shell?` (default false) | `spawned` with `pid` |
 | `set_mode` | `mode`: `"walk"` or `{"window": id}` | `ok` (3D only) |

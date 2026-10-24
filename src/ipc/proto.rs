@@ -52,6 +52,8 @@ pub enum Request {
     ReloadConfig,
     /// Performance numbers (spacectl stats).
     Stats,
+    /// Where the view is and where it looks.
+    Camera,
     Screenshot {
         path: String,
         #[serde(default)]
@@ -212,6 +214,7 @@ pub enum Response {
     Event { event: Event },
     Block { block: String },
     Stats { stats: Stats },
+    Camera { position: [f64; 3], yaw_deg: f64, pitch_deg: f64 },
 }
 
 /// Performance over the last seconds (frame times: CPU ms per rendered frame).

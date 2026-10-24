@@ -489,6 +489,14 @@ fn handle_request(state: &mut SpaceState, id: ConnectionId, request: Request) ->
             crate::input::mode::set_mode(state, target, None);
             Response::Ok
         }
+        Request::Camera => {
+            let c = &state.view.camera;
+            Response::Camera {
+                position: c.position.to_array().map(f64::from),
+                yaw_deg: f64::from(c.yaw.to_degrees()),
+                pitch_deg: f64::from(c.pitch.to_degrees()),
+            }
+        }
         Request::Stats => {
             let s = state.perf.snapshot(std::time::Instant::now());
             let gpu = state.view.scene.as_ref().map_or(0, |sc| sc.gpu_bytes())
@@ -543,6 +551,8 @@ fn handle_request(state: &mut SpaceState, id: ConnectionId, request: Request) ->
             if let Err(e) = finite(&values) {
                 return Some(e);
             }
+            // A glide in progress would move the view away again.
+            state.focus_view_cancel();
             let camera = &mut state.view.camera;
             camera.position = glam::Vec3::from(position);
             // Teleporting puts you in fly mode, so you stay where you were put instead of
