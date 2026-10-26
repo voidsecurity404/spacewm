@@ -411,6 +411,12 @@ fn handle_request(state: &mut SpaceState, id: ConnectionId, request: Request) ->
             );
             let app = program.rsplit('/').next().unwrap_or(&program).to_string();
             let held = state.hold_back_launch(&cmd, &app, cwd.map(std::path::PathBuf::from));
+            if !held {
+                // You typed it: its window is one you asked for (in front of you, or in
+                // your hand), not an old spot.
+                state.expect_window_until =
+                    Some(std::time::Instant::now() + crate::input::mode::SPAWN_FOCUS_WINDOW);
+            }
             Response::Gate { allow: !held }
         }
         Request::Spawn { command, shell } => {
