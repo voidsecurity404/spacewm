@@ -317,7 +317,10 @@ fn print_human(response: &Response) {
             );
             println!("panel updates/s  {:.1}", s.panel_updates_per_s);
             println!("chunk uploads/s  {:.1}", s.chunk_uploads_per_s);
-            println!("panels           {} ({} visible)", s.panels, s.visible_panels);
+            println!(
+                "panels           {} ({} visible, {} shown without a copy)",
+                s.panels, s.visible_panels, s.direct_panels
+            );
             println!("GPU memory       ~{:.1} MiB", s.gpu_memory_mib);
         }
     }

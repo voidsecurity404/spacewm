@@ -565,6 +565,7 @@ pub fn release_all_keys(state: &mut SpaceState) {
 /// Per-frame input work in 3D: walking (held keys) and the hover highlight.
 pub fn before_frame(state: &mut SpaceState) {
     let _span = tracing::trace_span!("physics").entered();
+    let overlays = tracing::trace_span!("overlays").entered();
     state.refresh_hud();
     state.refresh_inventory();
     state.refresh_launching();
@@ -574,6 +575,7 @@ pub fn before_frame(state: &mut SpaceState) {
     state.refresh_confirm();
     state.refresh_emotes();
     state.refresh_dock();
+    drop(overlays);
     if state.render_mode != RenderMode::Scene3D {
         return;
     }
@@ -602,6 +604,7 @@ pub fn before_frame(state: &mut SpaceState) {
     };
     let forward = state.view.camera.forward_flat();
     state.player.walk_speed = state.input_settings.walk_speed;
+    let player_span = tracing::trace_span!("player").entered();
     let moved = match state.map.as_deref() {
         Some(map) => state.player.update(dt, intent, forward, map),
         None => {
@@ -610,6 +613,7 @@ pub fn before_frame(state: &mut SpaceState) {
             state.player.update(dt, intent, forward, &cells)
         }
     };
+    drop(player_span);
     // Fell off the world: back to the spawn point.
     if state.player.pos.y < -40.0 {
         state.respawn();
@@ -625,6 +629,7 @@ pub fn before_frame(state: &mut SpaceState) {
     state.apply_panel_glides();
     world_ops::update_grab(state);
     state.update_drag_resize();
+    let _hover = tracing::trace_span!("hover").entered();
     mode::update_hover(state);
     // Needs this frame's hover.
     state.refresh_drag_hint();

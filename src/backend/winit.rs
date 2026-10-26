@@ -773,12 +773,7 @@ fn render(state: &mut SpaceState) {
             &state.cursor_status,
             state.dnd_icon.as_ref(),
             &state.lock,
-            &render::hidden_panels(
-                state.render_mode,
-                &state.world,
-                &state.view.visible_panels,
-                state.fullscreen_panel(),
-            ),
+            &state.frame_pacing(),
             time,
         );
     } else if b.frame_callback_timer.is_none() {
@@ -798,12 +793,7 @@ fn render(state: &mut SpaceState) {
                         &state.cursor_status,
                         state.dnd_icon.as_ref(),
                         &state.lock,
-                        &render::hidden_panels(
-                            state.render_mode,
-                            &state.world,
-                            &state.view.visible_panels,
-                            state.fullscreen_panel(),
-                        ),
+                        &state.frame_pacing(),
                         time,
                     );
                 }

@@ -273,6 +273,10 @@ pub struct Stats {
     pub panels: usize,
     /// Panels inside the view (others are not re-rendered and get throttled callbacks).
     pub visible_panels: usize,
+    /// Panels drawn straight from the app's own texture (no copy, see panel_texture.rs).
+    /// `default`: a newer spacectl still understands an older spacewm.
+    #[serde(default)]
+    pub direct_panels: usize,
 }
 
 impl Response {

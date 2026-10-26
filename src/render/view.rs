@@ -160,6 +160,8 @@ pub struct RenderSettings {
     pub map_fog: (f32, f32),
     pub dim_unfocused: bool,
     pub mipmaps: bool,
+    /// Near single-surface panels are drawn from the app's own texture (no copy).
+    pub direct_panels: bool,
 }
 
 /// Map fog: the far side of the town fades a little into the sky.
@@ -173,6 +175,7 @@ impl Default for RenderSettings {
             map_fog: MAP_FOG,
             dim_unfocused: true,
             mipmaps: true,
+            direct_panels: true,
         }
     }
 }
@@ -191,6 +194,7 @@ impl RenderSettings {
             map_fog,
             dim_unfocused: config.panels.dim_unfocused,
             mipmaps: config.render.panel_mipmaps,
+            direct_panels: config.render.direct_panels,
         }
     }
 }
@@ -297,9 +301,14 @@ impl View3D {
             cache
         });
         textures.updates = 0;
+        textures.direct_enabled = self.settings.direct_panels;
         let span = tracing::trace_span!("panel_textures").entered();
+        // From where the scene is drawn (behind the body in third person), and how far
+        // away a panel is shown pixel-perfect (output height over 2·tan(fov/2), per ppu).
+        let eye = view_from.map_or(self.camera.position, |(pos, _, _)| pos);
+        let px_per_tan = size.h as f32 / (2.0 * (self.camera.fov_y_deg.to_radians() / 2.0).tan());
         let (changed, waiting) =
-            textures.update(renderer, world, &self.visible_panels, self.camera.position);
+            textures.update(renderer, world, &self.visible_panels, eye, px_per_tan);
         drop(span);
         if changed {
             self.dirty = true;
@@ -494,6 +503,9 @@ fn cursor_draw(
         border_px: 0.0,
         border_color: Vec4::ZERO,
         opaque: false,
+        flip_y: false,
+        opaque_rgb: false,
+        direct: false,
     })
 }
 
@@ -512,7 +524,7 @@ fn panel_draws(
         .filter(|p| p.visible)
         .filter_map(|p| {
             let target = textures.get(p.id)?;
-            let texture = glow::NativeTexture(std::num::NonZeroU32::new(target.texture.tex_id())?);
+            let texture = glow::NativeTexture(std::num::NonZeroU32::new(target.tex_id)?);
             let tex_size = Vec2::new(target.size.w as f32, target.size.h as f32);
             // Geometry inside the texture: it starts at -bbox.loc (bbox is relative to the
             // geometry), scaled like the texture if the window had to be shrunk.
@@ -549,7 +561,10 @@ fn panel_draws(
                 opacity,
                 border_px,
                 border_color,
-                opaque: window_is_opaque(&p.window) && opacity >= 1.0,
+                opaque: (target.opaque_rgb || window_is_opaque(&p.window)) && opacity >= 1.0,
+                flip_y: target.flip_y,
+                opaque_rgb: target.opaque_rgb,
+                direct: target.direct,
             };
             Some((draw, p.position.distance_squared(camera.position)))
         })

@@ -42,11 +42,21 @@ pub struct DockItem {
 
 /// What the image was drawn for: (app name, open) per slot, hover, scale.
 type Drawn = (Vec<(String, bool)>, Option<usize>, i32);
+/// Inputs `items` was built from: the windows (id, app), the configured apps, and the
+/// generation of the installed-app list.
+type BuiltFrom = (Vec<(PanelId, String)>, Vec<String>, u64);
 
 #[derive(Default)]
 pub struct Dock {
     pub entries: Option<Vec<DesktopEntry>>,
     entries_loaded: Option<Instant>,
+    /// Folder stamps the entries were read at (see `desktop::dirs_stamp`).
+    entries_stamp: Vec<Option<std::time::SystemTime>>,
+    /// Bumped whenever `entries` is re-read, so `items` knows to rebuild.
+    entries_generation: u64,
+    /// What `items` was built from: rebuilding means matching every window against
+    /// every installed app, too much to do on each frame when nothing changed.
+    built_from: Option<BuiltFrom>,
     icons: HashMap<String, Option<Vec<u8>>>,
     pub items: Vec<DockItem>,
     pub hover: Option<usize>,
@@ -239,8 +249,13 @@ impl SpaceState {
                 Some((p.id, app))
             })
             .collect();
-        let entries = self.dock.entries.as_deref().unwrap_or(&[]);
-        let items = build_items(entries, &self.config.dock.apps, &windows);
+        let built_from = (windows, self.config.dock.apps.clone(), self.dock.entries_generation);
+        if self.dock.built_from.as_ref() != Some(&built_from) {
+            let entries = self.dock.entries.as_deref().unwrap_or(&[]);
+            self.dock.items = build_items(entries, &built_from.1, &built_from.0);
+            self.dock.built_from = Some(built_from);
+        }
+        let items = &self.dock.items;
         let scale = self
             .space
             .outputs()
@@ -251,7 +266,6 @@ impl SpaceState {
         let key: Vec<(String, bool)> =
             items.iter().map(|i| (i.name.clone(), !i.windows.is_empty())).collect();
         let hover = self.dock.hover.filter(|&h| h < items.len() && self.dock.cursor);
-        self.dock.items = items;
         if let Some(geo) = self.primary_output_geometry() {
             self.dock.origin = dock_origin(&self.dock.items, (geo.size.w, geo.size.h));
         }
@@ -337,10 +351,19 @@ impl SpaceState {
 
     /// Load (or refresh) the installed apps' .desktop entries.
     pub fn ensure_entries(&mut self) {
-        let stale = self.dock.entries_loaded.is_none_or(|t| t.elapsed().as_secs() > 120);
-        if self.dock.entries.is_none() || stale {
+        // Every two minutes, look at the folders' timestamps (cheap); read the files
+        // again only if something was installed or removed. Re-reading them all inside a
+        // frame used to be a ~10 ms hitch every two minutes.
+        let check = self.dock.entries_loaded.is_none_or(|t| t.elapsed().as_secs() > 120);
+        if self.dock.entries.is_some() && !check {
+            return;
+        }
+        let stamp = crate::launcher::desktop::dirs_stamp();
+        self.dock.entries_loaded = Some(Instant::now());
+        if self.dock.entries.is_none() || stamp != self.dock.entries_stamp {
             self.dock.entries = Some(crate::launcher::desktop::load_all());
-            self.dock.entries_loaded = Some(Instant::now());
+            self.dock.entries_stamp = stamp;
+            self.dock.entries_generation += 1;
         }
     }
 

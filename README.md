@@ -81,6 +81,11 @@ start. Saved changes apply live (keybinds, mouse, keyboard layout, fov, fog, ren
 distance...); a mistake keeps the previous settings and shows the error on screen.
 `spacewm --check-config` validates the file.
 
+Two `[render]` options save work on apps you are not looking at closely:
+`far_panel_fps` caps how often apps on distant panels redraw (default 15), and
+`direct_panels` draws the window you are close to straight from the app's own texture
+(default on). Both are explained in the config file itself.
+
 ## Control and debugging
 
 `spacectl` talks to the running spacewm (see docs/ipc.md): `spacectl list`, `spacectl move 3 0 2 -4`,

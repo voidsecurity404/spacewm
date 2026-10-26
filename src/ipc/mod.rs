@@ -524,6 +524,11 @@ fn handle_request(state: &mut SpaceState, id: ConnectionId, request: Request) ->
                     gpu_memory_mib: gpu as f64 / (1024.0 * 1024.0),
                     panels: state.world.panels().len(),
                     visible_panels: state.view.visible_panels.len(),
+                    direct_panels: state
+                        .view
+                        .panel_textures
+                        .as_ref()
+                        .map_or(0, |t| t.direct_count()),
                 },
             }
         }

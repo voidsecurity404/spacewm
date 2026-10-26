@@ -150,6 +150,16 @@ pub fn application_dirs() -> Vec<PathBuf> {
     dirs.into_iter().map(|d| d.join("applications")).collect()
 }
 
+/// When the application folders last changed. Installing or removing an app adds or
+/// deletes a file there, which updates the folder's modification time, so comparing
+/// stamps tells whether a re-read is needed without opening a single .desktop file.
+pub fn dirs_stamp() -> Vec<Option<std::time::SystemTime>> {
+    application_dirs()
+        .iter()
+        .map(|d| std::fs::metadata(d).and_then(|m| m.modified()).ok())
+        .collect()
+}
+
 /// Every listed application, sorted by name.
 pub fn load_all() -> Vec<DesktopEntry> {
     let mut seen = HashSet::new();

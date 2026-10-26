@@ -14,19 +14,31 @@
 //!    every surface feature for us, and the damage tracker repaints only the changed parts.
 //! 4. Our 3D shader then samples that one texture on the panel quad, with mipmaps so text
 //!    stays smooth instead of shimmering when the panel is far away.
+//!
+//! Shortcut for the common case (the window you are working in): a panel close enough
+//! that its texture is shown 1:1 or magnified, made of one surface (no popups, no
+//! subsurfaces, no X11 menus), with a plain buffer (scale 1, not rotated or cropped). Then
+//! step 3 would only copy the client's texture pixel for pixel, and mipmaps would never be
+//! sampled. So the 3D shader samples the client's own texture instead: no copy, no extra
+//! GPU memory. For a dmabuf client that is truly zero-copy, as in HackMatrix; unlike there,
+//! anything the shortcut can't show correctly (a menu opens, the panel moves away) falls
+//! back to the full path on the next frame.
 
 use std::{borrow::Borrow, collections::HashMap};
 
 use smithay::{
-    backend::renderer::{
-        damage::OutputDamageTracker,
-        element::{surface::WaylandSurfaceRenderElement, AsRenderElements},
-        gles::{GlesRenderer, GlesTexture},
-        glow::GlowRenderer,
-        utils::with_renderer_surface_state,
-        Bind,
+    backend::{
+        allocator::Fourcc,
+        renderer::{
+            damage::OutputDamageTracker,
+            element::{surface::WaylandSurfaceRenderElement, AsRenderElements},
+            gles::{GlesRenderer, GlesTexture},
+            glow::GlowRenderer,
+            utils::{import_surface_tree, with_renderer_surface_state},
+            Bind, Renderer, Texture,
+        },
     },
-    desktop::Window,
+    desktop::{PopupManager, Window},
     reexports::glow::{self, HasContext},
     utils::{Physical, Point, Rectangle, Scale, Size, Transform},
     wayland::seat::WaylandFocus,
@@ -40,10 +52,17 @@ const MAX_TEXTURE_MAX_ANISOTROPY_EXT: u32 = 0x84FF;
 
 /// Panels farther than this get a half-resolution texture: at that distance a 1:1
 /// texture would be minified 4x anyway, and it costs a quarter of the GPU work and memory.
-const LOD_DISTANCE: f32 = 10.0;
+pub const LOD_DISTANCE: f32 = 10.0;
 /// Panel textures re-rendered per frame at most; the rest wait for the next frames, so a
 /// burst (all terminals redrawing at once) can't cause one long frame.
 pub const UPDATES_PER_FRAME: usize = 8;
+/// A panel counts as "near" (shown 1:1 or magnified, so mipmaps are never sampled) up to
+/// this many times its pixel-perfect distance. A little shrinking is fine with plain
+/// bilinear filtering.
+const NEAR_SLACK: f32 = 1.2;
+/// ...and only when seen roughly head-on (cosine of the angle to the panel's normal):
+/// at a steep angle the far side of a panel is shrunk a lot even when its middle is close.
+const NEAR_FACING: f32 = 0.85;
 
 pub struct PanelTarget {
     pub texture: GlesTexture,
@@ -53,13 +72,43 @@ pub struct PanelTarget {
     pub size: Size<i32, Physical>,
     damage_tracker: OutputDamageTracker,
     rendered_once: bool,
+    /// Mip levels allocated.
+    levels: i32,
+    /// The image changed while the panel was near, and the smaller copies were not
+    /// rebuilt (nothing samples them up close). Until they are, sampling is limited to
+    /// the full-size level, so a stale small copy can never show.
+    mips_stale: bool,
+}
+
+/// A panel shown straight from the client's own texture (see the module docs).
+struct Direct {
+    /// A reference to the client's texture: keeps it alive while we draw it.
+    texture: GlesTexture,
+    size: Size<i32, Physical>,
+    /// The buffer's alpha channel is padding (XRGB): draw it as fully opaque.
+    opaque_rgb: bool,
+}
+
+/// What the 3D shader samples for one panel.
+#[derive(Clone, Copy, Debug)]
+pub struct PanelTex {
+    pub tex_id: u32,
+    pub size: Size<i32, Physical>,
+    /// Stored bottom row first (some dmabufs); our own textures are top row first.
+    pub flip_y: bool,
+    pub opaque_rgb: bool,
+    /// The client's own texture: no mipmaps, so it must be sampled with plain bilinear.
+    pub direct: bool,
 }
 
 pub struct PanelTextureCache {
     targets: HashMap<PanelId, PanelTarget>,
+    direct: HashMap<PanelId, Direct>,
     max_size: i32,
     anisotropy: f32,
     pub mipmaps: bool,
+    /// The no-copy shortcut for near single-surface panels (`render.direct_panels`).
+    pub direct_enabled: bool,
     /// Panel textures re-rendered since the counter was last reset (debug stats).
     pub updates: u32,
 }
@@ -95,7 +144,15 @@ impl PanelTextureCache {
             })
             .unwrap_or((4096, 1.0));
         tracing::debug!(max_size, anisotropy, "panel textures");
-        Self { targets: HashMap::new(), max_size, anisotropy, mipmaps: true, updates: 0 }
+        Self {
+            targets: HashMap::new(),
+            direct: HashMap::new(),
+            max_size,
+            anisotropy,
+            mipmaps: true,
+            direct_enabled: true,
+            updates: 0,
+        }
     }
 
     /// Switch mipmapped textures on/off; textures are recreated on the next update.
@@ -104,19 +161,43 @@ impl PanelTextureCache {
         self.targets.clear();
     }
 
-    /// GPU memory of all panel textures (mip chains add about a third).
+    /// GPU memory of all panel textures (mip chains add about a third). Panels shown
+    /// from the client's own texture cost nothing extra.
     pub fn gpu_bytes(&self) -> usize {
         let mip = if self.mipmaps { 4.0 / 3.0 } else { 1.0 };
         self.targets.values().map(|t| ((t.size.w * t.size.h * 4) as f64 * mip) as usize).sum()
     }
 
-    pub fn get(&self, id: PanelId) -> Option<&PanelTarget> {
-        self.targets.get(&id)
+    pub fn get(&self, id: PanelId) -> Option<PanelTex> {
+        if let Some(d) = self.direct.get(&id) {
+            return Some(PanelTex {
+                tex_id: d.texture.tex_id(),
+                size: d.size,
+                flip_y: d.texture.is_y_inverted(),
+                opaque_rgb: d.opaque_rgb,
+                direct: true,
+            });
+        }
+        self.targets.get(&id).map(|t| PanelTex {
+            tex_id: t.texture.tex_id(),
+            size: t.size,
+            flip_y: false,
+            opaque_rgb: false,
+            direct: false,
+        })
+    }
+
+    /// Panels currently shown from the client's own texture (debug stats and tests).
+    pub fn direct_count(&self) -> usize {
+        self.direct.len()
     }
 
     /// Re-render the textures of visible panels whose client committed new content (or
     /// whose distance crossed the LOD threshold). Panels outside the view keep their
     /// `content_dirty` and are updated once they come into view.
+    ///
+    /// `px_per_tan` is the output height over 2·tan(fov/2): divided by a panel's pixels
+    /// per metre it gives the distance at which the panel is shown pixel-perfect.
     ///
     /// Returns (a texture changed, so the scene must be redrawn; updates are still
     /// waiting because of the per-frame budget).
@@ -126,9 +207,11 @@ impl PanelTextureCache {
         world: &mut World,
         visible: &std::collections::HashSet<PanelId>,
         camera_pos: glam::Vec3,
+        px_per_tan: f32,
     ) -> (bool, bool) {
         // Drop textures of panels that no longer exist.
         self.targets.retain(|id, _| world.panels().iter().any(|p| p.id == *id));
+        self.direct.retain(|id, _| world.panels().iter().any(|p| p.id == *id));
 
         let mut changed = false;
         // Sizes follow the client even for panels out of view (they aren't retextured, but
@@ -145,9 +228,60 @@ impl PanelTextureCache {
         let mut budget = UPDATES_PER_FRAME;
         let mut waiting = false;
         for panel in world.panels_mut().iter_mut().filter(|p| visible.contains(&p.id)) {
-            let lod = if panel.position.distance(camera_pos) > LOD_DISTANCE { 0.5 } else { 1.0 };
-            let lod_changed = self.targets.get(&panel.id).is_some_and(|t| t.lod != lod);
-            if !(panel.content_dirty || lod_changed) {
+            let dist = panel.position.distance(camera_pos);
+            let lod = if dist > LOD_DISTANCE { 0.5 } else { 1.0 };
+            let facing = panel.normal().dot((camera_pos - panel.position).normalize_or_zero());
+            let near = dist <= px_per_tan / panel.pixels_per_unit.max(1.0) * NEAR_SLACK
+                && facing.abs() >= NEAR_FACING;
+            let simple = self.direct_enabled && near && is_single_surface(panel);
+            let was_direct = self.direct.contains_key(&panel.id);
+
+            // The shortcut: show the client's texture itself. Not counted against the
+            // budget: it is no extra work, and a dmabuf panel must switch to its new
+            // buffer in the same frame (the client may already be drawing into the old
+            // one again).
+            if simple && (panel.content_dirty || !was_direct) {
+                let geo = panel.window.geometry();
+                let bbox = panel.window.bbox();
+                match direct_texture(renderer, &panel.window, bbox) {
+                    Some(direct) => {
+                        panel.content_dirty = false;
+                        panel.bbox_px = Rectangle::new(bbox.loc - geo.loc, bbox.size);
+                        // The copy is not needed meanwhile: free its GPU memory.
+                        self.targets.remove(&panel.id);
+                        self.direct.insert(panel.id, direct);
+                        self.updates += 1;
+                        changed = true;
+                        continue;
+                    }
+                    // Unusual buffer (rotated, cropped, YUV video...): the full path.
+                    None => {
+                        if self.direct.remove(&panel.id).is_some() {
+                            changed = true;
+                        }
+                    }
+                }
+            }
+            if simple && was_direct && self.direct.contains_key(&panel.id) {
+                continue; // still shown directly, nothing new
+            }
+            if self.direct.remove(&panel.id).is_some() {
+                changed = true; // back to our own copy, rendered below
+            }
+
+            let target = self.targets.get(&panel.id);
+            let lod_changed = target.is_some_and(|t| t.lod != lod);
+            let missing = target.is_none();
+            // Moved away from a panel whose mipmaps were skipped: build them now.
+            if !(panel.content_dirty || lod_changed || missing) {
+                if !near && target.is_some_and(|t| t.mips_stale) {
+                    if let Some(t) = self.targets.get_mut(&panel.id) {
+                        match build_mipmaps(renderer, t) {
+                            Ok(()) => changed = true,
+                            Err(err) => tracing::warn!(panel = panel.id, "mipmaps: {err}"),
+                        }
+                    }
+                }
                 continue;
             }
             if budget == 0 {
@@ -178,6 +312,7 @@ impl PanelTextureCache {
                 &panel.x11_children,
                 bbox,
                 lod,
+                near,
             ) {
                 Ok(true) => {
                     self.updates += 1;
@@ -191,6 +326,7 @@ impl PanelTextureCache {
     }
 
     /// Returns Ok(true) if the texture content changed.
+    #[allow(clippy::too_many_arguments)]
     fn render_panel(
         &mut self,
         renderer: &mut GlowRenderer,
@@ -199,6 +335,7 @@ impl PanelTextureCache {
         children: &[crate::xwayland::X11Child],
         bbox: Rectangle<i32, smithay::utils::Logical>,
         lod: f64,
+        near: bool,
     ) -> Result<bool, String> {
         // Very large windows are scaled down to the GPU's texture size limit; far panels
         // to half resolution.
@@ -246,18 +383,25 @@ impl PanelTextureCache {
         drop(render_span);
 
         let _mip_span = tracing::trace_span!("panel_mipmap").entered();
-        if damaged && self.mipmaps {
-            let tex = glow::NativeTexture(non_zero(target.texture.tex_id())?);
-            renderer
-                .with_context(|gl| unsafe {
-                    // Rebuild the smaller copies (1/2, 1/4, ...) from the new full-size image.
-                    gl.bind_texture(glow::TEXTURE_2D, Some(tex));
-                    gl.generate_mipmap(glow::TEXTURE_2D);
-                    gl.bind_texture(glow::TEXTURE_2D, None);
-                })
-                .map_err(|e| e.to_string())?;
+        if !self.mipmaps {
+            return Ok(damaged);
         }
-        Ok(damaged)
+        if near {
+            // Up close the smaller copies are never sampled: skip rebuilding them (a full
+            // pass over the image on the GPU) until the panel moves away.
+            if damaged && !target.mips_stale {
+                set_max_level(renderer, &target.texture, 0)?;
+                target.mips_stale = true;
+            }
+            Ok(damaged)
+        } else if damaged || target.mips_stale {
+            // Also when this update changed nothing but the copies are behind: no other
+            // frame may come to fix them.
+            build_mipmaps(renderer, target)?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     fn create_target(
@@ -310,8 +454,114 @@ impl PanelTextureCache {
             size,
             damage_tracker: OutputDamageTracker::new(size, 1.0, Transform::Normal),
             rendered_once: false,
+            levels,
+            mips_stale: false,
         })
     }
+}
+
+/// Rebuild the smaller copies (1/2, 1/4, ...) from the full-size image, and let the
+/// sampler use them again.
+fn build_mipmaps(renderer: &mut GlowRenderer, target: &mut PanelTarget) -> Result<(), String> {
+    let tex = glow::NativeTexture(non_zero(target.texture.tex_id())?);
+    let top = target.levels - 1;
+    renderer
+        .with_context(|gl| unsafe {
+            gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+            // GL only fills the levels up to MAX_LEVEL, and while the panel was near that
+            // was 0: raise it first, or the copies stay empty and the panel turns invisible.
+            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAX_LEVEL, top);
+            gl.generate_mipmap(glow::TEXTURE_2D);
+            gl.bind_texture(glow::TEXTURE_2D, None);
+        })
+        .map_err(|e| e.to_string())?;
+    target.mips_stale = false;
+    Ok(())
+}
+
+/// Limit sampling to mip levels 0..=`level` (GL_TEXTURE_MAX_LEVEL).
+fn set_max_level(
+    renderer: &mut GlowRenderer,
+    texture: &GlesTexture,
+    level: i32,
+) -> Result<(), String> {
+    let tex = glow::NativeTexture(non_zero(texture.tex_id())?);
+    renderer
+        .with_context(|gl| unsafe {
+            gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAX_LEVEL, level);
+            gl.bind_texture(glow::TEXTURE_2D, None);
+        })
+        .map_err(|e| e.to_string())
+}
+
+/// One surface, nothing hanging off it: no subsurfaces (video layers, Firefox's
+/// separate parts), no popups (menus, tooltips), no X11 menus.
+fn is_single_surface(panel: &crate::world::panel::Panel<Window>) -> bool {
+    if !panel.x11_children.is_empty() {
+        return false;
+    }
+    let Some(surface) = panel.window.wl_surface() else {
+        return false;
+    };
+    PopupManager::popups_for_surface(&surface).next().is_none() && !has_mapped_child(&surface)
+}
+
+/// Whether a subsurface below `surface` shows anything. Apps often keep unmapped ones
+/// around (foot: its decorations, search box, URL hints), which don't count.
+fn has_mapped_child(
+    surface: &smithay::reexports::wayland_server::protocol::wl_surface::WlSurface,
+) -> bool {
+    smithay::wayland::compositor::get_children(surface).iter().any(|child| {
+        with_renderer_surface_state(child, |s| s.buffer().is_some()).unwrap_or(false)
+            || has_mapped_child(child)
+    })
+}
+
+/// The client's texture of a single-surface window, if it can be shown as is: same size
+/// as the window's bbox (buffer scale 1, not rotated, not cropped or scaled by
+/// viewporter) and a plain RGB(A) format (not YUV video, which needs a converting
+/// sampler). Imports the newest buffer first, which for shm means uploading what changed.
+fn direct_texture(
+    renderer: &mut GlowRenderer,
+    window: &Window,
+    bbox: Rectangle<i32, smithay::utils::Logical>,
+) -> Option<Direct> {
+    let surface = window.wl_surface()?;
+    if let Err(err) = import_surface_tree(renderer, &surface) {
+        tracing::debug!("direct panel texture: import failed: {err}");
+        return None;
+    }
+    let context = renderer.context_id();
+    with_renderer_surface_state(&surface, |state| {
+        if state.buffer_scale() != 1 || state.buffer_transform() != Transform::Normal {
+            return None;
+        }
+        let size = state.buffer_size()?;
+        let view = state.view()?;
+        let uncropped = view.src.loc.x == 0.0
+            && view.src.loc.y == 0.0
+            && view.src.size == size.to_f64()
+            && view.dst == size;
+        if !uncropped || size != bbox.size {
+            tracing::trace!(?size, ?bbox, ?view, "direct: size");
+            return None;
+        }
+        let texture = state.texture::<GlesTexture>(context)?.clone();
+        let opaque_rgb = match texture.format()? {
+            Fourcc::Argb8888 | Fourcc::Abgr8888 => false,
+            Fourcc::Xrgb8888 | Fourcc::Xbgr8888 => true,
+            other => {
+                tracing::trace!(?other, "direct: format");
+                return None;
+            }
+        };
+        if (texture.width() as i32, texture.height() as i32) != (size.w, size.h) {
+            return None;
+        }
+        Some(Direct { texture, size: (size.w, size.h).into(), opaque_rgb })
+    })
+    .flatten()
 }
 
 fn non_zero(id: u32) -> Result<std::num::NonZeroU32, String> {

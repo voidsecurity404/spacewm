@@ -670,25 +670,6 @@ pub fn monotonic_now() -> smithay::utils::Time<smithay::utils::Monotonic> {
     smithay::utils::Clock::<smithay::utils::Monotonic>::new().now()
 }
 
-/// Panels whose apps get only throttled frame callbacks: 3D panels out of view (or
-/// hidden with Mod+H). They keep running, slowly, without drawing frames nobody sees.
-pub fn hidden_panels(
-    render_mode: RenderMode,
-    world: &crate::world::World,
-    visible: &std::collections::HashSet<crate::world::panel::PanelId>,
-    fullscreen: Option<crate::world::panel::PanelId>,
-) -> std::collections::HashSet<crate::world::panel::PanelId> {
-    if render_mode != RenderMode::Scene3D {
-        return Default::default();
-    }
-    let shown = |id: &crate::world::panel::PanelId| match fullscreen {
-        // Fullscreen: only that window is on screen.
-        Some(f) => *id == f,
-        None => visible.contains(id),
-    };
-    world.panels().iter().map(|p| p.id).filter(|id| !shown(id)).collect()
-}
-
 /// The fullscreen window drawn flat over the output: its geometry at the output's
 /// top-left corner, X11 menus on top of it.
 pub fn fullscreen_elements<R>(
@@ -734,13 +715,17 @@ where
 
 /// Tell clients they may draw their next frame. Without frame callbacks a client draws
 /// one frame and then waits forever — the classic "frozen window" beginner bug.
+///
+/// `pacing` lists the panels whose apps should draw less often, with the minimum gap
+/// between their callbacks (see `SpaceState::frame_pacing`); everything else gets one per
+/// frame.
 pub fn send_frame_callbacks(
     output: &Output,
     space: &Space<Window>,
     cursor_status: &CursorImageStatus,
     dnd_icon: Option<&DndIcon>,
     lock: &crate::wayland::session_lock::LockState,
-    hidden: &std::collections::HashSet<crate::world::panel::PanelId>,
+    pacing: &FramePacing,
     time: Duration,
 ) {
     if let Some(surface) = lock.surface_for(output) {
@@ -750,12 +735,14 @@ pub fn send_frame_callbacks(
     }
     // Throttle: a surface that is not visible still gets a callback at most this often,
     // so hidden clients keep running slowly instead of freezing.
-    let throttle = Some(Duration::from_secs(1));
+    let throttle = Some(HIDDEN_FRAME_INTERVAL);
     for window in space.elements() {
-        // `None` = "not shown on any output": smithay then only sends a callback once per
-        // `throttle`.
-        let shown = !hidden.contains(&crate::state::window_id(window));
-        window.send_frame(output, time, throttle, |_, _| shown.then(|| output.clone()));
+        match pacing.get(&crate::state::window_id(window)) {
+            // Paced: smithay sends a callback only if `gap` passed since the last one
+            // (the closure's `None` means "don't treat it as shown on this output").
+            Some(&gap) => window.send_frame(output, time, Some(gap), |_, _| None),
+            None => window.send_frame(output, time, throttle, |_, _| Some(output.clone())),
+        }
     }
     // Bars and launchers too, or they would draw one frame and freeze.
     for layer in smithay::desktop::layer_map_for_output(output).layers() {
@@ -771,28 +758,68 @@ pub fn send_frame_callbacks(
     }
 }
 
+/// Panels whose apps draw less often → the minimum gap between their frame callbacks.
+pub type FramePacing = std::collections::HashMap<crate::world::panel::PanelId, Duration>;
+
+/// Apps on panels out of view: one frame callback a second, so they keep running (a
+/// terminal asked to resize still draws its new size) but cost next to nothing.
+pub const HIDDEN_FRAME_INTERVAL: Duration = Duration::from_secs(1);
+
 impl crate::state::SpaceState {
-    /// Throttled frame callbacks for panels out of view, without rendering (see the
-    /// timer in main). Shown windows get theirs from the frame they are drawn in.
-    pub fn send_hidden_frame_callbacks(&mut self) {
-        let hidden = hidden_panels(
-            self.render_mode,
-            &self.world,
-            &self.view.visible_panels,
-            self.fullscreen_panel(),
-        );
-        if hidden.is_empty() {
-            return;
+    /// How often each panel's app may draw, like a video stream that spends its bits
+    /// where the viewer is looking:
+    /// - out of view (or behind a fullscreen window): once a second;
+    /// - far away (beyond the half-resolution distance): `render.far_panel_fps`;
+    /// - everything else, and the window you are using or carrying: every frame.
+    pub fn frame_pacing(&self) -> FramePacing {
+        let mut pacing = FramePacing::new();
+        if self.render_mode != RenderMode::Scene3D {
+            return pacing;
         }
-        let time = self.start_time.elapsed();
-        let throttle = Some(Duration::from_secs(1));
-        for output in self.space.outputs() {
-            for window in self.space.elements() {
-                if hidden.contains(&crate::state::window_id(window)) {
-                    window.send_frame(output, time, throttle, |_, _| None);
+        let fullscreen = self.fullscreen_panel();
+        let far_gap = match self.config.render.far_panel_fps {
+            0 => None,
+            fps => Some(Duration::from_secs_f64(1.0 / fps as f64)),
+        };
+        let eye = self.view.camera.position;
+        // The window you are typing into always runs at full rate.
+        let active = match self.mode {
+            crate::input::mode::InputMode::Window { panel } => Some(panel),
+            crate::input::mode::InputMode::Walk => None,
+        };
+        let carried = self.grab.as_ref().map(|g| g.panel);
+        for p in self.world.panels() {
+            let shown = match fullscreen {
+                // Fullscreen: only that window is on screen.
+                Some(f) => p.id == f,
+                None => self.view.visible_panels.contains(&p.id),
+            };
+            if !shown {
+                pacing.insert(p.id, HIDDEN_FRAME_INTERVAL);
+            } else if let Some(gap) = far_gap {
+                let far = p.position.distance(eye) > panel_texture::LOD_DISTANCE;
+                if far && fullscreen.is_none() && Some(p.id) != active && Some(p.id) != carried {
+                    pacing.insert(p.id, gap);
                 }
             }
         }
+        pacing
+    }
+
+    /// Frame callbacks for paced panels (out of view or far), without rendering: a
+    /// scene where nothing moves renders nothing, and their apps would wait forever.
+    /// Returns when to come back: soon if far panels are waiting, else in a second.
+    pub fn send_paced_frame_callbacks(&mut self) -> Duration {
+        let pacing = self.frame_pacing();
+        let time = self.start_time.elapsed();
+        for output in self.space.outputs() {
+            for window in self.space.elements() {
+                if let Some(&gap) = pacing.get(&crate::state::window_id(window)) {
+                    window.send_frame(output, time, Some(gap), |_, _| None);
+                }
+            }
+        }
+        pacing.values().copied().min().unwrap_or(HIDDEN_FRAME_INTERVAL)
     }
 }
 

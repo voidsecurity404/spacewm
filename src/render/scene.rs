@@ -122,6 +122,12 @@ pub struct PanelDraw {
     pub border_color: Vec4,
     /// Opaque panels write depth; translucent ones (drawn last, far to near) don't.
     pub opaque: bool,
+    /// The texture's rows are stored bottom first.
+    pub flip_y: bool,
+    /// Ignore the texture's alpha channel (XRGB buffers: it's padding, maybe garbage).
+    pub opaque_rgb: bool,
+    /// The client's own texture (no mipmaps): sample it with plain bilinear filtering.
+    pub direct: bool,
 }
 
 /// Offscreen targets, recreated when the output size changes.
@@ -702,9 +708,26 @@ fn draw_panels(
         unsafe {
             gl.depth_mask(p.opaque);
             gl.bind_texture(glow::TEXTURE_2D, Some(p.texture));
+            if p.direct {
+                // The client's texture has no mip levels: a mipmap filter would make it
+                // "incomplete" and read as black. smithay sets its own filters whenever it
+                // draws the texture, so set ours every time too.
+                gl.tex_parameter_i32(
+                    glow::TEXTURE_2D,
+                    glow::TEXTURE_MIN_FILTER,
+                    glow::LINEAR as i32,
+                );
+                gl.tex_parameter_i32(
+                    glow::TEXTURE_2D,
+                    glow::TEXTURE_MAG_FILTER,
+                    glow::LINEAR as i32,
+                );
+            }
         }
         program.set_mat4(gl, "u_model", &p.model);
         program.set_f32(gl, "u_opacity", p.opacity);
+        program.set_f32(gl, "u_flip_y", if p.flip_y { 1.0 } else { 0.0 });
+        program.set_f32(gl, "u_opaque_rgb", if p.opaque_rgb { 1.0 } else { 0.0 });
         unsafe {
             let loc = program.uniform_location(gl, "u_tex_size");
             gl.uniform_2_f32(loc.as_ref(), p.tex_size.x, p.tex_size.y);

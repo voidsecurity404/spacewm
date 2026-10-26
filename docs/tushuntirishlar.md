@@ -796,3 +796,51 @@ dock, tugma) ishlardi. Endi qolgan uch holat ham yopildi:
 **Bitta chegara qoldi:** dasturni to'liq yo'li bilan ochish, masalan
 `/usr/lib/firefox/firefox`. Bunda `PATH` umuman ishlatilmagani uchun darvozachidan
 o'tmaydi. Shunda ham spacewm buni ochilgandan keyin payqaydi va avvalgidek o'rganib oladi.
+
+---
+
+### Tezlik: waypipe va HackMatrix g'oyalari (src/render/panel_texture.rs, src/main.rs)
+
+Maqsad: ekranda aynan bir xil tasvir, lekin kamroq ish. Ikki loyihadan to'rtta g'oya
+olindi:
+
+1. **Nusxasiz tekstura (`render.direct_panels`).** Odatda spacewm dasturning oynasini
+   o'z teksturasiga chizib, keyin shu nusxani sahnaga qo'yadi. Oyna sizga juda yaqin
+   bo'lib, u bitta yuzadan iborat bo'lsa (popup, subsurface yo'q), dasturning o'z
+   buferi to'g'ridan-to'g'ri ishlatiladi. Nusxa chizilmaydi va GPU xotirasi tejaladi.
+   Agar bufer kutilmagan ko'rinishda bo'lsa (aylantirilgan, kesilgan, YUV video,
+   `buffer_scale` ≠ 1), spacewm avtomatik eski yo'lga qaytadi.
+2. **Uzoqdagi panellar sekinroq (`render.far_panel_fps = 15`).** 10 metrdan uzoqdagi
+   panel ichidagi matn baribir mayda ko'rinadi. Shuning uchun dastur u yerda sekundiga
+   15 kadr chizadi, yaqinida esa har kadr. Kadr callback'lari ham shunga moslashadi:
+   uzoqda panel bo'lsa 66 ms, bo'lmasa 1 s.
+3. **Mipmap'larni kechiktirish.** Mipmap — tasvirning kichraytirilgan nusxalari
+   (1/2, 1/4, ...). Uzoqdan ko'rinadi, yaqinda esa kerak emas. Panel yaqin bo'lganda
+   kichik nusxalar qayta qurilmaydi. Uzoqlashganda esa ular bir martalik qurilib,
+   keyin qayta ishlatiladi.
+
+   **Topilgan bug:** `glGenerateMipmap` faqat `GL_TEXTURE_MAX_LEVEL` gacha bo'lgan
+   darajalarni to'ldiradi. Yaqinda bu qiymat 0 ga tushirilgan edi. Oldin
+   `generate_mipmap` chaqirilar, `MAX_LEVEL` keyin tiklanardi. Natijada kichik
+   nusxalar bo'sh qolar va uzoqlashganda panel shaffof bo'lib ko'rinmay qolardi.
+   Tuzatish: avval `MAX_LEVEL` tiklanadi, keyin mipmap'lar quriladi. Buni
+   `tests/e2e/stage16_efficiency.sh` ushladi (diff 0.0156 → 0.0).
+4. **Dock keshi.** Dock har kadrda hamma oynani hamma o'rnatilgan dastur bilan
+   solishtirardi. Endi u faqat oynalar ro'yxati, sozlamalar yoki `.desktop` papkasi
+   o'zgarganda qayta hisoblanadi (`src/launcher/desktop.rs` da `dirs_stamp`).
+
+**O'lchovlar** (release, headless 1280x720, foot'da tinmay chiqayotgan matn):
+
+| Holat | Oldin | Keyin |
+|-------|-------|-------|
+| Uzoqdagi band terminal (14 m) | CPU 14.2% | CPU 4.6% (15 fps) |
+| Yaqin oyna (direct) | CPU 14.2–15.8% | CPU 12.4%, oyna uchun GPU xotirasi −3.5 MB |
+| Dock | Har kadrda ~100 µs, har 2 daqiqada 10 ms qotish | Kesh, qotish yo'q |
+
+**Profil:** eng katta xarajat shm buferini GPU'ga yuklash (~850 µs, foot). Smithay
+allaqachon faqat o'zgargan qismni yuklaydi, ya'ni waypipe'ning diff g'oyasi bu yerda
+bor. Profil qilish: `SPACEWM_SPAN_TIMES=1 RUST_LOG=spacewm=trace`.
+
+**Cheklov:** direct yo'lning dmabuf (GPU) dasturlar bilan to'g'riligi faqat
+`is_y_inverted` bayrog'iga tayanadi. Piksel solishtirish testi faqat shm (foot) bilan
+qilingan.

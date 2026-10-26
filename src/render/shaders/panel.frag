@@ -8,6 +8,8 @@ in vec3 v_world_pos;
 
 uniform sampler2D u_tex;
 uniform float u_opacity;
+uniform float u_flip_y;      // 1: the texture's rows are stored bottom first
+uniform float u_opaque_rgb;  // 1: XRGB texture, its alpha channel is padding
 uniform vec2 u_tex_size;     // texture size in px
 uniform vec4 u_geo_rect;     // window geometry inside the texture: x0, y0, x1, y1 (px)
 uniform float u_border_px;   // 0 = no border
@@ -20,7 +22,13 @@ uniform float u_fog_end;
 out vec4 frag_color;
 
 void main() {
-    vec4 c = texture(u_tex, v_uv);
+    // A client's own texture (shown directly, see panel_texture.rs) may be stored bottom
+    // row first and may have no real alpha.
+    vec2 uv = u_flip_y > 0.5 ? vec2(v_uv.x, 1.0 - v_uv.y) : v_uv;
+    vec4 c = texture(u_tex, uv);
+    if (u_opaque_rgb > 0.5) {
+        c.a = 1.0;
+    }
     vec2 px = v_uv * u_tex_size;
     vec4 g = u_geo_rect;
     if (u_border_px > 0.0 && px.x >= g.x && px.y >= g.y && px.x < g.z && px.y < g.w) {

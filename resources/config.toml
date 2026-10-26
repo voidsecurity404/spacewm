@@ -57,6 +57,13 @@ panel_mipmaps = true
 # When nothing moves, cap redraws caused by apps (blinking cursors, animations) to this
 # many per second. 0: no cap.
 max_fps_idle = 0
+# Apps on panels more than 10 m away may draw at most this many frames per second (their
+# text is tiny from there; a busy terminal across the room then costs far less). 0: no limit.
+far_panel_fps = 15
+# Draw the window you are close to straight from the app's own texture, without a copy
+# (windows without open menus). Faster and uses less GPU memory; set false if a window
+# ever looks wrong up close.
+direct_panels = true
 # The clock / mode / window title line in the top-left corner (Mod+F1 toggles it).
 hud = true
 # Frames always follow the monitor's refresh (no tearing); false is not supported yet.

@@ -891,12 +891,7 @@ fn render(state: &mut SpaceState, crtc: crtc::Handle) {
         &state.cursor_status,
         state.dnd_icon.as_ref(),
         &state.lock,
-        &render::hidden_panels(
-            state.render_mode,
-            &state.world,
-            &state.view.visible_panels,
-            state.fullscreen_panel(),
-        ),
+        &state.frame_pacing(),
         time,
     );
     super::headless::finish_frame(state, frame_start, prepared);

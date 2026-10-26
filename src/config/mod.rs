@@ -309,6 +309,14 @@ pub struct Render {
     /// When nothing moves, redraws caused by apps (a blinking cursor, a video) are capped
     /// at this rate. 0: no cap (the monitor's refresh rate).
     pub max_fps_idle: u32,
+    /// Apps on panels farther than the half-resolution distance (10 m) may draw at most
+    /// this many frames per second: their text is tiny from there anyway, and a busy
+    /// terminal across the room then costs a fraction of the work. 0: no limit.
+    pub far_panel_fps: u32,
+    /// Draw a window you are close to straight from the app's own texture instead of a
+    /// copy (only windows without popups or extra layers). Saves a copy per frame and the
+    /// copy's GPU memory; false is an escape hatch should a GPU driver misdraw it.
+    pub direct_panels: bool,
     /// The clock/mode/title line in the top-left corner (Mod+F1 toggles it).
     pub hud: bool,
     /// Frames follow the monitor's refresh (DRM page flips, or the host's pace when
@@ -325,6 +333,8 @@ impl Default for Render {
             fog: true,
             panel_mipmaps: true,
             max_fps_idle: 0,
+            far_panel_fps: 15,
+            direct_panels: true,
             hud: true,
             vsync: true,
         }
@@ -732,6 +742,7 @@ impl Config {
         check_range(&mut p, "render.fov", r.fov, 30.0, 120.0);
         check_range(&mut p, "render.render_distance_chunks", r.render_distance_chunks, 2, 16);
         check_range(&mut p, "render.max_fps_idle", r.max_fps_idle, 0, 1000);
+        check_range(&mut p, "render.far_panel_fps", r.far_panel_fps, 0, 1000);
 
         let pn = &self.panels;
         check_range(

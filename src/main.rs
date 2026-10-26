@@ -172,15 +172,17 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         .map_err(|e| anyhow!("failed to register signal source: {}", e.error))?;
 
     // Frame callbacks normally go out after each rendered frame. A scene where nothing
-    // moves renders nothing, so apps on panels out of view would wait forever (a terminal
-    // asked to resize never draws its new size). This tick hands them their throttled
-    // once-a-second callback without rendering.
-    let tick = std::time::Duration::from_secs(1);
+    // moves renders nothing, so apps on panels out of view (or far away, which draw at a
+    // lower rate) would wait forever: a terminal asked to resize never draws its new size.
+    // This tick hands them their throttled callbacks without rendering. It runs once a
+    // second, or at the far-panel rate while such panels exist.
     loop_handle
-        .insert_source(Timer::from_duration(tick), move |_, _, state: &mut SpaceState| {
-            state.send_hidden_frame_callbacks();
-            TimeoutAction::ToDuration(tick)
-        })
+        .insert_source(
+            Timer::from_duration(render::HIDDEN_FRAME_INTERVAL),
+            |_, _, state: &mut SpaceState| {
+                TimeoutAction::ToDuration(state.send_paced_frame_callbacks())
+            },
+        )
         .map_err(|e| anyhow!("failed to register frame callback timer: {}", e.error))?;
 
     if state.cli.drm_test {
