@@ -447,8 +447,9 @@ fn handle_request(state: &mut SpaceState, id: ConnectionId, request: Request) ->
             panel_changed(state)
         }
         Request::ResizePanel { id: panel, width, height } => {
-            if !(100..=8000).contains(&width) || !(100..=8000).contains(&height) {
-                return Some(Response::error("width and height must be 100..8000"));
+            let max = crate::input::world_ops::MAX_WINDOW;
+            if !(100..=max.0).contains(&width) || !(100..=max.1).contains(&height) {
+                return Some(Response::error(format!("width and height must be 100..{}", max.0)));
             }
             match state.window_by_id(panel) {
                 Some(window) => {

@@ -5,6 +5,7 @@
 
 pub mod atlas;
 pub mod camera;
+pub mod confirm;
 pub mod crosshair;
 pub mod cursor;
 pub mod dock;
@@ -132,6 +133,8 @@ pub struct OverlayInputs<'a> {
     pub drag_hint: Option<&'a crate::inventory::Image>,
     /// The window switcher (centered) and its top-left corner.
     pub switcher: Option<(&'a crate::inventory::Image, (i32, i32))>,
+    /// A yes/no question (centered) and its top-left corner, with a cursor.
+    pub confirm: Option<(&'a crate::inventory::Image, (i32, i32))>,
     /// The settings box (centered), with its own cursor.
     pub settings: Option<&'a crate::inventory::Image>,
     /// The window menu and its top-left corner (output-relative).
@@ -192,7 +195,7 @@ where
         let x = (geo.size.w - size.0) / 2;
         elements.extend(boxed(renderer, buffer, (x, geo.size.h / 2 + 16)));
     }
-    if let Some(((buffer, _), at)) = inputs.switcher {
+    if let Some(((buffer, _), at)) = inputs.confirm.or(inputs.switcher) {
         elements.extend(pointer_elements(
             renderer,
             inputs.cursor_status,
@@ -317,6 +320,7 @@ where
         || inputs.menu.is_some()
         || inputs.settings.is_some()
         || inputs.switcher.is_some()
+        || inputs.confirm.is_some()
         || inputs.dock_cursor;
     if !covered || !three_d {
         elements.extend(mode_overlay(renderer, inputs, Some(geo)));
@@ -416,6 +420,13 @@ macro_rules! overlay_inputs {
                 let at =
                     $crate::render::switcher::box_origin(s.entries.len(), (geo.size.w, geo.size.h));
                 s.image.as_ref().map(|i| (i, at))
+            }),
+            confirm: $state.confirm.as_ref().and_then(|c| {
+                let geo =
+                    $state.space.outputs().next().and_then(|o| $state.space.output_geometry(o))?;
+                let at =
+                    $crate::render::confirm::box_origin(c.lines.len(), (geo.size.w, geo.size.h));
+                c.image.as_ref().map(|i| (i, at))
             }),
             dock: $state.dock.image.as_ref().map(|i| (i, $state.dock.origin)),
             dock_tooltip: $state.dock.tooltip.as_ref().map(|t| (t, $state.dock.tooltip_at)),

@@ -250,6 +250,8 @@ enum KeyOutcome {
     Settings(Keysym),
     /// A key while the window switcher is open.
     Switcher(Keysym),
+    /// A key while a yes/no question is open.
+    Confirm(Keysym),
 }
 
 pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState, time: InputTime) {
@@ -312,6 +314,12 @@ pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState,
         }
         let combo_mods = Mods::from_state(mods, state.config.general.mod_key, nested);
         let mod_escape = combo_mods.mod_ && sym == Some(Keysym::Escape);
+        // A question takes the keys while open (it is on top of everything).
+        if state.confirm.is_some() {
+            state.input.suppressed_keys.insert(keycode);
+            let sym = if mod_escape { Keysym::Escape } else { sym.unwrap_or(Keysym::NoSymbol) };
+            return FilterResult::Intercept(Some(KeyOutcome::Confirm(sym)));
+        }
         // The window switcher takes the keys while open.
         if state.switcher.is_some() {
             state.input.suppressed_keys.insert(keycode);
@@ -418,6 +426,7 @@ pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState,
         Some(Some(KeyOutcome::Menu(sym))) => state.menu_key(sym),
         Some(Some(KeyOutcome::Settings(sym))) => state.settings_key(sym),
         Some(Some(KeyOutcome::Switcher(sym))) => state.switcher_key(sym),
+        Some(Some(KeyOutcome::Confirm(sym))) => state.confirm_key(sym),
         _ => {}
     }
 }
@@ -544,6 +553,7 @@ pub fn before_frame(state: &mut SpaceState) {
     state.refresh_menu();
     state.refresh_settings();
     state.refresh_switcher();
+    state.refresh_confirm();
     state.refresh_dock();
     if state.render_mode != RenderMode::Scene3D {
         return;
@@ -630,6 +640,10 @@ pub fn handle_pointer_motion_absolute(
     time: InputTime,
 ) {
     state.input_activity();
+    if state.confirm.is_some() {
+        state.confirm_pointer(pos);
+        return;
+    }
     if state.switcher.is_some() {
         state.switcher_pointer(pos);
         return;
@@ -684,6 +698,10 @@ pub fn handle_pointer_motion(
     time: InputTime,
 ) {
     state.input_activity();
+    if state.confirm.is_some() {
+        state.confirm_pointer(state.pointer_location + delta);
+        return;
+    }
     if state.switcher.is_some() {
         state.switcher_pointer(state.pointer_location + delta);
         return;
@@ -813,6 +831,14 @@ pub fn handle_pointer_button(
         return;
     }
     if button_state == ButtonState::Released && state.input.suppressed_buttons.remove(&button) {
+        return;
+    }
+    // A question: a click on a button answers it.
+    if state.confirm.is_some() {
+        if button_state == ButtonState::Pressed {
+            state.input.suppressed_buttons.insert(button);
+            state.confirm_click();
+        }
         return;
     }
     // The window switcher: a click picks a window (or cancels).

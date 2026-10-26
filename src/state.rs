@@ -185,6 +185,8 @@ pub struct SpaceState {
     pub building_until: Option<Instant>,
     /// The window switcher (Mod+Tab), while open.
     pub switcher: Option<crate::render::switcher::Switcher>,
+    /// A yes/no question in the middle (an app open outside spacewm), while open.
+    pub confirm: Option<crate::render::confirm::Confirm>,
     /// Windows by last use, most recent first (for the switcher).
     pub mru: Vec<crate::world::panel::PanelId>,
     /// The settings box (Mod+comma), while open.
@@ -421,6 +423,7 @@ impl SpaceState {
             menu: None,
             settings: None,
             switcher: None,
+            confirm: None,
             mru: Vec::new(),
             dock: Default::default(),
             seated: Default::default(),

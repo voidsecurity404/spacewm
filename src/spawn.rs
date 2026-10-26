@@ -62,14 +62,6 @@ fn session_env(command: &mut Command, socket: &OsStr) {
     };
 }
 
-/// A started program.
-#[derive(Debug)]
-pub struct Spawned {
-    pub pid: u32,
-    /// It runs separately from a copy open outside spacewm (see isolate.rs): tell the user.
-    pub note: Option<String>,
-}
-
 /// A `Command` for a helper tool (wpctl, grim...) with our session environment and a
 /// clean signal mask. Safe to build on any thread.
 pub fn session_command(program: &str, socket: &OsStr) -> Command {
@@ -91,34 +83,22 @@ pub fn session_command(program: &str, socket: &OsStr) -> Command {
 
 /// Run `cmd` (split like a shell would, but without a shell) as a client of our socket.
 /// Errors are logged, never fatal.
-pub fn spawn(cmd: &str, socket: &OsStr) -> Result<Spawned, String> {
+pub fn spawn(cmd: &str, socket: &OsStr) -> Result<u32, String> {
     let args = shell_words::split(cmd).map_err(|e| format!("bad command '{cmd}': {e}"))?;
-    // An app already open outside spacewm would just open its window there: keep this
-    // copy apart so it opens here.
-    let prepared = crate::isolate::prepare(&args);
-    let pid = spawn_args(&prepared.args, cmd, socket, prepared.bus.as_deref())?;
-    Ok(Spawned { pid, note: prepared.note })
+    spawn_args(&args, cmd, socket)
 }
 
 /// Run `cmd` through `sh -c` (pipes, redirections, `&&`). Only for callers the user
 /// allowed to (config `general.ipc_allow_shell`).
 pub fn spawn_shell(cmd: &str, socket: &OsStr) -> Result<u32, String> {
-    spawn_args(&["sh".into(), "-c".into(), cmd.into()], cmd, socket, None)
+    spawn_args(&["sh".into(), "-c".into(), cmd.into()], cmd, socket)
 }
 
-fn spawn_args(
-    args: &[String],
-    label: &str,
-    socket: &OsStr,
-    bus: Option<&str>,
-) -> Result<u32, String> {
+fn spawn_args(args: &[String], label: &str, socket: &OsStr) -> Result<u32, String> {
     let (program, rest) = args.split_first().ok_or_else(|| "empty command".to_string())?;
     let mut command = Command::new(program);
     command.args(rest).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     session_env(&mut command, socket);
-    if let Some(bus) = bus {
-        command.env("DBUS_SESSION_BUS_ADDRESS", bus);
-    }
     // SAFETY: only async-signal-safe libc calls between fork and exec.
     unsafe {
         command.pre_exec(|| {
@@ -185,7 +165,7 @@ impl SpaceState {
     pub fn launch_named(&mut self, cmd: &str, name: &str) -> Result<u32, String> {
         match self.launch_untracked(cmd) {
             Ok(pid) => {
-                self.launch_started(pid, name.to_string());
+                self.launch_started(pid, name.to_string(), cmd.to_string());
                 Ok(pid)
             }
             Err(e) => {
@@ -197,21 +177,9 @@ impl SpaceState {
     }
 
     /// Start a program without waiting for a window (autostart daemons, the locker,
-    /// IPC scripts). When it had to be kept apart from a copy open outside spacewm, say so
-    /// on screen: otherwise a fresh profile (no logins, no bookmarks) would be a surprise.
+    /// IPC scripts).
     pub fn launch_untracked(&mut self, cmd: &str) -> Result<u32, String> {
-        let spawned = spawn(cmd, &self.socket_name)?;
-        if let Some(note) = spawned.note {
-            let style = crate::render::text::Style {
-                size: 16.0,
-                fg: [1.0, 1.0, 1.0, 1.0],
-                bg: [0.10, 0.22, 0.42, 0.93],
-                padding: 12,
-                max_width: 900,
-            };
-            self.show_notice(vec![note], style, 6);
-        }
-        Ok(spawned.pid)
+        spawn(cmd, &self.socket_name)
     }
 }
 

@@ -61,9 +61,11 @@ Daily use: the HUD shows time, date, battery and keyboard layout; apps open when
 exits are reopened at the next start (`[desktop] restore_apps`). All commands behind
 these features are in the `[desktop]` config section.
 
-Apps already open outside spacewm (on the desktop it is nested in) still open inside it:
-browsers and Telegram then get their own profile in `~/.local/share/spacewm/apps/`
-(log in once), D-Bus single-instance apps a private session bus. See `src/isolate.rs`.
+An app you open that is already running outside spacewm (on the desktop it is nested in)
+hands the request to that copy, whatever app it is (Steam, browsers, Telegram, GNOME
+apps ...). spacewm notices it from what the start did and asks whether to close it there
+and open it here (`[desktop] running_elsewhere = "ask" | "move" | "leave"`). See
+`src/isolate.rs` and `src/desktop/elsewhere.rs`.
 
 ## Config
 

@@ -328,9 +328,11 @@ pub fn place_block(state: &mut SpaceState) {
     state.queue_redraw();
 }
 
-/// Window sizes spacewm asks apps for are kept within these (logical px).
+/// Window sizes spacewm asks apps for are kept within these (logical px). The top is what
+/// any GPU can hold as one texture with room to spare (16384 is common): an 8192 px
+/// wide window is four 1920 px screens, as big as anyone needs. Its buffer is 256 MB.
 const MIN_WINDOW: (i32, i32) = (200, 120);
-const MAX_WINDOW: (i32, i32) = (4000, 3000);
+pub const MAX_WINDOW: (i32, i32) = (8192, 8192);
 
 /// Mod+Ctrl+= / Mod+Ctrl+-: make the window itself bigger or smaller (more or fewer
 /// terminal rows and columns), unlike Mod+= which only scales the panel in the world.

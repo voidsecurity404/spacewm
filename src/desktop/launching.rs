@@ -4,8 +4,9 @@
 //!
 //! Errors are told plainly: a command that can't be started, or a program that exits
 //! with an error before showing a window. No false alarms: a program that exits fine
-//! without a window (it handed the request to a copy already running, or never had a
-//! window) or that takes very long just drops off the list quietly.
+//! without a window (it never had one) or that takes very long just drops off the list
+//! quietly. One that exits fine because it handed the request to a copy of itself open
+//! OUTSIDE spacewm is noticed (the programs it ran are watched): see isolate.rs.
 
 use std::time::{Duration, Instant};
 
@@ -25,12 +26,22 @@ const SHOW_AFTER: Duration = Duration::from_millis(400);
 const GIVE_UP: Duration = Duration::from_secs(20);
 /// Dots animation step.
 const STEP: Duration = Duration::from_millis(350);
+/// How often the programs a start runs are noted, and for how long. A hand-off to a
+/// running copy takes a fraction of a second, so look often at first.
+const WATCH_EVERY: Duration = Duration::from_millis(50);
+const WATCH_FOR: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone)]
 pub struct Pending {
     pub pid: u32,
     pub name: String,
     pub since: Instant,
+    /// The command (to start it again after moving it here).
+    pub cmd: String,
+    /// When it started, in clock ticks after boot: copies running elsewhere are older.
+    pub start_ticks: u64,
+    /// The processes of its tree seen so far, with their programs.
+    pub seen: Vec<(u32, String)>,
 }
 
 #[derive(Default)]
@@ -40,6 +51,8 @@ pub struct Launching {
     pub image: Option<Image>,
     drawn: String,
     ticking: bool,
+    /// Dots phase last drawn: redraw only when it moves.
+    phase: usize,
 }
 
 /// What the user sees for a command: "firefox" for "/usr/lib/firefox/firefox --new".
@@ -81,10 +94,28 @@ fn draw(text: &str, scale: i32) -> Option<Image> {
     Some((buffer, size))
 }
 
+/// Note the programs `p`'s process tree runs now.
+fn watch(p: &mut Pending) {
+    for (pid, name) in crate::isolate::tree(p.pid) {
+        if !p.seen.iter().any(|(q, _)| *q == pid) {
+            p.seen.push((pid, name));
+        }
+    }
+}
+
 impl SpaceState {
     /// An app the user asked for was started.
-    pub fn launch_started(&mut self, pid: u32, name: String) {
-        self.desktop.launching.pending.push(Pending { pid, name, since: Instant::now() });
+    pub fn launch_started(&mut self, pid: u32, name: String, cmd: String) {
+        let mut p = Pending {
+            pid,
+            name,
+            since: Instant::now(),
+            cmd,
+            start_ticks: crate::isolate::now_ticks(),
+            seen: Vec::new(),
+        };
+        watch(&mut p);
+        self.desktop.launching.pending.push(p);
         self.schedule_launch_tick();
     }
 
@@ -111,7 +142,8 @@ impl SpaceState {
         self.queue_redraw();
         match code {
             Some(0) | None => {
-                tracing::debug!(app = p.name, "exited without a window of its own");
+                tracing::debug!(app = p.name, seen = ?p.seen, "exited without a window of its own");
+                self.check_handed_elsewhere(&p);
             }
             Some(code) => {
                 tracing::warn!(app = p.name, code, "app failed to start");
@@ -126,26 +158,38 @@ impl SpaceState {
             return;
         }
         self.desktop.launching.ticking = true;
-        let _ = self.loop_handle.insert_source(Timer::from_duration(STEP), |_, _, state| {
-            let l = &mut state.desktop.launching;
-            l.pending.retain(|p| {
-                let keep = p.since.elapsed() < GIVE_UP;
-                if !keep {
-                    tracing::info!(
-                        app = p.name,
-                        "no window after a long time; not waiting anymore"
-                    );
+        let _ =
+            self.loop_handle.insert_source(Timer::from_duration(WATCH_EVERY), |_, _, state| {
+                let l = &mut state.desktop.launching;
+                for p in l.pending.iter_mut().filter(|p| p.since.elapsed() < WATCH_FOR) {
+                    watch(p);
                 }
-                keep
+                l.pending.retain(|p| {
+                    let keep = p.since.elapsed() < GIVE_UP;
+                    if !keep {
+                        tracing::info!(
+                            app = p.name,
+                            "no window after a long time; not waiting anymore"
+                        );
+                    }
+                    keep
+                });
+                // The dots move every STEP: redraw then, not at every look.
+                let phase =
+                    l.pending.iter().map(|p| p.since).min().map_or(0, |oldest| {
+                        (oldest.elapsed().as_millis() / STEP.as_millis()) as usize
+                    });
+                if phase != l.phase || l.pending.is_empty() {
+                    l.phase = phase;
+                    state.queue_redraw();
+                }
+                if state.desktop.launching.pending.is_empty() {
+                    state.desktop.launching.ticking = false;
+                    TimeoutAction::Drop
+                } else {
+                    TimeoutAction::ToDuration(WATCH_EVERY)
+                }
             });
-            state.queue_redraw();
-            if state.desktop.launching.pending.is_empty() {
-                state.desktop.launching.ticking = false;
-                TimeoutAction::Drop
-            } else {
-                TimeoutAction::ToDuration(STEP)
-            }
-        });
     }
 
     /// Before each frame: the "Starting ..." image for what has waited long enough.

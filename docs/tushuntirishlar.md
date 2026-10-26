@@ -390,46 +390,56 @@ sessiyada Super. Oyna ochiq paytda bosilgan tugmalar ilovaga yetib bormaydi, kam
 ham qimirlamaydi. Esc, Alt+K yoki sichqoncha bosilsa yopiladi. Bu Window rejimida ham,
 fullscreen'da ham ishlaydi.
 
-### Dastur tashqarida ochiq bo'lsa ham spacewm ichida ochiladi (src/isolate.rs)
+### Dastur tashqarida ochiq bo'lsa ham spacewm ichida ochiladi (src/isolate.rs, src/desktop/elsewhere.rs)
 
-Muammo: Telegram, Firefox, Nautilus kabi ko'p dasturlar "bitta nusxali". Ularni ikkinchi
-marta ishga tushirsangiz, yangi oyna ochilmaydi: yangi nusxa ishlab turgan nusxaga
-"oyna och" deb xabar yuboradi va yopiladi. Agar o'sha nusxa Hyprland'da ishlayotgan
-bo'lsa, oyna spacewm'da emas, Hyprland'da ochiladi. Tajriba: Hyprland'da Telegram ochiq
-turganda spacewm'dan `Telegram` buyrug'i 0 ta oyna berdi.
+Muammo: Steam, Telegram, Firefox, Nautilus kabi ko'p dasturlar "bitta nusxali". Ularni
+ikkinchi marta ishga tushirsangiz yangi oyna ochilmaydi: yangi nusxa ishlab turgan
+nusxaga "oyna och" deb xabar yuboradi va yopiladi. O'sha nusxa Hyprland'da ishlayotgan
+bo'lsa, oyna spacewm'da emas, Hyprland'da ochiladi. Ular bir-birini turli yo'llar bilan
+topadi: D-Bus nomi, profil papkasidagi socket yoki lock, Steam'dagi `~/.steam/steam.pipe`.
 
-Ular bir-birini quyidagi yo'llar bilan topadi:
-- **D-Bus**: GTK/GNOME ilovalari (GApplication), Firefox. Session bus'da nom egallaydi,
-  masalan `org.gnome.Nautilus`.
-- **Profil papkasidagi lock yoki socket**: Telegram, Chromium.
+Avval spacewm buni har bir dastur uchun alohida hal qilardi: Firefox va Telegram'ga
+alohida profil, Nautilus'ga shaxsiy D-Bus berilardi. Steam esa hech bir ro'yxatda yo'q
+edi va baribir Hyprland'da ochilardi. Endi **dasturdan qat'i nazar bitta umumiy
+yechim** ishlaydi, ro'yxat ham, alohida kod ham yo'q:
 
-Yechim: dastur ishga tushirilishidan oldin spacewm `/proc` orqali shu dasturning
-spacewm'ga tegishli bo'lmagan nusxasini qidiradi. Bu nusxa sizga tegishli bo'lishi,
-lekin spacewm'ning bolasi bo'lmasligi kerak (ota jarayonlar zanjiri `/proc/<pid>/stat`
-orqali tekshiriladi). Topilsa, dastur ajratib ishga tushiriladi:
-- **VS Code oilasi** (code, codium, cursor): o'z `--user-data-dir`'i beriladi, lekin
-  kengaytmalaringiz umumiy qoladi (`--extensions-dir ~/.vscode/extensions`).
-- **Boshqa Electron/Chromium dasturlari** (Discord, Obsidian, Slack): tashqi nusxaning
-  papkasida Chromium fayllari (`chrome_crashpad_handler`, `resources.pak`) bo'lsa, ular
-  ham alohida `--user-data-dir` oladi. VS Code D-Bus emas, o'z socket'i orqali
-  bog'lanadi, shuning uchun avval bu holat ushlanmay qolgan edi.
-- **Firefox oilasi**: `--profile ~/.local/share/spacewm/apps/firefox`
-- **Chromium oilasi**: `--user-data-dir=...`
-- **Telegram**: `-workdir ...`. Bir marta login qilasiz, keyin saqlanib qoladi.
-- **Boshqa dasturlar**: faqat tashqi nusxa session bus'da nom egallagan bo'lsa (`busctl`
-  bilan tekshiriladi), spacewm'ning shaxsiy `dbus-daemon`'i beriladi. Terminal kabi oddiy
-  dasturlarga tegilmaydi, shunda ular ichida `notify-send` kabi buyruqlar avvalgidek
-  ishlaydi.
+1. **Kuzatish** (`desktop/launching.rs`): siz ochgan dastur oynasi chiqquncha spacewm
+   uning jarayonlar daraxtini birinchi 5 soniya davomida har 50 ms'da kuzatib turadi.
+   Bunda daraxtdagi har bir dastur nomi `/proc/<pid>/exe` dan olinadi, shuning uchun
+   skript ichidan chaqirilgan haqiqiy dastur ham ko'rinadi. sh, bash va python kabi
+   yordamchilar hisobga olinmaydi.
+2. **Aniqlash** (`isolate.rs`): dastur oyna ochmasdan 0 kodi bilan chiqib ketsa, spacewm
+   o'sha dasturlardan birining tashqaridagi nusxasini qidiradi. Nusxa quyidagi
+   shartlarga mos kelishi kerak:
+   - sizga tegishli;
+   - spacewm'ning bolasi emas;
+   - siz dasturni ochishdan **oldin** ishga tushgan (`/proc/<pid>/stat` dagi
+     starttime orqali).
 
-Ekranda ko'k xabar chiqadi, unda nima uchun bu nusxa alohida ekani yoziladi. Profil
-papkalari 0700 huquqi bilan yaratiladi, chunki ularda login ma'lumotlari saqlanadi.
-Shaxsiy D-Bus spacewm bilan birga to'xtaydi; spacewm qulasa ham `PR_SET_PDEATHSIG` tufayli
-to'xtaydi. Tashqarida hech narsa ochiq bo'lmasa, dastur odatdagidek, sizning asl
-profilingiz bilan ochiladi. Haqiqiy spacewm sessiyasida (DRM) "tashqi desktop" yo'q,
-shuning uchun bu holat u yerda deyarli uchramaydi.
+   Shunday nusxa topilsa, demak so'rov unga uzatilgan. Terminal kabi oddiy dasturlar
+   esa oyna ochadi, shuning uchun ularga hech qachon tegilmaydi.
+3. **Ko'chirish** (`desktop/elsewhere.rs`): spacewm'da savol chiqadi: "Steam spacewm'dan
+   tashqarida ochiq. U yerda yopib, shu yerda ochaymi?"
+   - **Enter** yoki tugma bosilsa: tashqaridagi nusxaga SIGTERM yuboriladi. Bu
+     oynani yopish bilan bir xil: dastur ishini saqlab, o'zi yopiladi. spacewm uning
+     yopilishini kutadi (ko'pi bilan 30 s) va dasturni spacewm ichida qayta ochadi.
+     Endi so'rovni uzatadigan nusxa qolmagani uchun dastur shu yerda ochiladi, sizning
+     odatdagi profilingiz bilan: login, tablar va sozlamalar joyida qoladi. Majburan
+     o'ldirish (SIGKILL) hech qachon ishlatilmaydi. Dastur u yerda "saqlaysizmi?" deb
+     so'rab qolsa, spacewm shuni aytadi.
+   - **Esc**: hech narsa qilinmaydi.
+
+   Sozlama: `[desktop] running_elsewhere`:
+   - `"ask"` (standart): har safar so'raydi;
+   - `"move"`: so'ramasdan ko'chiradi;
+   - `"leave"`: dasturni o'sha yerda qoldirib, faqat xabar beradi.
+
+Eski alohida profillar (`~/.local/share/spacewm/apps/`) endi ishlatilmaydi, ularni
+o'chirib tashlasangiz ham bo'ladi.
 
 Test (`tests/e2e/stage8_isolation.sh`) alohida `dbus-run-session` va vaqtinchalik HOME
-ichida ishlaydi: sizning haqiqiy D-Bus'ingizga va Firefox profilingizga tegmaydi.
+ichida ishlaydi. U o'zi yaratgan `spacefake` nomli soxta "bitta nusxali" dasturni ikkinchi
+spacewm'da ochadi, keyin uni ko'chiradi. Haqiqiy dasturlaringizga tegmaydi.
 
 ### Barqarorlik: stress testi (tests/e2e/stage8_stress.sh)
 
@@ -580,7 +590,7 @@ uchun qancha katta bo'layotgani ko'rinib turadi.
 
 Sichqonchaning piksel harakati oynaga qadar bo'lgan masofaga qarab oyna piksellariga
 aylantiriladi: `ppu / (ekran_balandligi / (2·masofa·tan(fov/2)))`. Shu tufayli burchak
-kursor bilan bir xil tezlikda yuradi. O'lcham 240×140 dan ekranning 2 baravarigacha.
+kursor bilan bir xil tezlikda yuradi. O'lcham 240×140 dan 8192×8192 gacha (GPU teksturasi bemalol sig'adigan chegara).
 Undan kattaroq oynaga orqaga chekinib qarash mumkin.
 
 Avvalgi "burchak nishon chizig'iga ergashadi" usuli foydalanuvchiga noqulay bo'lgani

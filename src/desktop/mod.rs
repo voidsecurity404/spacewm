@@ -14,6 +14,7 @@
 //! tool must never freeze the desktop. Every command has a timeout; results come back to
 //! the event loop through a calloop channel.
 
+pub mod elsewhere;
 pub mod icons;
 pub mod launching;
 pub mod osd;
@@ -82,6 +83,8 @@ pub struct DesktopState {
     pub battery: Option<status::Battery>,
     /// Apps on their way ("Starting Firefox ...").
     pub launching: launching::Launching,
+    /// An app being closed outside spacewm to open it here.
+    pub moving: Option<elsewhere::Moving>,
 }
 
 /// Set up the result channel and the periodic tick. Called once at startup.
@@ -292,8 +295,13 @@ impl SpaceState {
         }
     }
 
-    /// A short blue message (like the one for separately started apps).
+    /// A short blue message.
     pub fn show_info(&mut self, text: String) {
+        self.show_info_for(text, 4);
+    }
+
+    /// A blue message shown for `secs` (or until replaced or cleared).
+    pub fn show_info_for(&mut self, text: String, secs: u64) {
         let style = crate::render::text::Style {
             size: 16.0,
             fg: [1.0, 1.0, 1.0, 1.0],
@@ -301,7 +309,7 @@ impl SpaceState {
             padding: 12,
             max_width: 900,
         };
-        self.show_notice(vec![text], style, 4);
+        self.show_notice(vec![text], style, secs);
     }
 
     /// Every TICK: auto-lock, battery.

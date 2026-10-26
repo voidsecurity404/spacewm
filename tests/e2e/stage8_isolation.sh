@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Apps already open OUTSIDE spacewm still open inside it: a second headless spacewm plays
-# "the other desktop". Runs on a private D-Bus session bus and a throwaway HOME, so the
-# user's real bus, Firefox profile and spacewm app profiles are never touched.
+# Apps already open OUTSIDE spacewm: opening one from spacewm hands the request to that
+# copy (its window opens there). spacewm notices it from what the start did, whatever
+# the app is, asks, closes the copy outside and opens it here. A second headless spacewm
+# plays "the other desktop". Runs on a private D-Bus session bus and a throwaway HOME,
+# so the user's real bus and profiles are never touched. The app it closes is a
+# made-up one ("spacefake", a copy of foot under its own name) that only this test runs.
 if [ -z "${SPACE_ISOLATION_INNER:-}" ]; then
     REAL_OUT="${SPACE_TEST_OUT:-$HOME/spacewm-test}"
     T=$(mktemp -d)
@@ -31,65 +34,102 @@ for _ in $(seq 50); do [ -S "$SOCKA" ] && break; sleep 0.1; done
 WLA=$(sed -n 's/.*spacewm listening on \([^ ]*\).*/\1/p' "$OUT/spacewm-other.log" | head -1)
 [ -n "$WLA" ] || fail "the other spacewm did not start"
 ka() { "$SPACECTL" --socket "$SOCKA" "$@"; }
-
-space_start --render 3d --log-level info
 count() { kc --json list | python3 -c "import json,sys; print(len(json.load(sys.stdin)['panels']))"; }
+counta() { ka --json list | python3 -c "import json,sys; print(len(json.load(sys.stdin)['panels']))"; }
+logged() { for _ in $(seq "${2:-60}"); do grep -q "$1" "$OUT/spacewm.log" && return 0; sleep 0.1; done; return 1; }
 
-# ---- A GApplication (D-Bus single instance): nautilus.
-WAYLAND_DISPLAY="$WLA" nautilus --new-window >/dev/null 2>&1 &
-for _ in $(seq 100); do ka list | grep -q Nautilus && break; sleep 0.1; done
-ka list | grep -q Nautilus || fail "nautilus did not open on the other desktop"
-kc spawn nautilus --new-window >/dev/null
-for _ in $(seq 100); do [ "$(count)" -ge 1 ] && break; sleep 0.1; done
-[ "$(count)" -ge 1 ] || fail "nautilus opened its window on the other desktop, not in spacewm"
-grep -q "private D-Bus" "$OUT/spacewm.log" || fail "no private bus used"
-shot s8-iso-nautilus >/dev/null
-pass "nautilus already open elsewhere still opens in spacewm (private D-Bus)"
-# Starting it again from spacewm reaches the copy in spacewm (a second window here).
-kc spawn nautilus --new-window >/dev/null
-for _ in $(seq 100); do [ "$(count)" -ge 2 ] && break; sleep 0.1; done
-[ "$(count)" -ge 2 ] || fail "second nautilus window did not open in spacewm: $(kc list | tr "\n" "; ")"
-pass "opening it again from spacewm opens a second window here"
-
-# ---- Firefox (D-Bus remote by profile): own spacewm profile.
-WAYLAND_DISPLAY="$WLA" MOZ_ENABLE_WAYLAND=1 firefox about:blank >/dev/null 2>&1 &
-for _ in $(seq 300); do ka list | grep -qi firefox && break; sleep 0.1; done
-ka list | grep -qi firefox || fail "firefox did not open on the other desktop"
-before=$(count)
-kc spawn firefox about:blank >/dev/null
-for _ in $(seq 300); do kc list | grep -qi firefox && break; sleep 0.1; done
-kc list | grep -qi firefox || fail "firefox opened on the other desktop, not in spacewm (count $before -> $(count))"
-grep -q 'own profile app="firefox"' "$OUT/spacewm.log" || fail "firefox was not given its own profile"
-[ -d "$XDG_DATA_HOME/spacewm/apps/firefox" ] || fail "profile directory missing"
-[ "$(stat -c %a "$XDG_DATA_HOME/spacewm/apps/firefox")" = 700 ] || fail "profile directory is not private"
-shot s8-iso-firefox >/dev/null
-pass "firefox already open elsewhere opens in spacewm with its own profile (0700)"
-
-# ---- An Electron app (VS Code: one instance per --user-data-dir, found by a socket).
-if command -v code >/dev/null; then
-    WAYLAND_DISPLAY="$WLA" code --ozone-platform=wayland --new-window >"$OUT/code-other.log" 2>&1 &
-    for _ in $(seq 300); do ka list | grep -qi "code" && break; sleep 0.1; done
-    ka list | grep -qi "code" || fail "VS Code did not open on the other desktop"
-    kc spawn code >/dev/null
-    for _ in $(seq 300); do kc list | grep -qi "code" && break; sleep 0.1; done
-    kc list | grep -qi "code" || fail "VS Code opened on the other desktop, not in spacewm"
-    grep -q 'own profile app="code"' "$OUT/spacewm.log" || fail "VS Code was not given its own profile"
-    pass "VS Code already open elsewhere opens in spacewm (own --user-data-dir)"
+# ---- "spacefake": a made-up single-instance app no list in spacewm knows. Its launcher
+# script hands the request to a running copy (a short-lived helper program with the
+# same name exits fine, like Steam's or Chromium's second start), else runs the app.
+F="$HOME/fake"
+mkdir -p "$F/app" "$F/handoff"
+cp "$(command -v foot)" "$F/app/spacefake"      # the app: a window
+cp "$(command -v sleep)" "$F/handoff/spacefake" # "tell the running copy", exit 0
+cat >"$F/spacefake-launcher" <<EOF
+#!/bin/sh
+if [ -f "$F/lock" ] && kill -0 "\$(cat "$F/lock")" 2>/dev/null; then
+    exec "$F/handoff/spacefake" 0.4
 fi
+"$F/app/spacefake" &
+echo \$! >"$F/lock"
+wait
+EOF
+chmod +x "$F/spacefake-launcher"
+start_outside() {
+    WAYLAND_DISPLAY="$WLA" "$F/app/spacefake" >/dev/null 2>&1 &
+    echo $! >"$F/lock"
+    for _ in $(seq 50); do [ "$(counta)" -ge 1 ] && break; sleep 0.1; done
+    [ "$(counta)" -ge 1 ] || fail "spacefake did not open on the other desktop"
+    sleep 0.3
+}
+cfg() {
+    printf '[desktop]\nrunning_elsewhere = "%s"\n[[keybinds.spawn]]\nkey = "Mod+B"\ncommand = "%s"\n' \
+        "$1" "$F/spacefake-launcher" >"$OUT/iso-config-$$.toml"
+}
 
-# ---- A plain program (foot) open elsewhere needs nothing: normal start, normal bus.
-WAYLAND_DISPLAY="$WLA" foot >/dev/null 2>&1 &
-for _ in $(seq 50); do ka list | grep -q foot && break; sleep 0.1; done
-kc spawn foot >/dev/null
-for _ in $(seq 50); do kc list | grep -q foot && break; sleep 0.1; done
-kc list | grep -q foot || fail "foot did not open"
-tail -n 5 "$OUT/spacewm.log" | grep -q 'args=\["foot"\]' || fail "foot was started differently: $(grep 'command="foot"' "$OUT/spacewm.log" | tail -1)"
-pass "foot open elsewhere starts normally (it is not single-instance)"
+cfg ask
+space_start --render 3d --log-level info --config "$OUT/iso-config-$$.toml"
+start_outside
+OUTSIDE=$(cat "$F/lock")
+kc input key Super+b
+logged "the app went to its copy outside spacewm" || fail "the hand-off to the copy outside was not noticed"
+logged "question shown" || fail "no question shown"
+grep -q "pids=\[$OUTSIDE\]" "$OUT/spacewm.log" || fail "the wrong process was found: $(grep 'went to its copy' "$OUT/spacewm.log")"
+shot s8-iso-question >/dev/null
+kc input key Escape
+logged "question answered yes=false" || fail "Escape did not answer no"
+sleep 0.5
+kill -0 "$OUTSIDE" 2>/dev/null || fail "'Leave it' closed the copy outside"
+[ "$(count)" = 0 ] || fail "'Leave it' opened a window here"
+pass "an app handing its start to a copy outside is noticed and asked about; Esc leaves it"
 
-BUS_PID=$(sed -n 's/.*private D-Bus session bus started.* pid=\([0-9]*\).*/\1/p' "$OUT/spacewm.log" | head -1)
-[ -n "$BUS_PID" ] && kill -0 "$BUS_PID" 2>/dev/null || fail "private D-Bus daemon not running"
+kc input key Super+b
+logged "question shown.*" 60
+for _ in $(seq 60); do [ "$(grep -c 'question shown' "$OUT/spacewm.log")" -ge 2 ] && break; sleep 0.1; done
+[ "$(grep -c 'question shown' "$OUT/spacewm.log")" -ge 2 ] || fail "no second question"
+kc input key Return
+logged "asked an app outside spacewm to quit pid=$OUTSIDE ok=true" || fail "the copy outside was not asked to quit"
+logged "closed outside spacewm; opening it here" 100 || fail "did not open it here after it closed"
+for _ in $(seq 80); do [ "$(count)" -ge 1 ] && break; sleep 0.1; done
+[ "$(count)" -ge 1 ] || fail "the app did not open in spacewm after moving"
+kill -0 "$OUTSIDE" 2>/dev/null && fail "the copy outside is still running"
+[ "$(counta)" = 0 ] || fail "its window is still on the other desktop"
+shot s8-iso-moved >/dev/null
+pass "Enter: closed on the other desktop, opened in spacewm"
 space_stop || fail "unclean exit"
-sleep 0.3
-kill -0 "$BUS_PID" 2>/dev/null && fail "private D-Bus daemon $BUS_PID left running"
+
+# ---- running_elsewhere = "leave": just say so.
+kill "$(cat "$F/lock")" 2>/dev/null || true; sleep 0.3 # the copy this test opened in spacewm
+cfg leave
+space_start --render 3d --log-level info --config "$OUT/iso-config-$$.toml"
+start_outside
+kc input key Super+b
+logged "the app went to its copy outside spacewm" || fail "not noticed (leave)"
+sleep 0.4
+grep -q "question shown" "$OUT/spacewm.log" && fail "asked although running_elsewhere = leave"
+kill -0 "$(cat "$F/lock")" 2>/dev/null || fail "leave closed it"
+pass "running_elsewhere = leave: nothing closed, no question"
+space_stop || fail "unclean exit"
+kill "$(cat "$F/lock")" 2>/dev/null || true # the copy this test opened outside
+
+# (No real single-instance app here: spacewm finds copies by program name, and a real
+# app the user has open, like their Nautilus, must never be closed by a test.)
+cfg move
+space_start --render 3d --log-level info --config "$OUT/iso-config-$$.toml"
+
+# ---- A program that is not single-instance (foot) open elsewhere: nothing to do.
+WAYLAND_DISPLAY="$WLA" foot >/dev/null 2>&1 &
+FOOT_OUT=$!
+for _ in $(seq 50); do ka list | grep -q foot && break; sleep 0.1; done
+before=$(count)
+kc input key Super+Return
+for _ in $(seq 50); do [ "$(count)" -gt "$before" ] && break; sleep 0.1; done
+[ "$(count)" -gt "$before" ] || fail "foot did not open in spacewm"
+sleep 0.5
+kill -0 "$FOOT_OUT" 2>/dev/null || fail "the foot outside was closed"
+pass "foot open elsewhere just opens here too (it is not single-instance), nothing closed"
+kill "$FOOT_OUT" 2>/dev/null || true
+space_stop || fail "unclean exit"
 grep -E "panicked|ERROR" "$OUT/spacewm.log" && fail "errors in log"
-pass "clean exit, private bus stopped"
+rm -f "$OUT/iso-config-$$.toml"
+pass "clean exit"

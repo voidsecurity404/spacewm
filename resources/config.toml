@@ -94,6 +94,12 @@ lock_after_minutes = 10
 # Reopen the apps that were open when spacewm last exited (their windows go back to
 # where they were).
 restore_apps = true
+# Many apps run only once: started again, they hand the request to the copy already
+# running. When that copy is outside spacewm (on your other desktop), its window opens
+# THERE. Then: "ask" whether to close it there and open it here, "move" without
+# asking, or "leave" it there. Closing it asks the app to quit like closing its window
+# does; it opens here with your usual profile (logins, tabs and settings stay).
+running_elsewhere = "ask"
 # Print: whole screen, Shift+Print: a region you drag (region_selector prints it).
 # Saved here and copied to the clipboard.
 screenshot_dir = "~/Pictures/Screenshots"

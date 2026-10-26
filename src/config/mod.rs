@@ -97,6 +97,18 @@ impl Default for Dock {
 
 /// Everyday desktop things: locking, screenshots, media keys, restoring apps. Commands
 /// are run without a shell (split like a shell would); "" switches a feature off.
+/// An app started from spacewm went to its copy open outside spacewm (see isolate.rs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RunningElsewhere {
+    /// Ask: close it there and open it here?
+    Ask,
+    /// Do that without asking.
+    Move,
+    /// Leave it there (just say so).
+    Leave,
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Desktop {
@@ -106,6 +118,8 @@ pub struct Desktop {
     pub lock_after_minutes: u32,
     /// Start the apps that were open when spacewm last exited.
     pub restore_apps: bool,
+    /// An app you open is already running outside spacewm and opened its window there.
+    pub running_elsewhere: RunningElsewhere,
     /// Where Print saves screenshots ("~" is your home).
     pub screenshot_dir: String,
     /// Prints "x,y wxh" for Shift+Print (a region you drag).
@@ -135,6 +149,7 @@ impl Default for Desktop {
             lock_command: s("swaylock -f -c 101418"),
             lock_after_minutes: 10,
             restore_apps: true,
+            running_elsewhere: RunningElsewhere::Ask,
             screenshot_dir: s("~/Pictures/Screenshots"),
             region_selector: s("slurp"),
             notification_daemon: s("mako"),

@@ -238,7 +238,6 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     }
 
     state.save_layout();
-    isolate::shutdown();
     // GL objects can only be freed while the context exists, i.e. before the backend drops.
     if let Some(scene) = state.view.scene.take() {
         scene.destroy(state.backend.renderer());

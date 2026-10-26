@@ -216,7 +216,7 @@ sleep 1.6
 read -r TLX1 TLY1 TLZ1 < <(top_left)
 python3 -c "import math; exit(0 if math.dist(($TLX0,$TLY0,$TLZ0),($TLX1,$TLY1,$TLZ1)) < 0.03 else 1)" ||
     fail "the top-left corner moved while resizing ($TLX0 $TLY0 $TLZ0 -> $TLX1 $TLY1 $TLZ1)"
-# Far right/down: bigger than the screen is fine, up to two screens.
+# Far right/down: bigger than the screen is fine (up to 8192 px).
 read -r _ _ _ _ WX HX _ < <(panel)
 aim $((WX - 15)) $((HX - 15))
 kc input click --state press
@@ -224,7 +224,7 @@ kc input move-by 400 300
 kc input click --state release
 sleep 1.6
 read -r _ _ _ _ W2 H2 _ < <(panel)
-[ "$W2" -le 2560 ] && [ "$H2" -le 1440 ] || fail "resized beyond two screens (${W2}x$H2)"
+[ "$W2" -le 8192 ] && [ "$H2" -le 8192 ] || fail "resized beyond the limit (${W2}x$H2)"
 [ "$W2" -gt "$((W1 + 100))" ] && [ "$H2" -gt "$((H1 + 10))" ] || fail "a big corner drag did not grow the window (${W1}x$H1 -> ${W2}x$H2)"
 # And back up-left: smaller.
 aim $((W2 - 15)) $((H2 - 15))

@@ -26,9 +26,6 @@ const RESIZE_EVERY: Duration = Duration::from_millis(33);
 const SETTLE: Duration = Duration::from_millis(1500);
 /// Smallest window a drag makes (logical px).
 const MIN_SIZE: (f64, f64) = (240.0, 140.0);
-/// Biggest window a drag makes, in screens: bigger than the screen is fine (step back to
-/// see it all), but not so big that one fast flick makes a giant window.
-const MAX_SCREENS: f64 = 2.0;
 
 /// A resize in progress: the top corner that stays put (top-left when dragging the
 /// bottom-right corner, top-right for the bottom-left one) and the window's axes.
@@ -180,12 +177,12 @@ impl SpaceState {
         let side = if left { -1.0 } else { 1.0 };
         d.wanted.0 += side * delta.x * factor;
         d.wanted.1 += delta.y * factor;
-        let max = self
-            .primary_output_geometry()
-            .map_or((1920.0, 1080.0), |g| (g.size.w as f64, g.size.h as f64));
+        // As big as you like (bigger than the screen too: step back to see it all), up
+        // to what a GPU texture holds.
+        let max = world_ops::MAX_WINDOW;
         d.size = (
-            d.wanted.0.clamp(MIN_SIZE.0, (max.0 * MAX_SCREENS).max(MIN_SIZE.0)),
-            d.wanted.1.clamp(MIN_SIZE.1, (max.1 * MAX_SCREENS).max(MIN_SIZE.1)),
+            d.wanted.0.clamp(MIN_SIZE.0, max.0 as f64),
+            d.wanted.1.clamp(MIN_SIZE.1, max.1 as f64),
         );
         // Past a limit and back: the corner comes back right away, not after the overshoot.
         d.wanted = d.size;

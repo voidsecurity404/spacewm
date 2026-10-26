@@ -1,110 +1,53 @@
-//! Apps that are already open somewhere else still open inside spacewm.
+//! Apps already open outside spacewm: noticing that a start went there, and moving them.
 //!
 //! Many desktop apps are "single instance": starting one a second time doesn't open a
-//! window, it tells the copy that is already running to open one and exits. That copy
-//! may live outside spacewm (on the desktop spacewm is nested in, or another session), so
-//! the window would appear THERE. How they find each other:
+//! window, it tells the copy that is already running to open one and exits. How they
+//! find that copy differs (a D-Bus name, a socket or lock in the profile folder, a pipe
+//! like Steam's), and that copy may live outside spacewm (on the desktop spacewm is nested
+//! in, or another session), so the window appears THERE.
 //!
-//! - D-Bus: GTK/GNOME apps (GApplication), many KDE/Qt apps, Firefox on Wayland register
-//!   a name on the session bus; a second start finds the name and forwards.
-//! - A lock/socket in the profile directory: Telegram, Chromium-based browsers, and
-//!   Electron apps (VS Code, Discord, Obsidian: Chromium inside).
-//!
-//! So when an instance of the same program is running and is NOT one of our own
-//! children, spacewm starts this one apart from it: browsers and Telegram get their own
-//! profile directory under ~/.local/share/spacewm/apps/ (log in once there; it is kept),
-//! everything else gets a private D-Bus session bus. Starting it again from spacewm then
-//! reaches the copy inside spacewm, as it should. When nothing runs outside, apps start
-//! normally with your usual profile.
+//! spacewm does not guess per app. It watches what happens: while a start is on its way,
+//! it notes every program in its process tree (launcher scripts start the real app).
+//! If the start then exits fine without ever showing a window, and one of those
+//! programs is running outside spacewm (started before, not by us), the request was
+//! handed to that copy. The only way to have the app in spacewm then is to close that
+//! copy and start it again here, with the user's usual profile (logins, settings and
+//! open tabs all stay). spacewm asks first (desktop.running_elsewhere), and only asks the
+//! app to quit (SIGTERM, as closing a window does), so it can save its work.
 
-use std::{
-    io::{BufRead, BufReader},
-    os::unix::process::CommandExt,
-    path::{Path, PathBuf},
-    process::{Child, Command, Stdio},
-    sync::Mutex,
-};
+use std::{collections::HashMap, path::PathBuf};
 
-/// How to keep one app apart from its other running copy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Rule {
-    /// Firefox family: `--profile <dir>` (a different profile never talks to the other).
-    FirefoxProfile,
-    /// Chromium family: `--user-data-dir=<dir>`.
-    ChromiumDataDir,
-    /// Telegram Desktop: `-workdir <dir>`.
-    TelegramWorkdir,
-    /// VS Code family: own `--user-data-dir`, but your extensions (`--extensions-dir`).
-    VsCode,
-    /// Anything else: a private D-Bus session bus.
-    PrivateBus,
-}
-
-pub fn rule_for(program: &str) -> Rule {
-    match program {
-        "firefox"
-        | "firefox-esr"
-        | "firefox-developer-edition"
-        | "librewolf"
-        | "waterfox"
-        | "floorp"
-        | "zen"
-        | "zen-browser" => Rule::FirefoxProfile,
-        "chromium"
-        | "chrome"
-        | "google-chrome"
-        | "google-chrome-stable"
-        | "brave"
-        | "brave-browser"
-        | "vivaldi"
-        | "vivaldi-stable"
-        | "microsoft-edge"
-        | "microsoft-edge-stable" => Rule::ChromiumDataDir,
-        "Telegram" | "telegram-desktop" | "telegram" => Rule::TelegramWorkdir,
-        "code" | "code-oss" | "codium" | "vscodium" | "cursor" => Rule::VsCode,
-        _ => Rule::PrivateBus,
-    }
-}
-
-/// The command line with the rule's profile option added right after the program (so
-/// it comes before any `--` that ends the options).
-/// `extensions`: the folder a VS Code copy should share with your usual one.
-pub fn apply(rule: Rule, args: &[String], dir: &Path, extensions: Option<&Path>) -> Vec<String> {
-    let dir = dir.to_string_lossy().into_owned();
-    let extra: Vec<String> = match rule {
-        Rule::VsCode => {
-            let mut v = vec!["--user-data-dir".into(), dir];
-            if let Some(ext) = extensions {
-                v.extend(["--extensions-dir".into(), ext.to_string_lossy().into_owned()]);
-            }
-            v
-        }
-        Rule::FirefoxProfile => vec!["--profile".into(), dir],
-        Rule::ChromiumDataDir => vec![format!("--user-data-dir={dir}")],
-        Rule::TelegramWorkdir => vec!["-workdir".into(), dir],
-        Rule::PrivateBus => Vec::new(),
-    };
-    let mut out = Vec::with_capacity(args.len() + extra.len());
-    out.extend(args.first().cloned());
-    out.extend(extra);
-    out.extend(args.iter().skip(1).cloned());
-    out
-}
-
-/// The command already chooses its own profile: leave it alone.
-fn has_own_profile(rule: Rule, args: &[String]) -> bool {
-    let flags: &[&str] = match rule {
-        Rule::FirefoxProfile => &["--profile", "-profile", "-P", "--no-remote", "-no-remote"],
-        Rule::ChromiumDataDir | Rule::VsCode => &["--user-data-dir"],
-        Rule::TelegramWorkdir => &["-workdir", "-many"],
-        Rule::PrivateBus => &[],
-    };
-    args.iter().skip(1).any(|a| flags.iter().any(|f| a == f || a.starts_with(&format!("{f}="))))
-}
+/// Programs that never mean "this app": shells and helpers a launcher script runs.
+const NEVER: &[&str] = &[
+    "sh",
+    "bash",
+    "dash",
+    "zsh",
+    "fish",
+    "env",
+    "spacectl",
+    "spacewm",
+    "xdg-open",
+    "gio",
+    "python",
+    "python3",
+    "perl",
+    "setsid",
+    "nohup",
+    "timeout",
+    "sleep",
+    "flatpak",
+    "bwrap",
+    "dbus-daemon",
+    "dbus-launch",
+    "systemd-run",
+    "uwsm",
+    "uwsm-app",
+];
 
 /// The file name of the program a command runs, following PATH and symlinks
 /// (/usr/bin/firefox -> firefox; `Telegram` -> Telegram).
-fn program_name(program: &str) -> Option<String> {
+pub fn program_name(program: &str) -> Option<String> {
     let path = if program.contains('/') {
         PathBuf::from(program)
     } else {
@@ -115,12 +58,19 @@ fn program_name(program: &str) -> Option<String> {
     Some(real.file_name()?.to_string_lossy().into_owned())
 }
 
-/// The parent pid of `pid`, from /proc/<pid>/stat ("pid (comm) state ppid ...", where
-/// comm may itself contain spaces and parentheses: parse after the LAST ')').
-fn parent_of(pid: u32) -> Option<u32> {
+/// What /proc/<pid>/stat tells: parent pid, state letter and start time (clock ticks
+/// after boot). The line is "pid (comm) state ppid ... starttime ...", where comm may
+/// itself contain spaces and parentheses: parse after the LAST ')'. After it, field 3
+/// (state) is index 0, so ppid is index 1 and starttime (field 22) index 19.
+fn stat(pid: u32) -> Option<(u32, char, u64)> {
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    let rest = &stat[stat.rfind(')')? + 1..];
-    rest.split_whitespace().nth(1)?.parse().ok()
+    let rest: Vec<&str> = stat[stat.rfind(')')? + 1..].split_whitespace().collect();
+    let state = rest.first()?.chars().next()?;
+    Some((rest.get(1)?.parse().ok()?, state, rest.get(19)?.parse().ok()?))
+}
+
+fn parent_of(pid: u32) -> Option<u32> {
+    stat(pid).map(|(ppid, _, _)| ppid)
 }
 
 pub fn is_descendant_of(mut pid: u32, ancestor: u32) -> bool {
@@ -137,282 +87,105 @@ pub fn is_descendant_of(mut pid: u32, ancestor: u32) -> bool {
     false
 }
 
-/// Processes running this program (same executable file name) that belong to us (same
-/// user) but are not spacewm's own descendants.
-fn running_elsewhere(name: &str) -> Vec<u32> {
-    let me = std::process::id();
+/// The program file name a process runs. A program updated while running shows as
+/// "... (deleted)".
+fn exe_name(pid: u32) -> Option<String> {
+    let exe = std::fs::read_link(format!("/proc/{pid}/exe")).ok()?;
+    Some(exe.file_name()?.to_string_lossy().trim_end_matches(" (deleted)").to_string())
+}
+
+/// Our own processes (same user), as pid -> parent pid.
+fn our_processes() -> HashMap<u32, u32> {
     // SAFETY: getuid has no preconditions.
     let uid = unsafe { libc::getuid() };
-    let Ok(entries) = std::fs::read_dir("/proc") else { return Vec::new() };
+    let Ok(entries) = std::fs::read_dir("/proc") else { return HashMap::new() };
     entries
         .flatten()
         .filter_map(|entry| {
             let pid = entry.file_name().to_str()?.parse::<u32>().ok()?;
             use std::os::unix::fs::MetadataExt;
-            (entry.metadata().ok()?.uid() == uid).then_some((pid, entry))
+            if entry.metadata().ok()?.uid() != uid {
+                return None;
+            }
+            Some((pid, parent_of(pid)?))
         })
-        .filter(|(pid, entry)| {
-            // A program updated while running shows as "... (deleted)".
-            let exe = std::fs::read_link(entry.path().join("exe")).ok();
-            let exe_name = exe
-                .as_ref()
-                .and_then(|e| e.file_name())
-                .map(|n| n.to_string_lossy().trim_end_matches(" (deleted)").to_string());
-            exe_name.as_deref() == Some(name) && !is_descendant_of(*pid, me)
-        })
-        .map(|(pid, _)| pid)
         .collect()
 }
 
-/// Is one of `pids` a Chromium/Electron program? Their folder holds Chromium's files
-/// (VS Code, Discord, Obsidian, Slack: one app instance per --user-data-dir).
-fn is_chromium_based(pids: &[u32]) -> bool {
-    pids.iter().any(|pid| {
-        let Ok(exe) = std::fs::read_link(format!("/proc/{pid}/exe")) else { return false };
-        let Some(dir) = exe.parent() else { return false };
-        ["chrome_crashpad_handler", "resources.pak", "resources/app.asar", "chrome-sandbox"]
-            .iter()
-            .any(|f| dir.join(f).exists())
-    })
-}
-
-/// The extensions folder VS Code (or VSCodium/Code - OSS) uses, if it exists.
-fn vscode_extensions(name: &str) -> Option<PathBuf> {
-    let home = PathBuf::from(std::env::var_os("HOME")?);
-    let dir = match name {
-        "code" => home.join(".vscode/extensions"),
-        "cursor" => home.join(".cursor/extensions"),
-        _ => home.join(".vscode-oss/extensions"),
-    };
-    dir.is_dir().then_some(dir)
-}
-
-/// Well-known names that don't mean "single instance" (media controls, tray icons).
-const GENERIC_NAMES: &[&str] =
-    &["org.mpris.MediaPlayer2.", "org.kde.StatusNotifierItem-", "org.a11y."];
-
-/// Does one of `pids` own a well-known name on the session bus? That is how D-Bus
-/// single-instance apps (GApplication: org.gnome.Nautilus...) find each other; a plain
-/// program like a terminal owns none, and then needs no private bus.
-fn owns_bus_name(pids: &[u32]) -> bool {
-    let out = Command::new("busctl")
-        .args(["--user", "--timeout=2", "list", "--no-legend", "--no-pager"])
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output();
-    let Ok(out) = out else { return false };
-    String::from_utf8_lossy(&out.stdout).lines().any(|line| {
-        let mut cols = line.split_whitespace();
-        let (Some(name), Some(pid)) = (cols.next(), cols.next()) else { return false };
-        !name.starts_with(':')
-            && !GENERIC_NAMES.iter().any(|g| name.starts_with(g))
-            && pid.parse::<u32>().is_ok_and(|p| pids.contains(&p))
-    })
-}
-
-/// Where spacewm keeps an app's own profile.
-fn profile_dir(name: &str) -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))?;
-    let dir = base.join("spacewm/apps").join(name);
-    std::fs::create_dir_all(&dir).ok()?;
-    // Profiles hold logins: owner only.
-    use std::os::unix::fs::PermissionsExt;
-    let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
-    Some(dir)
-}
-
-/// How a command will actually be started.
-#[derive(Debug, Default)]
-pub struct Prepared {
-    pub args: Vec<String>,
-    /// DBUS_SESSION_BUS_ADDRESS to use instead of ours.
-    pub bus: Option<String>,
-    /// Shown to the user: why this copy is separate.
-    pub note: Option<String>,
-}
-
-/// Decide how to start `args` (program first).
-pub fn prepare(args: &[String]) -> Prepared {
-    let plain = Prepared { args: args.to_vec(), ..Default::default() };
-    let Some(name) = args.first().and_then(|p| program_name(p)) else { return plain };
-    // Shells and helpers we start ourselves are never "single instance".
-    if matches!(name.as_str(), "sh" | "bash" | "dash" | "zsh" | "fish" | "env" | "spacectl") {
-        return plain;
+/// `root` and every process below it, with the program each runs (helpers left out).
+pub fn tree(root: u32) -> Vec<(u32, String)> {
+    let procs = our_processes();
+    let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
+    for (&pid, &ppid) in &procs {
+        children.entry(ppid).or_default().push(pid);
     }
-    let elsewhere = running_elsewhere(&name);
-    if elsewhere.is_empty() {
-        return plain;
-    }
-    let mut rule = rule_for(&name);
-    // Unknown apps without a bus name may still be Electron/Chromium inside: those find
-    // their other copy through a socket in their profile folder.
-    let owns_bus = rule == Rule::PrivateBus && owns_bus_name(&elsewhere);
-    if rule == Rule::PrivateBus && !owns_bus && is_chromium_based(&elsewhere) {
-        rule = Rule::ChromiumDataDir;
-    }
-    if has_own_profile(rule, args) {
-        return plain;
-    }
-    match rule {
-        // Not reachable through the bus (a terminal...): it opens here anyway.
-        Rule::PrivateBus if !owns_bus => plain,
-        Rule::PrivateBus => match private_bus() {
-            Some(bus) => {
-                tracing::info!(app = name, "already running outside spacewm: private D-Bus");
-                Prepared {
-                    args: args.to_vec(),
-                    bus: Some(bus),
-                    note: Some(format!(
-                        "{name} is also open outside spacewm: this copy runs separately"
-                    )),
-                }
-            }
-            None => plain,
-        },
-        _ => match profile_dir(&name) {
-            Some(dir) => {
-                tracing::info!(app = name, dir = %dir.display(), "already running outside spacewm: own profile");
-                let extensions = if rule == Rule::VsCode { vscode_extensions(&name) } else { None };
-                Prepared {
-                    args: apply(rule, args, &dir, extensions.as_deref()),
-                    bus: None,
-                    note: Some(format!(
-                        "{name} is also open outside spacewm: opened here with its own profile ({})",
-                        dir.display()
-                    )),
-                }
-            }
-            None => plain,
-        },
-    }
-}
-
-/// The private session bus: a dbus-daemon of our own, started on first use and stopped
-/// with spacewm (also if spacewm crashes: it gets SIGTERM when we die).
-static BUS: Mutex<Option<(Child, String)>> = Mutex::new(None);
-
-fn private_bus() -> Option<String> {
-    let mut guard = BUS.lock().ok()?;
-    if let Some((child, address)) = guard.as_mut() {
-        if matches!(child.try_wait(), Ok(None)) {
-            return Some(address.clone());
+    let mut out = Vec::new();
+    let mut todo = vec![root];
+    while let Some(pid) = todo.pop() {
+        if out.len() > 512 {
+            break;
         }
-        tracing::warn!("private D-Bus daemon died; starting a new one");
-    }
-    let mut command = Command::new("dbus-daemon");
-    command
-        .args(["--session", "--nofork", "--nopidfile", "--print-address=1"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    // SAFETY: only async-signal-safe calls between fork and exec.
-    unsafe {
-        command.pre_exec(|| {
-            let mut set: libc::sigset_t = std::mem::zeroed();
-            libc::sigemptyset(&mut set);
-            libc::pthread_sigmask(libc::SIG_SETMASK, &set, std::ptr::null_mut());
-            libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
-            Ok(())
-        });
-    }
-    let mut child = match command.spawn() {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!("cannot start a private D-Bus daemon: {e}");
-            return None;
+        if let Some(name) = exe_name(pid) {
+            out.push((pid, name));
         }
-    };
-    // The daemon prints its address once it listens. Read it on a helper thread with a
-    // timeout: a daemon that hangs must not hang spacewm.
-    let (tx, rx) = std::sync::mpsc::channel();
-    if let Some(out) = child.stdout.take() {
-        std::thread::spawn(move || {
-            let mut line = String::new();
-            let _ = BufReader::new(out).read_line(&mut line);
-            let _ = tx.send(line);
-        });
+        todo.extend(children.get(&pid).into_iter().flatten());
     }
-    let address = rx
-        .recv_timeout(std::time::Duration::from_secs(3))
-        .map(|l| l.trim().to_string())
-        .unwrap_or_default();
-    if address.is_empty() {
-        tracing::warn!("private D-Bus daemon gave no address");
-        let _ = child.kill();
-        let _ = child.wait();
-        return None;
-    }
-    tracing::info!(address, pid = child.id(), "private D-Bus session bus started");
-    *guard = Some((child, address.clone()));
-    Some(address)
+    out.retain(|(_, name)| !NEVER.contains(&name.as_str()));
+    out
 }
 
-/// Stop the private bus (spacewm is exiting).
-pub fn shutdown() {
-    if let Ok(mut guard) = BUS.lock() {
-        if let Some((mut child, _)) = guard.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
+/// Clock ticks since boot now (the unit of a process start time).
+pub fn now_ticks() -> u64 {
+    // SAFETY: sysconf has no preconditions.
+    let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) }.max(1) as f64;
+    let up = std::fs::read_to_string("/proc/uptime").ok();
+    let secs = up.and_then(|u| u.split_whitespace().next()?.parse::<f64>().ok()).unwrap_or(0.0);
+    (secs * hz) as u64
+}
+
+/// Processes running one of `names`, of our user, NOT spacewm's own descendants, started
+/// before `before` (ticks): copies that were already open somewhere else. Only the top
+/// ones: a browser's helper processes (same program) go when the browser quits.
+pub fn running_elsewhere(names: &[String], before: u64) -> Vec<u32> {
+    let me = std::process::id();
+    let names: Vec<&String> = names.iter().filter(|n| !NEVER.contains(&n.as_str())).collect();
+    if names.is_empty() {
+        return Vec::new();
     }
+    let procs = our_processes();
+    let found: Vec<u32> = procs
+        .keys()
+        .copied()
+        .filter(|&pid| {
+            exe_name(pid).is_some_and(|n| names.contains(&&n))
+                && stat(pid).is_some_and(|(_, state, start)| state != 'Z' && start < before)
+                && !is_descendant_of(pid, me)
+        })
+        .collect();
+    let mut tops: Vec<u32> = found
+        .iter()
+        .copied()
+        .filter(|pid| procs.get(pid).is_none_or(|parent| !found.contains(parent)))
+        .collect();
+    tops.sort_unstable();
+    tops
+}
+
+/// Still running (a zombie has quit: only its parent hasn't noticed yet)?
+pub fn alive(pid: u32) -> bool {
+    stat(pid).is_some_and(|(_, state, _)| state != 'Z' && state != 'X')
+}
+
+/// Ask a process to quit, as closing its window would (it may save its work first).
+pub fn ask_to_quit(pid: u32) {
+    // SAFETY: kill(2) with a valid signal number has no memory-safety preconditions.
+    let r = unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+    tracing::info!(pid, ok = r == 0, "asked an app outside spacewm to quit");
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn v(s: &[&str]) -> Vec<String> {
-        s.iter().map(|x| x.to_string()).collect()
-    }
-
-    #[test]
-    fn rules_put_the_profile_before_other_arguments() {
-        let dir = Path::new("/p");
-        assert_eq!(
-            apply(Rule::TelegramWorkdir, &v(&["Telegram", "--", "tg://x"]), dir, None),
-            v(&["Telegram", "-workdir", "/p", "--", "tg://x"])
-        );
-        assert_eq!(
-            apply(Rule::FirefoxProfile, &v(&["firefox", "https://a"]), dir, None),
-            v(&["firefox", "--profile", "/p", "https://a"])
-        );
-        assert_eq!(
-            apply(Rule::ChromiumDataDir, &v(&["chromium"]), dir, None),
-            v(&["chromium", "--user-data-dir=/p"])
-        );
-        assert_eq!(
-            apply(Rule::PrivateBus, &v(&["nautilus", "-w"]), dir, None),
-            v(&["nautilus", "-w"])
-        );
-        assert_eq!(
-            apply(Rule::VsCode, &v(&["code", "."]), dir, Some(Path::new("/e"))),
-            v(&["code", "--user-data-dir", "/p", "--extensions-dir", "/e", "."])
-        );
-        assert_eq!(
-            apply(Rule::VsCode, &v(&["code"]), dir, None),
-            v(&["code", "--user-data-dir", "/p"])
-        );
-    }
-
-    #[test]
-    fn known_apps() {
-        assert_eq!(rule_for("firefox"), Rule::FirefoxProfile);
-        assert_eq!(rule_for("Telegram"), Rule::TelegramWorkdir);
-        assert_eq!(rule_for("brave"), Rule::ChromiumDataDir);
-        assert_eq!(rule_for("nautilus"), Rule::PrivateBus);
-        assert_eq!(rule_for("code"), Rule::VsCode);
-    }
-
-    #[test]
-    fn own_profile_is_respected() {
-        assert!(has_own_profile(Rule::FirefoxProfile, &v(&["firefox", "--no-remote"])));
-        assert!(has_own_profile(Rule::FirefoxProfile, &v(&["firefox", "--profile", "/x"])));
-        assert!(has_own_profile(Rule::ChromiumDataDir, &v(&["chromium", "--user-data-dir=/x"])));
-        assert!(!has_own_profile(Rule::FirefoxProfile, &v(&["firefox", "https://a"])));
-    }
 
     #[test]
     fn process_tree() {
@@ -422,6 +195,22 @@ mod tests {
         let parent = parent_of(me).expect("own stat");
         assert!(!is_descendant_of(parent, me));
         // A program nobody runs is never found.
-        assert!(running_elsewhere("spacewm-no-such-program-xyz").is_empty());
+        assert!(running_elsewhere(&["spacewm-no-such-program-xyz".into()], u64::MAX).is_empty());
+        assert!(alive(me));
+        // Our own tree has us in it (the test binary isn't a helper).
+        assert!(tree(me).iter().any(|(pid, _)| *pid == me));
+    }
+
+    #[test]
+    fn helpers_never_count() {
+        // A shell open outside is never "the app" (launcher scripts are shells).
+        assert!(running_elsewhere(&["bash".into(), "sh".into()], u64::MAX).is_empty());
+    }
+
+    #[test]
+    fn start_times() {
+        let (_, state, start) = stat(std::process::id()).expect("stat");
+        assert!(state != 'Z');
+        assert!(start <= now_ticks() + 1, "{start} vs {}", now_ticks());
     }
 }
