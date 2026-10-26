@@ -196,6 +196,7 @@ where
     // (Elements earlier in the list are on top.) A box in the middle of the screen
     // hides the dock, or the dock would cover its bottom rows.
     let boxed_open = inputs.settings.is_some()
+        || inputs.launcher.is_some()
         || inputs.help.is_some()
         || inputs.switcher.is_some()
         || inputs.confirm.is_some()
@@ -230,8 +231,10 @@ where
             scale,
             inputs.time,
         ));
-        let at = crate::render::settings::box_origin((geo.size.w, geo.size.h));
-        elements.extend(boxed(renderer, buffer, at));
+        // The image has a shadow margin around the card.
+        let (x, y) = crate::render::settings::box_origin((geo.size.w, geo.size.h));
+        let m = crate::render::settings::SHADOW_MARGIN;
+        elements.extend(boxed(renderer, buffer, (x - m, y - m)));
     }
     if let Some(((buffer, _), at)) = inputs.menu {
         // Its cursor on top of it.

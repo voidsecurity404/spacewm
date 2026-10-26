@@ -356,6 +356,15 @@ impl SpaceState {
             .clone()
     }
 
+    /// An icon by its name (the .desktop Icon= value), premultiplied RGBA, `px` square.
+    pub fn icon_by_name(&mut self, icon: &str, px: u32) -> Option<Vec<u8>> {
+        self.dock
+            .icons
+            .entry(format!("{icon}@{px}"))
+            .or_insert_with(|| crate::desktop::icons::load(icon, px))
+            .clone()
+    }
+
     /// The name people know an app by ("Visual Studio Code" for "Code").
     pub fn app_display_name(&self, app_id: &str) -> String {
         self.dock

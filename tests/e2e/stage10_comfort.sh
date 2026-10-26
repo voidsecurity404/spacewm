@@ -392,9 +392,7 @@ kc input key Super+comma
 sleep 0.3
 grep -q "settings opened" "$OUT/spacewm.log" || fail "Mod+comma did not open settings"
 shot s10-settings >/dev/null
-# Row 2 is the field of view: box 470x712 centered, rows from 50 px, 30 px each.
-kc input move-to 640 $(( (720 - 712) / 2 + 50 + 2 * 30 + 15 ))
-kc input click
+settings_click "Field of view"
 sleep 0.4
 grep -q '^fov = 80.0' "$CFGS" || fail "click did not save fov = 80: $(grep '^fov' "$CFGS")"
 [ "$(grep -c '^#' "$CFGS")" = "$COMMENTS0" ] || fail "comments lost in the config file"

@@ -74,10 +74,9 @@ kc input key Escape
 sleep 0.3
 grep -q "settings opened" "$OUT/spacewm.log" || fail "Escape did not open the settings"
 shot s13-settings >/dev/null
-# Rows from 50 px, 30 px each, in a box 470x712 centered: row 4 is the time of day.
-row() { kc input move-to 640 $(( (720 - 712) / 2 + 50 + $1 * 30 + 15 )); kc input click; sleep 1.2; }
+row() { settings_click "$1"; sleep 1.2; }
 SHADOWS0=$(grep -c "shadow map drawn" "$OUT/spacewm.log")
-row 4
+row "Time of day"
 grep -q '^time_of_day = "afternoon"' "$CFG" || fail "time of day not saved: $(grep time_of_day "$CFG")"
 [ "$(grep -c "shadow map drawn" "$OUT/spacewm.log")" -gt "$SHADOWS0" ] || fail "the sun moved but the shadows were not redrawn"
 kc input key Escape
@@ -86,10 +85,10 @@ shot s13-afternoon >/dev/null
 pass "Escape opens the settings; a new time of day redraws the shadows once"
 kc input key Escape
 sleep 0.3
-row 3
+row "World"
 grep -q '^map = "voxel"' "$CFG" || fail "world not saved: $(grep '^map' "$CFG")"
 grep -q 'world map=Voxel' "$OUT/spacewm.log" || fail "did not switch to the block world"
-row 3
+row "World"
 grep -q '^map = "dust"' "$CFG" || fail "world not saved back"
 [ "$(grep -c 'map uploaded' "$OUT/spacewm.log")" -ge 2 ] || fail "the map was not uploaded again"
 kc input key Escape

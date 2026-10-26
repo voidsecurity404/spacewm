@@ -105,6 +105,16 @@ print(x + math.sin(y) * dist, py, z + math.cos(y) * dist, -p['yaw_deg'])
     kc teleport "$cx" "$cy" "$cz" --yaw "$cyaw" --pitch 0
 }
 
+# Click the Settings row labelled $1 (spacewm logs where each row is when Settings opens;
+# needs --log-level debug).
+settings_click() {
+    local xy
+    xy=$(grep "settings row setting=\"$1\"" "$OUT/spacewm.log" | tail -1 | sed -E 's/.* x=([0-9]+) y=([0-9]+).*/\1 \2/')
+    [ -n "$xy" ] || { echo "no settings row '$1' in the log" >&2; return 1; }
+    kc input move-to ${xy% *} ${xy#* }
+    kc input click
+}
+
 # Ids of panels with keyboard focus, e.g. "[1]" (empty list in Walk mode).
 focused() { kc --json list | python3 -c "import json,sys; print([p['id'] for p in json.load(sys.stdin)['panels'] if p['focused']])"; }
 

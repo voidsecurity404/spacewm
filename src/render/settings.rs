@@ -12,7 +12,6 @@ use smithay::{
 };
 use toml_edit::Value;
 
-use super::text::{self, Line, Style};
 use crate::{
     config::Config,
     inventory::{draw::Canvas, Image},
@@ -43,28 +42,33 @@ pub enum Setting {
     Building,
 }
 
+/// In the order they are shown: down the left column, then down the right one.
 pub const SETTINGS: [Setting; 20] = [
-    Setting::MouseSpeed,
-    Setting::InvertY,
-    Setting::Fov,
     Setting::Map,
     Setting::TimeOfDay,
     Setting::Shadows,
     Setting::Fog,
     Setting::RenderDistance,
+    Setting::MouseSpeed,
+    Setting::InvertY,
+    Setting::Fov,
     Setting::Hud,
     Setting::DimUnfocused,
     Setting::FocusZoom,
     Setting::AutoTilt,
     Setting::CarryNew,
+    Setting::Dock,
     Setting::LockAfter,
     Setting::RestoreApps,
-    Setting::Dock,
     Setting::Layouts,
     Setting::LayoutSwitch,
     Setting::Terminal,
     Setting::Building,
 ];
+
+/// The groups: title, first setting, how many, column.
+const GROUPS: [(&str, usize, usize, i32); 4] =
+    [("WORLD", 0, 5, 0), ("VIEW & MOUSE", 5, 4, 0), ("WINDOWS", 9, 5, 1), ("DESKTOP", 14, 6, 1)];
 
 const DEFAULT_SENSITIVITY: f64 = 0.0025;
 const SENSITIVITIES: [f64; 9] = [0.001, 0.0015, 0.002, 0.0025, 0.003, 0.004, 0.005, 0.0065, 0.008];
@@ -244,30 +248,55 @@ impl Setting {
     }
 }
 
-/// Layout in logical px.
-const WIDTH: i32 = 470;
-const PAD: i32 = 16;
-const TITLE_H: i32 = 34;
-const ROW_H: i32 = 30;
-const FOOT_H: i32 = 46;
+/// Layout in logical px: a card with two columns of groups.
+const COL_W: i32 = 340;
+const GAP: i32 = 16;
+const PAD: i32 = 20;
+const HEAD_H: i32 = 64;
+const GROUP_H: i32 = 30;
+const ROW_H: i32 = 36;
+const FOOT_H: i32 = 44;
+const RADIUS: i32 = 18;
+const ACCENT: [f32; 4] = [0.30, 0.55, 1.0, 1.0];
+
+/// Where row `i` is in the box: x, y, w, h.
+pub fn row_rect(i: usize) -> (i32, i32, i32, i32) {
+    let mut y_col = [HEAD_H, HEAD_H];
+    for (_, first, n, col) in GROUPS {
+        let c = col as usize;
+        y_col[c] += GROUP_H;
+        if (first..first + n).contains(&i) {
+            let x = PAD + col * (COL_W + GAP);
+            return (x, y_col[c] + (i - first) as i32 * ROW_H, COL_W, ROW_H);
+        }
+        y_col[c] += n as i32 * ROW_H;
+    }
+    (0, 0, 0, 0)
+}
+
+fn columns_height() -> i32 {
+    let mut h = [0, 0];
+    for (_, _, n, col) in GROUPS {
+        h[col as usize] += GROUP_H + n as i32 * ROW_H;
+    }
+    h[0].max(h[1])
+}
 
 pub fn box_size() -> (i32, i32) {
-    (WIDTH, PAD + TITLE_H + SETTINGS.len() as i32 * ROW_H + FOOT_H + PAD)
+    (2 * COL_W + GAP + 2 * PAD, HEAD_H + columns_height() + FOOT_H + PAD / 2)
 }
 
 /// The row at a point relative to the box's top-left corner.
 pub fn row_at(p: (f64, f64)) -> Option<usize> {
-    let y0 = (PAD + TITLE_H) as f64;
-    if p.0 < 0.0 || p.0 >= WIDTH as f64 || p.1 < y0 {
-        return None;
-    }
-    let i = ((p.1 - y0) / ROW_H as f64) as usize;
-    (i < SETTINGS.len()).then_some(i)
+    (0..SETTINGS.len()).find(|&i| {
+        let (x, y, w, h) = row_rect(i);
+        p.0 >= x as f64 && p.0 < (x + w) as f64 && p.1 >= y as f64 && p.1 < (y + h) as f64
+    })
 }
 
 pub fn box_origin(output: (i32, i32)) -> (i32, i32) {
     let (w, h) = box_size();
-    ((output.0 - w) / 2, ((output.1 - h) / 2).max(0))
+    ((output.0 - w).max(0) / 2, ((output.1 - h) / 2).max(0))
 }
 
 pub struct SettingsBox {
@@ -286,56 +315,86 @@ fn draw(
 ) -> Option<Image> {
     let s = scale;
     let (w, h) = box_size();
-    let mut c = Canvas::new(w * s, h * s);
-    c.fill(0, 0, w * s, h * s, [0.07, 0.08, 0.10, 0.96]);
-    c.frame(0, 0, w * s, h * s, s, [0.32, 0.36, 0.42, 1.0]);
-    let base = Style {
-        size: 15.0,
-        fg: [0.95, 0.96, 0.98, 1.0],
-        bg: [0.0; 4],
-        padding: 0,
-        max_width: 4000,
-    };
-    let line = |t: &str, fg: [f32; 4], size: f32| {
-        text::render_lines(
-            &[Line { text: t.into(), fg: Some(fg), bg: None }],
-            Style { size, ..base },
-            s,
-            0,
-        )
-    };
-    let title = line("Settings", [1.0, 0.86, 0.45, 1.0], 18.0)?;
-    c.blit(&title.rgba, title.width, title.height, PAD * s, (PAD - 2) * s);
+    // Room around the card for its shadow.
+    let m = 14;
+    let (cw, ch) = (w + 2 * m, h + 2 * m);
+    let mut c = Canvas::new(cw * s, ch * s);
+    let at = |v: i32| (v + m) * s;
+    c.shadow(at(0), at(4), w * s, h * s, RADIUS * s, m * s, 0.45);
+    c.round_gradient(
+        at(0),
+        at(0),
+        w * s,
+        h * s,
+        RADIUS * s,
+        [0.13, 0.14, 0.18, 0.97],
+        [0.08, 0.09, 0.12, 0.97],
+    );
+    c.round_frame(at(0), at(0), w * s, h * s, RADIUS * s, s, [1.0, 1.0, 1.0, 0.08]);
+
+    let white = [0.96, 0.97, 0.99, 1.0];
+    let gray = [0.58, 0.61, 0.67, 1.0];
+    c.text("Settings", 22.0, white, at(PAD), at(16), s);
+    c.text("changes are saved and applied at once", 12.5, gray, at(PAD), at(44), s);
+
+    for (title, first, _, col) in GROUPS {
+        let (_, y, _, _) = row_rect(first);
+        let x = PAD + col * (COL_W + GAP);
+        c.text(title, 11.5, [0.55, 0.70, 1.0, 1.0], at(x + 4), at(y - GROUP_H + 10), s);
+        c.fill(at(x + 4), at(y - 4), (COL_W - 8) * s, s.max(1), [1.0, 1.0, 1.0, 0.07]);
+    }
     for (i, setting) in SETTINGS.iter().enumerate() {
-        let y = PAD + TITLE_H + i as i32 * ROW_H;
-        if hover == Some(i) || (hover.is_none() && selected == i) {
-            c.fill(
-                (PAD - 6) * s,
-                y * s,
-                (w - 2 * PAD + 12) * s,
-                ROW_H * s,
-                [0.20, 0.40, 0.70, 1.0],
+        let (x, y, rw, rh) = row_rect(i);
+        let lit = hover == Some(i) || (hover.is_none() && selected == i);
+        if lit {
+            c.round_rect(at(x), at(y + 2), rw * s, (rh - 4) * s, 9 * s, [0.30, 0.55, 1.0, 0.16]);
+            c.round_frame(
+                at(x),
+                at(y + 2),
+                rw * s,
+                (rh - 4) * s,
+                9 * s,
+                s,
+                [0.40, 0.62, 1.0, 0.55],
             );
         }
-        let label = line(setting.label(), [0.92, 0.93, 0.95, 1.0], 15.0)?;
-        c.blit(&label.rgba, label.width, label.height, PAD * s, (y + 6) * s);
-        let v = format!("< {} >", values.get(i).map(String::as_str).unwrap_or(""));
-        let value = line(&v, [0.60, 0.80, 1.0, 1.0], 15.0)?;
-        c.blit(&value.rgba, value.width, value.height, (w - PAD) * s - value.width, (y + 6) * s);
+        c.text(
+            setting.label(),
+            14.5,
+            if lit { white } else { [0.86, 0.88, 0.92, 1.0] },
+            at(x + 12),
+            at(y + 9),
+            s,
+        );
+        let value = values.get(i).map(String::as_str).unwrap_or("");
+        match value {
+            "on" | "off" => {
+                c.switch(at(x + rw - 12 - 39), at(y + 9), 18 * s, value == "on", ACCENT)
+            }
+            _ => {
+                let t = format!("‹ {value} ›");
+                let tw = Canvas::text_width(&t, 13.0, s);
+                let pw = tw + 18 * s;
+                let px = at(x + rw - 10) - pw;
+                c.round_rect(px, at(y + 7), pw, 22 * s, 11 * s, [1.0, 1.0, 1.0, 0.08]);
+                c.text(&t, 13.0, [0.70, 0.82, 1.0, 1.0], px + 9 * s, at(y + 10), s);
+            }
+        }
     }
-    // Two short lines; a long path keeps its end (the file name).
-    let fy = PAD + TITLE_H + SETTINGS.len() as i32 * ROW_H + 8;
-    let gray = [0.55, 0.58, 0.62, 1.0];
-    let hint = line("click or arrows: change    Esc: close", gray, 12.0)?;
-    c.blit(&hint.rgba, hint.width, hint.height, PAD * s, fy * s);
-    let n = file.chars().count();
-    let shown: String = if n > 52 {
-        std::iter::once('…').chain(file.chars().skip(n - 51)).collect()
+    // Footer: the keys, and where it is saved (a long path keeps its end).
+    let fy = h - FOOT_H + 8;
+    c.fill(at(PAD), at(fy - 8), (w - 2 * PAD) * s, s.max(1), [1.0, 1.0, 1.0, 0.07]);
+    c.text("↑↓ choose   ←→ or click: change   Esc close", 12.0, gray, at(PAD), at(fy), s);
+    // Just the file's name: the folder is always the config folder.
+    let name = file.rsplit('/').next().unwrap_or(file);
+    let shown: String = if name.chars().count() > 22 {
+        name.chars().take(21).chain(std::iter::once('…')).collect()
     } else {
-        file.to_string()
+        name.to_string()
     };
-    let saved = line(&format!("saved to {shown}"), gray, 12.0)?;
-    c.blit(&saved.rgba, saved.width, saved.height, PAD * s, (fy + 18) * s);
+    let saved = format!("saved to {shown}");
+    let sw = Canvas::text_width(&saved, 12.0, s);
+    c.text(&saved, 12.0, [0.45, 0.48, 0.54, 1.0], at(w - PAD) - sw, at(fy), s);
     let buffer = smithay::backend::renderer::element::memory::MemoryRenderBuffer::from_slice(
         &c.rgba,
         smithay::backend::allocator::Fourcc::Abgr8888,
@@ -344,8 +403,12 @@ fn draw(
         smithay::utils::Transform::Normal,
         None,
     );
-    Some((buffer, (w, h)))
+    // The image includes the shadow margin: the box itself starts `m` px in.
+    Some((buffer, (cw, ch)))
 }
+
+/// The shadow margin around the settings card in its image.
+pub const SHADOW_MARGIN: i32 = 14;
 
 impl SpaceState {
     pub fn toggle_settings(&mut self) {
@@ -355,6 +418,13 @@ impl SpaceState {
         }
         let Some(geo) = self.primary_output_geometry() else { return };
         tracing::info!("settings opened");
+        // Where each row is on screen (for scripts and tests).
+        let o = box_origin((geo.size.w, geo.size.h));
+        for (i, setting) in SETTINGS.iter().enumerate() {
+            let (x, y, w, h) = row_rect(i);
+            let (cx, cy) = (geo.loc.x + o.0 + x + w / 2, geo.loc.y + o.1 + y + h / 2);
+            tracing::debug!(setting = setting.label(), x = cx, y = cy, "settings row");
+        }
         self.close_menu();
         self.close_inventory();
         self.set_dock_cursor(false);
@@ -507,12 +577,26 @@ mod tests {
 
     #[test]
     fn rows_hit_test() {
-        let y = (PAD + TITLE_H + 5) as f64;
-        assert_eq!(row_at((10.0, y)), Some(0));
-        assert_eq!(row_at((10.0, y + ROW_H as f64)), Some(1));
-        assert_eq!(row_at((10.0, 5.0)), None);
-        assert_eq!(row_at((-1.0, y)), None);
-        let (_, h) = box_size();
-        assert_eq!(row_at((10.0, (h - 2) as f64)), None);
+        // Every row is hit at its center, and rows never overlap.
+        for i in 0..SETTINGS.len() {
+            let (x, y, w, h) = row_rect(i);
+            assert!(w > 0 && h > 0, "row {i} placed");
+            assert_eq!(row_at(((x + w / 2) as f64, (y + h / 2) as f64)), Some(i));
+        }
+        assert_eq!(row_at((5.0, 5.0)), None, "the title");
+        let (w, h) = box_size();
+        assert_eq!(row_at((10.0, (h - 2) as f64)), None, "the footer");
+        // Fits the smallest screens spacewm is used on (a nested window, the 1280x720 test).
+        assert!(w <= 758 && h <= 700, "{w}x{h}");
+        // The two columns.
+        assert!(row_rect(0).0 < row_rect(SETTINGS.len() - 1).0);
+    }
+
+    #[test]
+    fn renders() {
+        let values: Vec<String> = SETTINGS.iter().map(|_| "on".to_string()).collect();
+        let (_, size) = draw(&values, None, 0, "/x/config.toml", 1).expect("font");
+        let (w, h) = box_size();
+        assert_eq!(size, (w + 2 * SHADOW_MARGIN, h + 2 * SHADOW_MARGIN));
     }
 }

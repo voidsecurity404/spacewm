@@ -31,7 +31,7 @@ impl Canvas {
     }
 
     /// Draw one premultiplied pixel over what is there ("over" blending).
-    fn put(&mut self, x: i32, y: i32, src: [f32; 4]) {
+    pub fn put(&mut self, x: i32, y: i32, src: [f32; 4]) {
         if x < 0 || y < 0 || x >= self.width || y >= self.height {
             return;
         }
@@ -99,6 +99,99 @@ impl Canvas {
             }
             None => (0, 0),
         }
+    }
+
+    /// How far (px) the point is outside a rounded rectangle; negative inside. The
+    /// "signed distance" to the shape: one number that gives smooth edges (coverage =
+    /// how much of the pixel is inside) and soft shadows (fade with the distance).
+    fn rounded_distance(px: f32, py: f32, x: f32, y: f32, w: f32, h: f32, r: f32) -> f32 {
+        let r = r.min(w / 2.0).min(h / 2.0).max(0.0);
+        let (cx, cy) = (x + w / 2.0, y + h / 2.0);
+        let qx = (px - cx).abs() - (w / 2.0 - r);
+        let qy = (py - cy).abs() - (h / 2.0 - r);
+        let outside = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt();
+        outside + qx.max(qy).min(0.0) - r
+    }
+
+    /// A filled rectangle with rounded corners and smooth (anti-aliased) edges.
+    #[allow(clippy::too_many_arguments)]
+    pub fn round_rect(&mut self, x: i32, y: i32, w: i32, h: i32, r: i32, color: Color) {
+        self.round_gradient(x, y, w, h, r, color, color);
+    }
+
+    /// `round_rect` whose color goes from `top` to `bottom`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn round_gradient(
+        &mut self,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        r: i32,
+        top: Color,
+        bottom: Color,
+    ) {
+        let (fx, fy, fw, fh, fr) = (x as f32, y as f32, w as f32, h as f32, r as f32);
+        for yy in y.max(0)..(y + h).min(self.height) {
+            let t = ((yy - y) as f32 + 0.5) / fh.max(1.0);
+            let c: [f32; 4] = std::array::from_fn(|i| top[i] + (bottom[i] - top[i]) * t);
+            for xx in x.max(0)..(x + w).min(self.width) {
+                let d =
+                    Self::rounded_distance(xx as f32 + 0.5, yy as f32 + 0.5, fx, fy, fw, fh, fr);
+                let cover = (0.5 - d).clamp(0.0, 1.0);
+                if cover > 0.0 {
+                    let a = c[3] * cover;
+                    self.put(xx, yy, [c[0] * a, c[1] * a, c[2] * a, a]);
+                }
+            }
+        }
+    }
+
+    /// A rounded outline `t` px thick, inside the rectangle.
+    #[allow(clippy::too_many_arguments)]
+    pub fn round_frame(&mut self, x: i32, y: i32, w: i32, h: i32, r: i32, t: i32, color: Color) {
+        let (fx, fy, fw, fh, fr, ft) = (x as f32, y as f32, w as f32, h as f32, r as f32, t as f32);
+        for yy in y.max(0)..(y + h).min(self.height) {
+            for xx in x.max(0)..(x + w).min(self.width) {
+                let d =
+                    Self::rounded_distance(xx as f32 + 0.5, yy as f32 + 0.5, fx, fy, fw, fh, fr);
+                // Inside the outer edge and outside the inner one.
+                let cover = (0.5 - d).clamp(0.0, 1.0) * (0.5 + d + ft).clamp(0.0, 1.0);
+                if cover > 0.0 {
+                    let a = color[3] * cover;
+                    self.put(xx, yy, [color[0] * a, color[1] * a, color[2] * a, a]);
+                }
+            }
+        }
+    }
+
+    /// A soft shadow under a rounded rectangle: dark right at its edge, fading out over
+    /// `blur` px (drawn before the shape itself).
+    #[allow(clippy::too_many_arguments)]
+    pub fn shadow(&mut self, x: i32, y: i32, w: i32, h: i32, r: i32, blur: i32, alpha: f32) {
+        let (fx, fy, fw, fh, fr, fb) =
+            (x as f32, y as f32, w as f32, h as f32, r as f32, blur as f32);
+        for yy in (y - blur).max(0)..(y + h + blur).min(self.height) {
+            for xx in (x - blur).max(0)..(x + w + blur).min(self.width) {
+                let d =
+                    Self::rounded_distance(xx as f32 + 0.5, yy as f32 + 0.5, fx, fy, fw, fh, fr);
+                let t = (1.0 - d.max(0.0) / fb.max(1.0)).clamp(0.0, 1.0);
+                let a = alpha * t * t;
+                if a > 0.003 {
+                    self.put(xx, yy, [0.0, 0.0, 0.0, a]);
+                }
+            }
+        }
+    }
+
+    /// An on/off switch, `h` px tall and twice as wide.
+    pub fn switch(&mut self, x: i32, y: i32, h: i32, on: bool, accent: Color) {
+        let w = h * 2 - h / 4;
+        let track = if on { accent } else { [0.30, 0.32, 0.37, 1.0] };
+        self.round_rect(x, y, w, h, h / 2, track);
+        let k = h - 6.max(h / 5);
+        let kx = if on { x + w - k - (h - k) / 2 } else { x + (h - k) / 2 };
+        self.round_rect(kx, y + (h - k) / 2, k, k, k / 2, [0.97, 0.97, 0.98, 1.0]);
     }
 
     /// Width in px of a line of text, to center it.
@@ -178,6 +271,23 @@ pub fn block_icon(block: Block, size: i32) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rounded_shapes_have_smooth_corners() {
+        let mut c = Canvas::new(40, 40);
+        c.round_rect(0, 0, 40, 40, 10, [1.0, 1.0, 1.0, 1.0]);
+        let a = |c: &Canvas, x: i32, y: i32| c.rgba[((y * 40 + x) * 4 + 3) as usize];
+        assert_eq!(a(&c, 20, 20), 255, "inside");
+        assert_eq!(a(&c, 0, 0), 0, "the very corner is cut off");
+        let edge = a(&c, 3, 2);
+        assert!(edge > 0 && edge < 255, "partly covered corner pixel: {edge}");
+        let mut s = Canvas::new(60, 60);
+        s.shadow(20, 20, 20, 20, 4, 10, 0.5);
+        assert!(a2(&s, 30, 18) > a2(&s, 30, 12), "shadow fades with distance");
+        fn a2(c: &Canvas, x: i32, y: i32) -> u8 {
+            c.rgba[((y * 60 + x) * 4 + 3) as usize]
+        }
+    }
 
     #[test]
     fn icon_has_cube_shape() {
