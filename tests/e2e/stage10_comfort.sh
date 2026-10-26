@@ -203,7 +203,8 @@ print(x - math.cos(y) * w / 2 + math.sin(y) * math.sin(t) * h / 2, yy + math.cos
       z + math.sin(y) * w / 2 + math.cos(y) * math.sin(t) * h / 2)"; }
 read -r TLX0 TLY0 TLZ0 < <(top_left)
 grep -q 'drag hint hint="drag: resize"' "$OUT/spacewm.log" || fail "no resize hint on the corner"
-# Look a little to the right while holding the corner: wider, top-left stays put.
+# Hold the corner and move the mouse right: the view stands still, the window gets
+# wider, its top-left corner stays put.
 kc input click --state press
 kc input move-by 20 0
 kc input move-by 20 0
@@ -215,7 +216,7 @@ sleep 1.6
 read -r TLX1 TLY1 TLZ1 < <(top_left)
 python3 -c "import math; exit(0 if math.dist(($TLX0,$TLY0,$TLZ0),($TLX1,$TLY1,$TLZ1)) < 0.03 else 1)" ||
     fail "the top-left corner moved while resizing ($TLX0 $TLY0 $TLZ0 -> $TLX1 $TLY1 $TLZ1)"
-# Look far right/down: never bigger than the screen.
+# Far right/down: bigger than the screen is fine, up to two screens.
 read -r _ _ _ _ WX HX _ < <(panel)
 aim $((WX - 15)) $((HX - 15))
 kc input click --state press
@@ -223,8 +224,7 @@ kc input move-by 400 300
 kc input click --state release
 sleep 1.6
 read -r _ _ _ _ W2 H2 _ < <(panel)
-[ "$W2" -le 1280 ] && [ "$H2" -le 720 ] || fail "resized beyond the screen (${W2}x$H2)"
-# A flick that turns past the window's plane still grows it (to the limit), not stuck.
+[ "$W2" -le 2560 ] && [ "$H2" -le 1440 ] || fail "resized beyond two screens (${W2}x$H2)"
 [ "$W2" -gt "$((W1 + 100))" ] && [ "$H2" -gt "$((H1 + 10))" ] || fail "a big corner drag did not grow the window (${W1}x$H1 -> ${W2}x$H2)"
 # And back up-left: smaller.
 aim $((W2 - 15)) $((H2 - 15))
@@ -234,7 +234,36 @@ kc input click --state release
 sleep 1.6
 read -r _ _ _ _ W3 H3 _ < <(panel)
 [ "$W3" -lt "$((W2 - 100))" ] && [ "$H3" -lt "$((H2 - 60))" ] || fail "dragging the corner back did not shrink (${W2}x$H2 -> ${W3}x$H3)"
-pass "the corner follows the crosshair (${W0}x$H0 -> ${W1}x$H1, max ${W2}x$H2, back ${W3}x$H3), top-left stays"
+pass "dragging the corner resizes, the view stands still (${W0}x$H0 -> ${W1}x$H1, max ${W2}x$H2, back ${W3}x$H3), top-left stays"
+# The bottom-left corner: moving left makes it wider, the top-right corner stays.
+read -r _ _ _ _ W4 H4 _ < <(panel)
+aim 15 $((H4 - 15))
+grep -q 'drag started panel=[0-9]* zone=Resize { left: true }' "$OUT/spacewm.log" && fail "stale left drag"
+top_right() { kc --json list | python3 -c "
+import json, math, sys
+p = json.load(sys.stdin)['panels'][0]
+y, t = math.radians(p['yaw_deg']), math.radians(p['tilt_deg']); ppu = p['pixels_per_unit']
+w, h = p['size_px'][0] / ppu, p['size_px'][1] / ppu
+x, yy, z = p['position']
+print(x + math.cos(y) * w / 2 + math.sin(y) * math.sin(t) * h / 2, yy + math.cos(t) * h / 2,
+      z - math.sin(y) * w / 2 + math.cos(y) * math.sin(t) * h / 2)"; }
+read -r TRX0 TRY0 TRZ0 < <(top_right)
+read -r _ CYAW0 CPITCH0 < <(kc --json camera | python3 -c "import json,sys; c=json.load(sys.stdin); print(0, c['yaw_deg'], c['pitch_deg'])")
+kc input click --state press
+kc input move-by -30 0
+kc input move-by -30 0
+read -r _ CYAW1 CPITCH1 < <(kc --json camera | python3 -c "import json,sys; c=json.load(sys.stdin); print(0, c['yaw_deg'], c['pitch_deg'])")
+kc input click --state release
+sleep 1.6
+read -r _ _ _ _ W5 H5 _ < <(panel)
+grep -q 'drag started panel=[0-9]* zone=Resize { left: true }' "$OUT/spacewm.log" || fail "no drag on the bottom-left corner"
+[ "$W5" -gt "$((W4 + 50))" ] || fail "dragging the bottom-left corner left did not widen (${W4} -> ${W5})"
+python3 -c "exit(0 if abs($CYAW1 - $CYAW0) < 0.01 and abs($CPITCH1 - $CPITCH0) < 0.01 else 1)" ||
+    fail "the view turned while resizing (yaw $CYAW0 -> $CYAW1)"
+read -r TRX1 TRY1 TRZ1 < <(top_right)
+python3 -c "import math; exit(0 if math.dist(($TRX0,$TRY0,$TRZ0),($TRX1,$TRY1,$TRZ1)) < 0.03 else 1)" ||
+    fail "the top-right corner moved ($TRX0 $TRY0 $TRZ0 -> $TRX1 $TRY1 $TRZ1)"
+pass "the bottom-left corner resizes too (${W4} -> ${W5}), top-right stays, the view stands still"
 
 space_stop || fail "unclean exit"
 

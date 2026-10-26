@@ -569,3 +569,19 @@ orqaga egish mumkin.
   `atan2(−dy, gorizontal masofa)`, bu yerda d = ko'z − oyna. Klik va sichqoncha egilgan
   tekislik bo'yicha hisoblanadi, shuning uchun egilgan oynada ham aniq ishlaydi.
   Qiyalik layout'da saqlanadi, `spacectl --json list` da `tilt_deg` sifatida ko'rinadi.
+
+### Oyna o'lchamini sichqoncha bilan o'zgartirish (qaytarildi)
+
+Oynaning pastki o'ng yoki pastki chap burchagiga qarab, sichqonchani bosib turing.
+Shu paytda ko'rinish joyida qotib turadi, sichqoncha harakati esa faqat oyna
+o'lchamini o'zgartiradi. Burchak sichqoncha bilan birga yuradi, qarama-qarshi tepa
+burchak joyida turadi: o'ng burchakda tepa-chap, chap burchakda tepa-o'ng. Shuning
+uchun qancha katta bo'layotgani ko'rinib turadi.
+
+Sichqonchaning piksel harakati oynaga qadar bo'lgan masofaga qarab oyna piksellariga
+aylantiriladi: `ppu / (ekran_balandligi / (2·masofa·tan(fov/2)))`. Shu tufayli burchak
+kursor bilan bir xil tezlikda yuradi. O'lcham 240×140 dan ekranning 2 baravarigacha.
+Undan kattaroq oynaga orqaga chekinib qarash mumkin.
+
+Avvalgi "burchak nishon chizig'iga ergashadi" usuli foydalanuvchiga noqulay bo'lgani
+uchun olib tashlandi.
