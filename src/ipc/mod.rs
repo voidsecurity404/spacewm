@@ -690,19 +690,19 @@ fn list_panels(state: &SpaceState) -> Vec<PanelInfo> {
             let size = window.geometry().size;
             // 3D position of the panel (metres); 2D-only windows fall back to their place
             // in the 2D space.
-            let (position, yaw_deg, pixels_per_unit, visible) = match state.world.panel_for_window(window) {
+            let (position, (yaw_deg, tilt_deg), pixels_per_unit, visible) = match state.world.panel_for_window(window) {
                 Some(p) => {
-                    let n = p.normal();
+                    let (yaw, tilt) = p.yaw_tilt();
                     (
                         [p.position.x as f64, p.position.y as f64, p.position.z as f64],
-                        (n.x as f64).atan2(n.z as f64).to_degrees(),
+                        (f64::from(yaw).to_degrees(), f64::from(tilt).to_degrees()),
                         p.pixels_per_unit as f64,
                         p.visible,
                     )
                 }
                 None => {
                     let loc = state.space.element_location(window).unwrap_or_default();
-                    ([loc.x as f64, loc.y as f64, 0.0], 0.0, 0.0, true)
+                    ([loc.x as f64, loc.y as f64, 0.0], (0.0, 0.0), 0.0, true)
                 }
             };
             PanelInfo {
@@ -711,6 +711,7 @@ fn list_panels(state: &SpaceState) -> Vec<PanelInfo> {
                 title,
                 position,
                 yaw_deg,
+                tilt_deg,
                 pixels_per_unit,
                 visible,
                 size_px: [size.w, size.h],

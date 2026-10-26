@@ -73,6 +73,10 @@ dim_unfocused = true
 # Entering a window glides the view in front of it, so text is sharp; leaving glides
 # back to where you stood.
 focus_zoom = true
+# A window you carry (drag by its top edge, or Mod+G) leans to face you: put it up
+# high and it looks down at you, low and it looks up. Mod+PageUp / Mod+PageDown tilt
+# any window by hand; Mod+Shift+R makes it upright again.
+auto_tilt = true
 
 [dock]
 # Favorite apps and open apps along the bottom while walking. Hold Mod (Alt when
@@ -127,6 +131,9 @@ walk_mode = "Mod+Escape"
 grab = "Mod+G"
 rotate = "Mod+R"
 reset_rotation = "Mod+Shift+R"
+# Tilt a window: PageDown makes it look down (for one up high), PageUp up.
+tilt_down = "Mod+Next"
+tilt_up = "Mod+Prior"
 scale_up = ["Mod+equal", "Mod+Shift+equal", "Mod+KP_Add"]
 scale_down = ["Mod+minus", "Mod+KP_Subtract"]
 # The window itself (more rows/columns in a terminal), not just how big the panel looks.

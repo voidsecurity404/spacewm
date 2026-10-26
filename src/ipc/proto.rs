@@ -191,6 +191,9 @@ pub struct PanelInfo {
     /// Panel rotation around Y in degrees; its front faces (sin yaw, 0, cos yaw).
     #[serde(default)]
     pub yaw_deg: f64,
+    /// Tilt in degrees: positive looks down, negative up, 0 upright.
+    #[serde(default)]
+    pub tilt_deg: f64,
     /// Panel scale: window pixels per metre.
     #[serde(default)]
     pub pixels_per_unit: f64,

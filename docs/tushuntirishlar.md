@@ -532,7 +532,7 @@ Maqsad: spacewm'ni tugma yodlamasdan, sichqoncha bilan va adashmasdan ishlatish.
 ### Qo'shimcha qulayliklar
 
 - **Oynalar ro'yxati (Mod+Tab / Mod+`)**: Mod'ni bosib turib ` (yoki Tab) bosing.
-  Barcha oynalar ikonka, nom, sarlavha va workspace bilan ro'yxat bo'lib chiqadi.
+  Barcha oynalar ikonka, nom va sarlavha bilan ro'yxat bo'lib chiqadi.
   Oxirgi ishlatilgan oyna tepada turadi, kursor esa oldingi oynada bo'ladi. ` ni
   takror bossangiz pastga tushasiz, Mod'ni qo'yib yuborsangiz tanlangan oynaga
   o'tasiz va oyna oldingizga keladi. Strelkalar, Enter, sichqoncha va Esc (bekor qilish) ham ishlaydi.
@@ -548,3 +548,24 @@ Foydalanuvchiga yoqmagani uchun Alt+D (2D desktop: workspace'lar, tiling, tepa p
 `spacewm --render 2d` buyrug'i faqat dasturchilar va testlar uchun oddiy rejim sifatida
 qoldi, unga tugma bilan o'tib bo'lmaydi. Alt+1…5 yana faqat qurilish yoqilganda blok
 tanlaydi.
+
+### Oynani egish (qiyalik)
+
+Haqiqiy monitorni kronshteynda o'zingizga qaratib qo'ygandek, oynani oldinga yoki
+orqaga egish mumkin.
+
+- **Avtomatik**: oynani ko'tarib yurganingizda (tepa chetidan tortish yoki Alt+G)
+  u o'zi sizga qarab egiladi: baland qo'ysangiz pastga, past qo'ysangiz yuqoriga
+  qaraydi. Ko'z balandligiga yaqin (±8°) bo'lsa tik qoladi, shunda ozgina pastga
+  qaraganingiz uchun hamma oyna qiyshayib qolmaydi. Devorga yoki yerga qo'yilganda
+  faqat qo'lda berilgan qiyalik qoladi. O'chirish uchun `[panels] auto_tilt = false`
+  yoki Alt+, ichidagi "Carried windows face me" bandi.
+- **Qo'lda**: Alt+PageDown oynani 15° pastga, Alt+PageUp 15° yuqoriga egadi. Eng
+  ko'pi 75°, undan ortiq egilganda oyna yonidan ko'rinib qoladi. O'ng klik menyusida
+  ham "Tilt: look down" va "Tilt: look up" bandlari bor. Alt+Shift+R ("Face me,
+  upright") oynani sizga qaratib, yana tik qiladi.
+- **Hisob**: oynaning burilishi Ry(yaw)·Rx(tilt). Rx(t) +Z ni (0, −sin t, cos t) ga
+  o'tkazadi, shuning uchun musbat qiyalikda oyna pastga qaraydi. Avtomatik qiyalik
+  `atan2(−dy, gorizontal masofa)`, bu yerda d = ko'z − oyna. Klik va sichqoncha egilgan
+  tekislik bo'yicha hisoblanadi, shuning uchun egilgan oynada ham aniq ishlaydi.
+  Qiyalik layout'da saqlanadi, `spacectl --json list` da `tilt_deg` sifatida ko'rinadi.

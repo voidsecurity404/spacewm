@@ -28,6 +28,7 @@ pub enum Setting {
     Hud,
     DimUnfocused,
     FocusZoom,
+    AutoTilt,
     LockAfter,
     RestoreApps,
     Dock,
@@ -37,7 +38,7 @@ pub enum Setting {
     Building,
 }
 
-pub const SETTINGS: [Setting; 15] = [
+pub const SETTINGS: [Setting; 16] = [
     Setting::MouseSpeed,
     Setting::InvertY,
     Setting::Fov,
@@ -46,6 +47,7 @@ pub const SETTINGS: [Setting; 15] = [
     Setting::Hud,
     Setting::DimUnfocused,
     Setting::FocusZoom,
+    Setting::AutoTilt,
     Setting::LockAfter,
     Setting::RestoreApps,
     Setting::Dock,
@@ -104,6 +106,7 @@ impl Setting {
             Setting::Hud => "Clock line (HUD)",
             Setting::DimUnfocused => "Dim other windows",
             Setting::FocusZoom => "Zoom into windows",
+            Setting::AutoTilt => "Carried windows face me",
             Setting::LockAfter => "Lock screen after",
             Setting::RestoreApps => "Reopen apps at start",
             Setting::Dock => "Dock",
@@ -131,6 +134,7 @@ impl Setting {
             Setting::Hud => yes(c.render.hud),
             Setting::DimUnfocused => yes(c.panels.dim_unfocused),
             Setting::FocusZoom => yes(c.panels.focus_zoom),
+            Setting::AutoTilt => yes(c.panels.auto_tilt),
             Setting::LockAfter => match c.desktop.lock_after_minutes {
                 0 => "never".into(),
                 m => format!("{m} min"),
@@ -173,6 +177,7 @@ impl Setting {
             Setting::Hud => ("render", "hud", flip(c.render.hud)),
             Setting::DimUnfocused => ("panels", "dim_unfocused", flip(c.panels.dim_unfocused)),
             Setting::FocusZoom => ("panels", "focus_zoom", flip(c.panels.focus_zoom)),
+            Setting::AutoTilt => ("panels", "auto_tilt", flip(c.panels.auto_tilt)),
             Setting::LockAfter => {
                 let f: Vec<f64> = LOCK_MINUTES.iter().map(|&m| m as f64).collect();
                 let i = nearest(&f, c.desktop.lock_after_minutes as f64);

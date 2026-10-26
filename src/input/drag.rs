@@ -19,6 +19,9 @@ use super::{raycast::PanelHit, world_ops};
 use crate::{state::SpaceState, world::panel::PanelId};
 
 /// Mouse travel (px) before a press becomes a drag.
+/// Metres out along the window's plane the corner goes when the crosshair misses it
+/// (far enough to hit the size limit on any window).
+const FAR_ON_PLANE: f32 = 100.0;
 const DRAG_START: f64 = 6.0;
 /// At most this often a resize is sent to the app while dragging.
 const RESIZE_EVERY: Duration = Duration::from_millis(33);
@@ -201,10 +204,21 @@ impl SpaceState {
         if let Some(mut d) = live {
             if let Some(a) = d.anchor {
                 let ray = super::raycast::camera_center_ray(&self.view.camera);
-                if let Some(t) =
-                    super::raycast::ray_plane(&ray, a.top_left, a.normal).filter(|t| *t > 0.0)
+                let on_plane = match super::raycast::ray_plane(&ray, a.top_left, a.normal)
+                    .filter(|t| *t > 0.0)
                 {
-                    let (x, y) = a.local_px(ray.origin + ray.dir * t);
+                    Some(t) => Some(ray.origin + ray.dir * t),
+                    // Turned so far that the crosshair passes the window's plane (looking
+                    // past its edge, or a fast flick): the corner goes as far as it can in
+                    // that direction: the look direction flattened onto the plane, far out.
+                    None => {
+                        let along = ray.dir - a.normal * ray.dir.dot(a.normal);
+                        (along.length() > 1e-4)
+                            .then(|| a.top_left + along.normalize() * FAR_ON_PLANE)
+                    }
+                };
+                if let Some(point) = on_plane {
+                    let (x, y) = a.local_px(point);
                     // Never bigger than the screen: a window you can't see whole is no use.
                     let max = self
                         .primary_output_geometry()

@@ -10,7 +10,10 @@ use super::{
 };
 use crate::{
     state::SpaceState,
-    world::{block::Block, panel::PanelId},
+    world::{
+        block::Block,
+        panel::{orientation, PanelId},
+    },
 };
 
 /// A panel being carried.
@@ -21,6 +24,8 @@ pub struct Grab {
     pub distance: f32,
     /// Extra rotation around Y on top of "facing the camera" (Mod+R).
     pub yaw_offset: f32,
+    /// Extra tilt on top of the automatic one (Mod+PageUp / Mod+PageDown).
+    pub tilt_offset: f32,
 }
 
 const GRAB_MIN: f32 = 0.8;
@@ -28,6 +33,20 @@ const GRAB_MAX: f32 = 8.0;
 /// A panel hung on a wall floats this far in front of it (no z-fighting with the wall).
 const WALL_GAP: f32 = 0.02;
 const PPU_MIN: f32 = 200.0;
+/// One Mod+PageUp / Mod+PageDown press tilts a panel this much.
+pub const TILT_STEP: f32 = 15.0 * std::f32::consts::PI / 180.0;
+/// Panels never tilt further than this (past it the window is seen edge-on).
+pub const TILT_MAX: f32 = 75.0 * std::f32::consts::PI / 180.0;
+/// Carried panels at about eye height stay upright: the automatic tilt starts past this
+/// angle, so a small look up or down doesn't leave every panel slightly crooked.
+const AUTO_TILT_DEAD: f32 = 8.0 * std::f32::consts::PI / 180.0;
+
+/// The automatic tilt for a carried panel at `pos`: it leans to face the eyes, minus a
+/// small dead zone around upright (no jump at its edge: the tilt grows from 0 there).
+fn auto_tilt(pos: Vec3, eye: Vec3) -> f32 {
+    let t = crate::world::panel::tilt_towards(pos, eye);
+    t.signum() * (t.abs() - AUTO_TILT_DEAD).max(0.0)
+}
 const PPU_MAX: f32 = 3000.0;
 
 fn modifiers(state: &SpaceState) -> ModifiersState {
@@ -82,7 +101,7 @@ pub fn grab_panel(state: &mut SpaceState, panel: PanelId) {
         return;
     };
     let distance = state.view.camera.position.distance(p.position).clamp(GRAB_MIN, GRAB_MAX);
-    state.grab = Some(Grab { panel, distance, yaw_offset: 0.0 });
+    state.grab = Some(Grab { panel, distance, yaw_offset: 0.0, tilt_offset: 0.0 });
     tracing::debug!(panel, distance, "panel grabbed");
 }
 
@@ -109,10 +128,17 @@ pub fn update_grab(state: &mut SpaceState) {
         return;
     };
     let height = p.world_size().y;
+    let auto = state.config.panels.auto_tilt;
+    let clamp_tilt = |t: f32| t.clamp(-TILT_MAX, TILT_MAX);
+    // Floating in the air: turned to the camera and (auto_tilt) leaning to face the eyes,
+    // like a monitor turned towards you: put it high and it looks down at you.
     let face_camera = |pos: Vec3| {
         let d = camera.position - pos;
-        Quat::from_rotation_y(d.x.atan2(d.z) + g.yaw_offset)
+        let tilt = if auto { auto_tilt(pos, camera.position) } else { 0.0 };
+        orientation(d.x.atan2(d.z) + g.yaw_offset, clamp_tilt(tilt + g.tilt_offset))
     };
+    // On a wall or the ground only the tilt asked for by hand.
+    let tilt = clamp_tilt(g.tilt_offset);
 
     let mut position = camera.position + camera.forward() * g.distance;
     let mut rotation = face_camera(position);
@@ -123,13 +149,15 @@ pub fn update_grab(state: &mut SpaceState) {
             let point = ray.origin + ray.dir * t;
             if normal.y == 0 && normal != glam::IVec3::ZERO {
                 // A wall: flat against it, facing out along the face normal.
+                // Tilted, its lower half would go into the wall: out by that much.
                 let n = normal.as_vec3();
-                position = point + n * WALL_GAP;
-                rotation = Quat::from_rotation_y(n.x.atan2(n.z) + g.yaw_offset);
+                position = point + n * (WALL_GAP + height / 2.0 * tilt.sin().abs());
+                rotation = orientation(n.x.atan2(n.z) + g.yaw_offset, tilt);
             } else if normal.y > 0 {
-                // The ground: stand the panel on it.
-                position = point + Vec3::new(0.0, height / 2.0 + WALL_GAP, 0.0);
-                rotation = face_camera(position);
+                // The ground: stand the panel on it (a tilted one is a bit lower).
+                position = point + Vec3::new(0.0, height / 2.0 * tilt.cos() + WALL_GAP, 0.0);
+                let d = camera.position - position;
+                rotation = orientation(d.x.atan2(d.z) + g.yaw_offset, tilt);
             }
         }
     }
@@ -146,6 +174,9 @@ pub fn update_grab(state: &mut SpaceState) {
 pub fn rotate_target(state: &mut SpaceState, reset: bool) {
     if let Some(g) = state.grab.as_mut() {
         g.yaw_offset = if reset { 0.0 } else { g.yaw_offset + std::f32::consts::FRAC_PI_2 };
+        if reset {
+            g.tilt_offset = 0.0;
+        }
         state.queue_redraw();
         return;
     }
@@ -163,6 +194,34 @@ pub fn rotate_panel(state: &mut SpaceState, id: PanelId, reset: bool) {
         } else {
             p.rotation = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2) * p.rotation;
         }
+    }
+    state.view.dirty = true;
+    state.layout_changed();
+}
+
+/// Mod+PageDown / Mod+PageUp: tilt the carried or targeted panel down (it looks down,
+/// for a window up high) or up, by 15°.
+pub fn tilt_target(state: &mut SpaceState, down: bool) {
+    if let Some(g) = state.grab.as_mut() {
+        let step = if down { TILT_STEP } else { -TILT_STEP };
+        g.tilt_offset = (g.tilt_offset + step).clamp(-2.0 * TILT_MAX, 2.0 * TILT_MAX);
+        state.queue_redraw();
+        return;
+    }
+    if let Some(id) = target_panel(state) {
+        tilt_panel(state, id, down);
+    }
+}
+
+/// Tilt `id` one step down or up, keeping where it faces. The result is a whole number
+/// of steps, so pressing back and forth returns exactly to upright.
+pub fn tilt_panel(state: &mut SpaceState, id: PanelId, down: bool) {
+    if let Some(p) = state.world.panels_mut().iter_mut().find(|p| p.id == id) {
+        let (yaw, tilt) = p.yaw_tilt();
+        let steps = (tilt / TILT_STEP).round() + if down { 1.0 } else { -1.0 };
+        let tilt = (steps * TILT_STEP).clamp(-TILT_MAX, TILT_MAX);
+        p.rotation = orientation(yaw, tilt);
+        tracing::info!(panel = id, tilt_deg = tilt.to_degrees().round(), "panel tilted");
     }
     state.view.dirty = true;
     state.layout_changed();

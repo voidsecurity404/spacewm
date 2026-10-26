@@ -106,9 +106,10 @@ sleep 0.3
 grep -q "window menu opened" "$OUT/spacewm.log" || fail "right click on a window opened no menu"
 M1=$(shot s10-menu)
 python3 -c "exit(0 if $($PX diff "$M0" "$M1") > 0.02 else 1)" || fail "menu not drawn"
-# "Show bigger" is entry 3: rows start 34 px down, 27 px each, a 7 px gap after entry 2;
-# the menu's corner is 6 px right of / below the screen center.
-read -r MX MY < <(python3 -c "print(640 + 6 + 60, 360 + 6 + 34 + 3*27 + 7 + 13)")
+# "Show bigger" is entry 3: rows start 34 px down, 27 px each, a 7 px gap after entry 2.
+# The menu's corner is in the log (next to the crosshair, moved up if it would not fit).
+read -r OX OY < <(grep "window menu opened" "$OUT/spacewm.log" | tail -1 | sed -E 's/.* x=([0-9]+) y=([0-9]+).*/\1 \2/')
+read -r MX MY < <(python3 -c "print($OX + 60, $OY + 34 + 3*27 + 7 + 13)")
 kc input move-to "$MX" "$MY"
 kc input click
 sleep 0.3
@@ -148,15 +149,19 @@ panel() { kc --json list | python3 -c "import json,sys; p=json.load(sys.stdin)['
 aim() {
     local AX AY AZ PYAW W H PPU
     read -r AX AY AZ PYAW W H PPU < <(panel)
+    # Carried windows lean to face you (auto_tilt), so the window may be tilted.
+    PTILT=$(kc --json list | python3 -c "import json,sys; print(json.load(sys.stdin)['panels'][0]['tilt_deg'])")
     read -r CX CY CZ CYAW CPITCH < <(python3 -c "
 import math
-y = math.radians($PYAW)
-nx, nz = math.sin(y), math.cos(y)          # the window's front
-rx, rz = math.cos(y), -math.sin(y)         # its right (window +x)
+y, t = math.radians($PYAW), math.radians($PTILT)
+# rotation = Ry(yaw) * Rx(tilt): front, right (window +x) and up (window -y)
+nx, ny, nz = math.sin(y) * math.cos(t), -math.sin(t), math.cos(y) * math.cos(t)
+rx, rz = math.cos(y), -math.sin(y)
+ux, uy, uz = math.sin(y) * math.sin(t), math.cos(t), math.cos(y) * math.sin(t)
 u = ($1 - $W / 2) / $PPU                   # metres right of the center
 v = ($H / 2 - $2) / $PPU                   # metres above it
-cx, cy, cz = $AX + nx, $AY, $AZ + nz
-tx, ty, tz = $AX + rx * u, $AY + v, $AZ + rz * u
+cx, cy, cz = $AX + nx, $AY + ny, $AZ + nz
+tx, ty, tz = $AX + rx * u + ux * v, $AY + uy * v, $AZ + rz * u + uz * v
 dx, dy, dz = tx - cx, ty - cy, tz - cz
 print(cx, cy, cz, math.degrees(math.atan2(dx, -dz)), math.degrees(math.atan2(dy, math.hypot(dx, dz))))")
     kc teleport "$CX" "$CY" "$CZ" --yaw "$CYAW" --pitch "$CPITCH"
@@ -190,10 +195,12 @@ aim $((W0 - 15)) $((H0 - 15))
 top_left() { kc --json list | python3 -c "
 import json, math, sys
 p = json.load(sys.stdin)['panels'][0]
-y = math.radians(p['yaw_deg']); ppu = p['pixels_per_unit']
+y, t = math.radians(p['yaw_deg']), math.radians(p['tilt_deg']); ppu = p['pixels_per_unit']
 w, h = p['size_px'][0] / ppu, p['size_px'][1] / ppu
 x, yy, z = p['position']
-print(x - math.cos(y) * w / 2, yy + h / 2, z + math.sin(y) * w / 2)"; }
+# center - right * w/2 + up * h/2 (see aim)
+print(x - math.cos(y) * w / 2 + math.sin(y) * math.sin(t) * h / 2, yy + math.cos(t) * h / 2,
+      z + math.sin(y) * w / 2 + math.cos(y) * math.sin(t) * h / 2)"; }
 read -r TLX0 TLY0 TLZ0 < <(top_left)
 grep -q 'drag hint hint="drag: resize"' "$OUT/spacewm.log" || fail "no resize hint on the corner"
 # Look a little to the right while holding the corner: wider, top-left stays put.
@@ -217,6 +224,8 @@ kc input click --state release
 sleep 1.6
 read -r _ _ _ _ W2 H2 _ < <(panel)
 [ "$W2" -le 1280 ] && [ "$H2" -le 720 ] || fail "resized beyond the screen (${W2}x$H2)"
+# A flick that turns past the window's plane still grows it (to the limit), not stuck.
+[ "$W2" -gt "$((W1 + 100))" ] && [ "$H2" -gt "$((H1 + 10))" ] || fail "a big corner drag did not grow the window (${W1}x$H1 -> ${W2}x$H2)"
 # And back up-left: smaller.
 aim $((W2 - 15)) $((H2 - 15))
 kc input click --state press
@@ -354,8 +363,8 @@ kc input key Super+comma
 sleep 0.3
 grep -q "settings opened" "$OUT/spacewm.log" || fail "Mod+comma did not open settings"
 shot s10-settings >/dev/null
-# Row 2 is the field of view: box 470x562 centered, rows from 50 px, 30 px each.
-kc input move-to 640 $(( (720 - 562) / 2 + 50 + 2 * 30 + 15 ))
+# Row 2 is the field of view: box 470x592 centered, rows from 50 px, 30 px each.
+kc input move-to 640 $(( (720 - 592) / 2 + 50 + 2 * 30 + 15 ))
 kc input click
 sleep 0.4
 grep -q '^fov = 80.0' "$CFGS" || fail "click did not save fov = 80: $(grep '^fov' "$CFGS")"

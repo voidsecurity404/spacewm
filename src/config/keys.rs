@@ -228,6 +228,9 @@ pub struct KeybindsConfig {
     pub grab: Binding,
     pub rotate: Binding,
     pub reset_rotation: Binding,
+    /// Tilt a window so it looks down / up (15° a press).
+    pub tilt_down: Binding,
+    pub tilt_up: Binding,
     pub scale_up: Binding,
     pub scale_down: Binding,
     /// The window itself: more/fewer rows and columns in a terminal.
@@ -280,6 +283,8 @@ impl Default for KeybindsConfig {
             grab: Binding::one("Mod+G"),
             rotate: Binding::one("Mod+R"),
             reset_rotation: Binding::one("Mod+Shift+R"),
+            tilt_down: Binding::one("Mod+Next"),
+            tilt_up: Binding::one("Mod+Prior"),
             // "+" is Shift+"=" on most layouts.
             scale_up: Binding::many(&["Mod+equal", "Mod+Shift+equal", "Mod+KP_Add"]),
             scale_down: Binding::many(&["Mod+minus", "Mod+KP_Subtract"]),
@@ -327,6 +332,8 @@ impl KeybindsConfig {
             ("grab", &self.grab, Action::Grab),
             ("rotate", &self.rotate, Action::RotatePanel),
             ("reset_rotation", &self.reset_rotation, Action::ResetPanelRotation),
+            ("tilt_down", &self.tilt_down, Action::TiltDown),
+            ("tilt_up", &self.tilt_up, Action::TiltUp),
             ("scale_up", &self.scale_up, Action::ScalePanelUp),
             ("scale_down", &self.scale_down, Action::ScalePanelDown),
             ("resize_grow", &self.resize_grow, Action::ResizeGrow),

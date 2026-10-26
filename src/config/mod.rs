@@ -314,6 +314,8 @@ pub struct Panels {
     pub dim_unfocused: bool,
     /// Entering a window glides the view in front of it (sharp text); leaving glides back.
     pub focus_zoom: bool,
+    /// A carried window leans to face you: put it up high and it looks down at you.
+    pub auto_tilt: bool,
 }
 
 impl Default for Panels {
@@ -323,6 +325,7 @@ impl Default for Panels {
             spawn_distance: SpawnDistance::Auto,
             dim_unfocused: true,
             focus_zoom: true,
+            auto_tilt: true,
         }
     }
 }

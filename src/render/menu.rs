@@ -32,12 +32,14 @@ pub enum Item {
     MoreRows,
     FewerRows,
     Rotate,
+    TiltDown,
+    TiltUp,
     FaceMe,
     Hide,
     Close,
 }
 
-pub const ITEMS: [Item; 11] = [
+pub const ITEMS: [Item; 13] = [
     Item::Use,
     Item::Fullscreen,
     Item::Move,
@@ -46,6 +48,8 @@ pub const ITEMS: [Item; 11] = [
     Item::MoreRows,
     Item::FewerRows,
     Item::Rotate,
+    Item::TiltDown,
+    Item::TiltUp,
     Item::FaceMe,
     Item::Hide,
     Item::Close,
@@ -62,7 +66,9 @@ impl Item {
             Item::MoreRows => "More rows / columns",
             Item::FewerRows => "Fewer rows / columns",
             Item::Rotate => "Turn 90 degrees",
-            Item::FaceMe => "Face me",
+            Item::TiltDown => "Tilt: look down",
+            Item::TiltUp => "Tilt: look up",
+            Item::FaceMe => "Face me, upright",
             Item::Hide => "Hide",
             Item::Close => "Close",
         }
@@ -209,6 +215,8 @@ impl SpaceState {
                 Item::MoreRows => first(&b.resize_grow),
                 Item::FewerRows => first(&b.resize_shrink),
                 Item::Rotate => first(&b.rotate),
+                Item::TiltDown => first(&b.tilt_down),
+                Item::TiltUp => first(&b.tilt_up),
                 Item::FaceMe => first(&b.reset_rotation),
                 Item::Hide => first(&b.hide),
                 Item::Close => first(&b.close),
@@ -224,7 +232,7 @@ impl SpaceState {
         let title = title.filter(|t| !t.is_empty()).or(app).unwrap_or_else(|| "Window".into());
         let center = (geo.size.w / 2, geo.size.h / 2);
         let origin = place(center, (geo.size.w, geo.size.h));
-        tracing::info!(panel, "window menu opened");
+        tracing::info!(panel, x = origin.0, y = origin.1, "window menu opened");
         self.close_inventory();
         self.view.controls.clear();
         self.pointer_location = (geo.loc + Point::from(center)).to_f64();
@@ -312,6 +320,8 @@ impl SpaceState {
             Item::MoreRows => world_ops::resize_panel(self, panel, true),
             Item::FewerRows => world_ops::resize_panel(self, panel, false),
             Item::Rotate => world_ops::rotate_panel(self, panel, false),
+            Item::TiltDown => world_ops::tilt_panel(self, panel, true),
+            Item::TiltUp => world_ops::tilt_panel(self, panel, false),
             Item::FaceMe => world_ops::rotate_panel(self, panel, true),
             Item::Hide => world_ops::hide_panel(self, panel),
             Item::Close => {

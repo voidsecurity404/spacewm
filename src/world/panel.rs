@@ -111,6 +111,15 @@ impl<W> Panel<W> {
             .map(|(x, y)| m.transform_point3(Vec3::new(x, y, 0.0)))
     }
 
+    /// The rotation as (yaw, tilt) in radians. Panels are turned around Y (yaw) and then
+    /// tilted around their own X axis: rotation = Ry(yaw) · Rx(tilt). Rx(t) maps +Z to
+    /// (0, −sin t, cos t), so a positive tilt makes the front look down (the top leans
+    /// towards you, like a monitor hung high on a wall) and a negative one look up.
+    pub fn yaw_tilt(&self) -> (f32, f32) {
+        let n = self.normal();
+        (n.x.atan2(n.z), (-n.y).clamp(-1.0, 1.0).asin())
+    }
+
     /// Turn (around Y only, staying upright) so the front faces `target`.
     ///
     /// A rotation by angle θ around Y maps +Z to (sin θ, 0, cos θ). We want that to point
@@ -127,6 +136,17 @@ impl<W> Panel<W> {
     pub fn set_size(&mut self, size_px: (i32, i32)) {
         self.size_px = size_px;
     }
+}
+
+/// The rotation for a yaw and a tilt (see `Panel::yaw_tilt`).
+pub fn orientation(yaw: f32, tilt: f32) -> Quat {
+    Quat::from_rotation_y(yaw) * Quat::from_rotation_x(tilt)
+}
+
+/// The tilt that makes a panel at `pos` look straight at `eye` (positive: down).
+pub fn tilt_towards(pos: Vec3, eye: Vec3) -> f32 {
+    let d = eye - pos;
+    (-d.y).atan2(d.x.hypot(d.z))
 }
 
 #[cfg(test)]
@@ -161,6 +181,27 @@ mod tests {
         p.face_towards(Vec3::new(5.0, 0.0, -2.0)); // to the right, at another height
         assert!((p.normal() - Vec3::X).length() < 1e-5, "{:?}", p.normal());
         assert!(p.normal().y.abs() < 1e-6, "stays upright");
+    }
+
+    #[test]
+    fn yaw_and_tilt_round_trip() {
+        let mut p = panel((800, 400));
+        p.rotation = orientation(0.7, 0.4);
+        let (yaw, tilt) = p.yaw_tilt();
+        assert!((yaw - 0.7).abs() < 1e-5 && (tilt - 0.4).abs() < 1e-5, "{yaw} {tilt}");
+        assert!(p.normal().y < 0.0, "positive tilt looks down");
+        // A panel above the eyes tilts down to look at them; one below tilts up.
+        let eye = Vec3::new(0.0, 1.6, 0.0);
+        assert!(tilt_towards(Vec3::new(0.0, 3.0, -2.0), eye) > 0.5);
+        assert!(tilt_towards(Vec3::new(0.0, 0.5, -2.0), eye) < -0.4);
+        assert!(tilt_towards(Vec3::new(0.0, 1.6, -2.0), eye).abs() < 1e-6);
+        // Looking along the tilted normal from the panel hits the eye.
+        p.position = Vec3::new(0.0, 3.0, -2.0);
+        p.face_towards(eye);
+        let (yaw, _) = p.yaw_tilt();
+        p.rotation = orientation(yaw, tilt_towards(p.position, eye));
+        let to_eye = (eye - p.position).normalize();
+        assert!((p.normal() - to_eye).length() < 1e-5, "{:?} {to_eye:?}", p.normal());
     }
 
     #[test]
