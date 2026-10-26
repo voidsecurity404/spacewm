@@ -359,6 +359,16 @@ pub fn resize_target(state: &mut SpaceState, grow: bool) {
 /// size; the panel follows then, growing around its center). Callers queue a redraw: an
 /// app waits for a frame callback before drawing at the new size, and an idle scene
 /// sends none.
+/// The biggest X11 window: the protocol's sizes are 16 bits, and Xwayland refuses more.
+const X11_MAX: i32 = 16384;
+
+/// The client-side shadow of an X11 window (its configured size minus its visible
+/// geometry), each side within 0..=256 px.
+fn x11_shadow(conf_w: i32, conf_h: i32, geo_w: i32, geo_h: i32) -> (i32, i32) {
+    let clamp = |d: i32| d.clamp(0, 256);
+    (clamp(conf_w.saturating_sub(geo_w)), clamp(conf_h.saturating_sub(geo_h)))
+}
+
 pub fn resize_window(window: &smithay::desktop::Window, (w, h): (i32, i32)) {
     let size = (w.clamp(MIN_WINDOW.0, MAX_WINDOW.0), h.clamp(MIN_WINDOW.1, MAX_WINDOW.1));
     tracing::debug!(w = size.0, h = size.1, "resize window");
@@ -367,11 +377,29 @@ pub fn resize_window(window: &smithay::desktop::Window, (w, h): (i32, i32)) {
         toplevel.send_pending_configure();
     } else if let Some(x11) = window.x11_surface() {
         // X11 sizes include client-side shadows: keep them, change the visible part.
+        // The shadow width comes from the app, so never trust it: Steam reported nonsense
+        // at a huge size (configure minus geometry was -39057 px), which made a negative
+        // size and crashed spacewm. Real shadows are a few dozen px.
         let geo = x11.geometry();
         let mut rect = x11.last_configure();
-        rect.size = (size.0 + rect.size.w - geo.size.w, size.1 + rect.size.h - geo.size.h).into();
+        let (shadow_w, shadow_h) = x11_shadow(rect.size.w, rect.size.h, geo.size.w, geo.size.h);
+        rect.size =
+            ((size.0 + shadow_w).clamp(1, X11_MAX), (size.1 + shadow_h).clamp(1, X11_MAX)).into();
         if let Err(e) = x11.configure(rect) {
             tracing::debug!("X11 resize failed: {e}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn x11_shadows_are_never_trusted_blindly() {
+        assert_eq!(x11_shadow(1040, 740, 1000, 700), (40, 40));
+        // What Steam reported at 8192 px: nonsense, which once made a negative size.
+        assert_eq!(x11_shadow(8192, 3262, 47249, -464), (0, 256));
+        assert_eq!(x11_shadow(i32::MIN, 10, i32::MAX, 0), (0, 10));
     }
 }

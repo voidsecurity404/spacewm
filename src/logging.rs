@@ -108,7 +108,10 @@ fn install_panic_hook() {
             .location()
             .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
             .unwrap_or_else(|| "<unknown location>".to_string());
-        tracing::error!(%location, "panic: {message}");
+        // Always with the call stack: a crash in a user's session must say where it came
+        // from, without them having to know about RUST_BACKTRACE.
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        tracing::error!(%location, "panic: {message}\n{backtrace}");
         if let Ok(fds) = DRM_FDS.try_lock() {
             for &fd in fds.iter() {
                 // SAFETY: a plain ioctl on an fd we opened; failure is harmless here.
