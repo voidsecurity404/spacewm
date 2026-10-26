@@ -8,8 +8,9 @@ OUT="${SPACE_TEST_OUT:-$HOME/spacewm-test}"
 mkdir -p "$OUT"
 : "${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR must be set}"
 SOCK="$XDG_RUNTIME_DIR/spacewm-e2e-$$.sock"
-SPACEWM="$ROOT/target/debug/spacewm"
-SPACECTL="$ROOT/target/debug/spacectl"
+# SPACE_BUILD=release tests the optimized build (as installed) instead of the debug one.
+SPACEWM="$ROOT/target/${SPACE_BUILD:-debug}/spacewm"
+SPACECTL="$ROOT/target/${SPACE_BUILD:-debug}/spacectl"
 SPACE_PID=""
 
 kc() { "$SPACECTL" --socket "$SOCK" "$@"; }
