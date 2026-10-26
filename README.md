@@ -51,10 +51,6 @@ Mod is Super on a real session and Alt when nested (`general.mod_key`).
 | drag a window's top edge / corner | move it / resize it |
 | hold Mod | a cursor for the dock (open apps, favorites) |
 | Mod+S | seated: all windows on an arc around you, no walking |
-| Mod+D | the 3D world or a 2D tiling desktop with a top bar |
-| 2D: Mod+1..9, Mod+Shift+1..9 | workspace; send the window there |
-| 2D: Mod+arrows, Mod+Shift+arrows | focus / swap with the neighbor |
-| 2D: Mod+V, Mod+F, Mod+drag | float, fullscreen, move (right button: resize) |
 | Mod+, | settings (saved to the config file, comments kept) |
 | Mod+L | lock the screen (also after 10 min idle on a real session) |
 | Print / Shift+Print | screenshot of the screen / a region, saved and copied |

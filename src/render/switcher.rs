@@ -1,10 +1,9 @@
 //! The window switcher (Mod+Tab / Mod+grave): every open window in a list, the most
-//! recently used first, with its icon, name, title and workspace. Hold Mod and press
+//! recently used first, with its icon, name and title. Hold Mod and press
 //! the key again to go down the list; let go of Mod to go to the chosen window. Arrows,
 //! Enter and a click work too; Escape cancels.
 //!
-//! Going to a window: in 3D it comes in front of you (like the dock); on the 2D desktop
-//! its workspace is shown and it gets the keyboard.
+//! Going to a window: it comes in front of you and is ready to use (like the dock).
 
 use smithay::{
     input::{keyboard::Keysym, pointer::CursorImageStatus},
@@ -31,7 +30,6 @@ pub struct Entry {
     pub panel: PanelId,
     pub name: String,
     pub title: String,
-    pub workspace: u8,
 }
 
 pub struct Switcher {
@@ -85,18 +83,17 @@ impl SpaceState {
                 let (app, title) = crate::state::window_names(&p.window);
                 let app = app.or_else(|| p.names.0.clone()).unwrap_or_else(|| "window".into());
                 let name = self.app_display_name(&app);
-                Some(Entry {
-                    panel: id,
-                    name,
-                    title: title.unwrap_or_default(),
-                    workspace: self.desktop2d.workspace_of(id).unwrap_or(1),
-                })
+                Some(Entry { panel: id, name, title: title.unwrap_or_default() })
             })
             .collect()
     }
 
     /// Mod+Tab: open the list on the window before this one; pressed again: next.
     pub fn switcher_next(&mut self, back: bool) {
+        // Windows come in front of you: a 3D thing.
+        if self.render_mode != RenderMode::Scene3D {
+            return;
+        }
         if let Some(s) = self.switcher.as_mut() {
             let n = s.entries.len().max(1);
             s.selected = if back { (s.selected + n - 1) % n } else { (s.selected + 1) % n };
@@ -136,18 +133,7 @@ impl SpaceState {
         self.view.dirty = true;
         let Some(e) = s.entries.get(s.selected).cloned() else { return };
         tracing::info!(panel = e.panel, "switcher: go to window");
-        match self.render_mode {
-            RenderMode::Scene3D => self.summon_panel(e.panel),
-            RenderMode::Flat2D => {
-                self.switch_workspace(e.workspace);
-                if let Some(w) =
-                    self.world.panels().iter().find(|p| p.id == e.panel).map(|p| p.window.clone())
-                {
-                    self.focus_window(Some(&w), smithay::utils::SERIAL_COUNTER.next_serial());
-                    self.note_2d_focus();
-                }
-            }
-        }
+        self.summon_panel(e.panel);
         self.queue_redraw();
     }
 
@@ -220,8 +206,7 @@ impl SpaceState {
             .collect();
         let icons: Vec<Option<Vec<u8>>> =
             apps.iter().map(|a| a.as_ref().and_then(|a| self.app_icon(a, icon_px))).collect();
-        let two_d = self.render_mode == RenderMode::Flat2D;
-        let image = draw(&entries, &icons, selected, two_d, scale);
+        let image = draw(&entries, &icons, selected, scale);
         if let Some(s) = self.switcher.as_mut() {
             s.image = image;
             s.drawn = Some((selected, scale));
@@ -233,7 +218,6 @@ fn draw(
     entries: &[Entry],
     icons: &[Option<Vec<u8>>],
     selected: usize,
-    two_d: bool,
     scale: i32,
 ) -> Option<Image> {
     let s = scale;
@@ -263,19 +247,6 @@ fn draw(
         let title: String = e.title.chars().take(56).collect();
         if !title.is_empty() && title != e.name {
             c.text(&title, 12.0, [0.62, 0.66, 0.72, 1.0], tx, (y + 25) * s, s);
-        }
-        if two_d {
-            let tag = format!("{}", e.workspace);
-            let tw = Canvas::text_width(&tag, 13.0, s);
-            c.fill((w - PAD - 30) * s, (y + 12) * s, 24 * s, 22 * s, [0.22, 0.25, 0.30, 1.0]);
-            c.text(
-                &tag,
-                13.0,
-                [0.90, 0.92, 0.95, 1.0],
-                (w - PAD - 18) * s - tw / 2,
-                (y + 14) * s,
-                s,
-            );
         }
     }
     let buffer = smithay::backend::renderer::element::memory::MemoryRenderBuffer::from_slice(
@@ -313,9 +284,8 @@ mod tests {
 
     #[test]
     fn renders() {
-        let e =
-            vec![Entry { panel: 1, name: "Foot".into(), title: "~/spacewm".into(), workspace: 2 }];
-        let (_, size) = draw(&e, &[None], 0, true, 1).expect("font");
+        let e = vec![Entry { panel: 1, name: "Foot".into(), title: "~/spacewm".into() }];
+        let (_, size) = draw(&e, &[None], 0, 1).expect("font");
         assert_eq!(size, box_size(1));
     }
 }

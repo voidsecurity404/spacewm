@@ -179,10 +179,6 @@ pub struct SpaceState {
     pub drag_hint: Option<(crate::input::drag::Zone, crate::inventory::Image)>,
     /// Seated mode: windows on an arc around you (input/seated.rs).
     pub seated: crate::input::seated::Seated,
-    /// The 2D desktop: workspaces, tiling, the top bar (desktop2d/).
-    pub desktop2d: crate::desktop2d::Desktop2d,
-    /// A Mod+drag on the 2D desktop (input/flat.rs).
-    pub drag2d: Option<crate::input::flat::Drag2d>,
     /// The dock along the bottom (render/dock.rs).
     pub dock: crate::render::dock::Dock,
     /// The hotbar replaces the dock until then (just built something).
@@ -428,8 +424,6 @@ impl SpaceState {
             mru: Vec::new(),
             dock: Default::default(),
             seated: Default::default(),
-            drag2d: None,
-            desktop2d: crate::desktop2d::Desktop2d::new(),
             building_until: None,
             drag: None,
             drag_hint: None,
@@ -606,7 +600,7 @@ impl SpaceState {
         if !self.layout.dirty {
             return;
         }
-        let open = self.world.panels().iter().filter_map(|p| self.saved_panel(p)).collect();
+        let open = self.world.panels().iter().filter_map(saved_panel).collect();
         let apps = self.open_apps();
         self.layout.save(open, apps);
     }
@@ -663,10 +657,6 @@ impl SpaceState {
         panel.placement_pending = false;
         // A new app is open: the list of apps to reopen next time changed.
         self.layout_changed();
-        if let Some(n) = saved.as_ref().map(|s| s.workspace).filter(|n| (1..=9).contains(n)) {
-            // Back on the workspace it was on.
-            self.ws_assign(panel_id, n);
-        }
         let Some(panel) = self.world.panels_mut().iter_mut().find(|p| &p.window == window) else {
             return;
         };
@@ -818,19 +808,7 @@ pub fn window_names(window: &Window) -> (Option<String>, Option<String>) {
 
 /// What gets saved about a panel (nothing for windows without an app_id: we couldn't
 /// match them again anyway).
-impl SpaceState {
-    /// What gets saved about a panel, with its workspace.
-    pub fn saved_panel(
-        &self,
-        p: &crate::world::panel::Panel,
-    ) -> Option<crate::world::layout::SavedPanel> {
-        let mut saved = saved_panel(p)?;
-        saved.workspace = self.desktop2d.workspace_of(p.id).unwrap_or(0);
-        Some(saved)
-    }
-}
-
-fn saved_panel(p: &crate::world::panel::Panel) -> Option<crate::world::layout::SavedPanel> {
+pub fn saved_panel(p: &crate::world::panel::Panel) -> Option<crate::world::layout::SavedPanel> {
     let (app_id, title) = window_names(&p.window);
     let app_id = app_id.or_else(|| p.names.0.clone());
     let title = title.or_else(|| p.names.1.clone());
@@ -841,6 +819,5 @@ fn saved_panel(p: &crate::world::panel::Panel) -> Option<crate::world::layout::S
         rotation: p.rotation.to_array(),
         pixels_per_unit: p.pixels_per_unit,
         hidden: !p.visible,
-        workspace: 0,
     })
 }

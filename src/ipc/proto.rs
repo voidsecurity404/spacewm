@@ -200,12 +200,6 @@ pub struct PanelInfo {
     pub focused: bool,
     /// "wayland" or "x11".
     pub kind: String,
-    /// The 2D desktop's workspace (1..9).
-    #[serde(default)]
-    pub workspace: u8,
-    /// On the 2D desktop, shown on the current workspace: x, y, width, height.
-    #[serde(default)]
-    pub rect_2d: Option<[i32; 4]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

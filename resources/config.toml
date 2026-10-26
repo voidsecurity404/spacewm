@@ -146,8 +146,6 @@ next_window = ["Mod+Tab", "Mod+grave"]
 help = "Mod+K"
 # Seated mode: all windows on an arc around you at reading distance, no walking.
 seated = "Mod+S"
-# Switch between the 3D world and a plain 2D desktop (windows stay where they are).
-toggle_2d = "Mod+D"
 # The settings box: the common settings with a click (saved to this file).
 settings = "Mod+comma"
 lock = "Mod+L"
@@ -163,15 +161,9 @@ brightness_down = "XF86MonBrightnessDown"
 play_pause = ["XF86AudioPlay", "XF86AudioPause"]
 next_track = "XF86AudioNext"
 previous_track = "XF86AudioPrev"
-# Workspaces 1-9: on the 2D desktop (Mod+D) only the current one is shown; windows
-# opened in 3D join the current one too. With building on, in 3D they pick blocks.
-workspace = ["Mod+1", "Mod+2", "Mod+3", "Mod+4", "Mod+5", "Mod+6", "Mod+7", "Mod+8", "Mod+9"]
-move_to_workspace = ["Mod+Shift+1", "Mod+Shift+2", "Mod+Shift+3", "Mod+Shift+4", "Mod+Shift+5", "Mod+Shift+6", "Mod+Shift+7", "Mod+Shift+8", "Mod+Shift+9"]
-# 2D desktop: float / tile the focused window; move the keyboard (left, right, up,
-# down); swap the window with a neighbor.
-float = "Mod+V"
-focus = ["Mod+Left", "Mod+Right", "Mod+Up", "Mod+Down"]
-move_window = ["Mod+Shift+Left", "Mod+Shift+Right", "Mod+Shift+Up", "Mod+Shift+Down"]
+# Hotbar slots. While walking, plain 1-5, the scroll wheel and E (inventory) work too;
+# left click breaks a block, right click places the selected one.
+select_block = ["Mod+1", "Mod+2", "Mod+3", "Mod+4", "Mod+5"]
 
 # Keys that start programs:
 # [[keybinds.spawn]]

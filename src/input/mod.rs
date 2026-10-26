@@ -9,7 +9,6 @@
 
 pub mod camera_controls;
 pub mod drag;
-pub mod flat;
 pub mod focus_view;
 pub mod fullscreen;
 pub mod inject;
@@ -95,16 +94,8 @@ pub enum Action {
     Help,
     /// Windows on an arc around you, no walking (and back).
     ToggleSeated,
-    /// The 3D world or a plain 2D desktop.
-    Toggle2d,
     /// Open/close the settings box.
     Settings,
-    /// Show workspace 1..9 (3D with building on: hotbar block).
-    Workspace(u8),
-    MoveToWorkspace(u8),
-    ToggleFloat,
-    FocusDir(crate::desktop2d::tiling::Dir),
-    MoveDir(crate::desktop2d::tiling::Dir),
     /// Lock the screen now.
     Lock,
     Screenshot,
@@ -462,9 +453,6 @@ pub fn run_action(state: &mut SpaceState, action: Action) {
         Action::SelectBlock(i) if state.config.general.building => state.select_slot(i as usize),
         Action::Inventory if state.config.general.building => state.toggle_inventory(),
         Action::SelectBlock(_) | Action::Inventory => {}
-        Action::ToggleFullscreen if state.render_mode == RenderMode::Flat2D => {
-            state.toggle_fullscreen_2d(None);
-        }
         Action::ToggleFullscreen => {
             let target = world_ops::target_panel(state);
             state.toggle_fullscreen(target);
@@ -473,19 +461,7 @@ pub fn run_action(state: &mut SpaceState, action: Action) {
         Action::Help => state.toggle_help(),
         Action::Lock => state.lock_now(),
         Action::ToggleSeated => state.toggle_seated(),
-        Action::Toggle2d => state.toggle_2d(),
         Action::Settings => state.toggle_settings(),
-        Action::Workspace(n) => {
-            if state.render_mode == RenderMode::Scene3D && state.config.general.building {
-                state.select_slot(n as usize - 1);
-            } else {
-                state.switch_workspace(n);
-            }
-        }
-        Action::MoveToWorkspace(n) => state.move_to_workspace(n),
-        Action::ToggleFloat => state.toggle_float(),
-        Action::FocusDir(d) => state.focus_dir(d),
-        Action::MoveDir(d) => state.move_dir(d),
         Action::Screenshot => state.screenshot(false),
         Action::ScreenshotRegion => state.screenshot(true),
         Action::Hardware(hw) => state.hardware_key(hw),
@@ -558,7 +534,6 @@ pub fn release_all_keys(state: &mut SpaceState) {
 /// Per-frame input work in 3D: walking (held keys) and the hover highlight.
 pub fn before_frame(state: &mut SpaceState) {
     let _span = tracing::trace_span!("physics").entered();
-    state.refresh_2d();
     state.refresh_hud();
     state.refresh_inventory();
     state.refresh_launching();
@@ -685,10 +660,6 @@ pub fn handle_pointer_motion_absolute(
     }
     let pos = clamp_to_outputs(state, pos);
     state.pointer_location = pos;
-    if state.drag2d.is_some() {
-        state.drag2d_motion();
-        return;
-    }
     let Some(pointer) = state.seat.get_pointer() else {
         return;
     };
@@ -757,10 +728,6 @@ pub fn handle_pointer_motion(
     }
     let pos = clamp_to_outputs(state, state.pointer_location + delta);
     state.pointer_location = pos;
-    if state.drag2d.is_some() {
-        state.drag2d_motion();
-        return;
-    }
     let Some(pointer) = state.seat.get_pointer() else {
         return;
     };
@@ -839,12 +806,6 @@ pub fn handle_pointer_button(
             walk_click(state, BTN_LEFT);
         }
         state.queue_redraw();
-        return;
-    }
-    // 2D: the end of a Mod+drag.
-    if button_state == ButtonState::Released && state.drag2d.is_some() {
-        state.input.suppressed_buttons.remove(&button);
-        state.drag2d_release();
         return;
     }
     if button_state == ButtonState::Released && state.input.suppressed_buttons.remove(&button) {
@@ -932,33 +893,9 @@ pub fn handle_pointer_button(
         && state.render_mode == RenderMode::Flat2D
         && !state.lock.is_locked()
     {
-        // The top bar: workspace buttons (and nothing goes to the windows below it).
-        if let Some(geo) = state.primary_output_geometry() {
-            let local = pointer.current_location() - geo.loc.to_f64();
-            if local.y < crate::desktop2d::bar::HEIGHT as f64
-                && state.desktop2d.fullscreen.is_none()
-            {
-                state.input.suppressed_buttons.insert(button);
-                state.bar_click(local.x);
-                return;
-            }
-        }
-        // Mod+drag moves, Mod+right-drag resizes the window under the pointer.
-        let mods = state.seat.get_keyboard().map(|k| k.modifier_state()).unwrap_or_default();
-        let nested = state.backend.is_nested();
-        let modkey = Mods::from_state(&mods, state.config.general.mod_key, nested).mod_;
-        if modkey
-            && (button == BTN_LEFT || button == BTN_RIGHT)
-            && state.drag2d_press(button == BTN_RIGHT)
-        {
-            state.input.suppressed_buttons.insert(button);
-            return;
-        }
         // 2D click-to-focus. Not while a grab (popup menu, drag) is active: the grab decides.
         let window = state.space.element_under(pointer.current_location()).map(|(w, _)| w.clone());
         state.focus_window(window.as_ref(), serial);
-        state.note_2d_focus();
-        state.desktop2d.bar.dirty = true;
     }
     pointer.button(state, &ButtonEvent { button, state: button_state, serial, time });
     pointer.frame(state);
@@ -967,17 +904,6 @@ pub fn handle_pointer_button(
 
 pub fn handle_pointer_axis(state: &mut SpaceState, frame: AxisFrame) {
     state.input_activity();
-    // 2D: the wheel over the top bar changes the volume.
-    if state.render_mode == RenderMode::Flat2D && state.desktop2d.fullscreen.is_none() {
-        let on_bar = state.primary_output_geometry().is_some_and(|g| {
-            (state.pointer_location.y - g.loc.y as f64) < crate::desktop2d::bar::HEIGHT as f64
-        });
-        if on_bar {
-            let notches = frame.v120.map(|(_, v)| v as f64 / 120.0).unwrap_or(frame.axis.1 / 15.0);
-            state.bar_scroll(notches);
-            return;
-        }
-    }
     if pointer_is_3d(state) && state.mode == InputMode::Walk {
         let notches = frame.v120.map(|(_, v)| v as f64 / 120.0).unwrap_or(frame.axis.1 / 15.0);
         if notches == 0.0 {

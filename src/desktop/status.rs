@@ -52,21 +52,6 @@ fn battery_in(root: &Path) -> Option<Battery> {
     })
 }
 
-/// Wi-Fi signal (0..100) from /proc/net/wireless, if a wireless interface is up.
-pub fn wifi() -> Option<u8> {
-    parse_wireless(&std::fs::read_to_string("/proc/net/wireless").ok()?)
-}
-
-/// The file's table: two header lines, then "wlan0: 0000   54.  -56.  -256 ...", where
-/// the third column is the link quality out of 70.
-pub fn parse_wireless(text: &str) -> Option<u8> {
-    text.lines().skip(2).find_map(|line| {
-        let (_, rest) = line.split_once(':')?;
-        let quality: f32 = rest.split_whitespace().nth(1)?.trim_end_matches('.').parse().ok()?;
-        Some((quality / 70.0 * 100.0).round().clamp(0.0, 100.0) as u8)
-    })
-}
-
 /// Local time as (year, month 1-12, day, weekday 0=Sunday, hour, minute, second).
 pub fn local_now() -> (i32, u32, u32, u32, u32, u32, u32) {
     // SAFETY: time(NULL) and localtime_r with a zeroed out-struct are plain libc calls.
@@ -136,13 +121,6 @@ mod tests {
         mk("hidpp_battery_0", &[("type", "Battery"), ("scope", "Device"), ("capacity", "5")]);
         assert_eq!(battery_in(&root), Some(Battery { percent: 87, charging: true }));
         let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn wireless_quality() {
-        let text = "Inter-| sta-|   Quality        |   Discarded packets\n face | tus | link level noise |  nwid  crypt\n wlan0: 0000   54.  -56.  -256        0      0\n";
-        assert_eq!(parse_wireless(text), Some(77));
-        assert_eq!(parse_wireless("h1\nh2\n"), None);
     }
 
     #[test]

@@ -508,7 +508,7 @@ Maqsad: spacewm'ni tugma yodlamasdan, sichqoncha bilan va adashmasdan ishlatish.
   masofasida, sizga qaragan holda silliq teriladi. Chap-o'ng tartibi saqlanadi.
   Yurish o'chadi, faqat boshingizni burasiz. Yangi oyna yoyga qo'shiladi, yopilgan oyna
   o'rnida bo'sh joy qolmaydi. Alt+S yana bosilsa, oynalar eski joylariga qaytadi.
-- **2D/3D (Alt+D)**: ish paytida oddiy 2D desktop'ga o'tish va qaytish mumkin. Har bir
+- **2D/3D (Alt+D)** (keyinchalik olib tashlandi, pastga qarang): ish paytida oddiy 2D desktop'ga o'tish va qaytish mumkin. Har bir
   oyna doim 2D joyiga ham ega, shuning uchun hech narsa yopilmaydi va siljimaydi. 2D'da
   oynalarning sarlavha qatori yo'q, shuning uchun Alt+tortish oynani suradi, Alt+o'ng
   tugma bilan tortish esa o'lchamini o'zgartiradi.
@@ -529,53 +529,22 @@ Maqsad: spacewm'ni tugma yodlamasdan, sichqoncha bilan va adashmasdan ishlatish.
   o'zgartira olmaydi. Pastda faqat dock turadi. Xohlasangiz, sozlamalardan (Alt+,)
   "Building blocks" ni yoqing.
 
-## 2D desktop: workspace'lar, tiling, tepa panel (src/desktop2d/)
-
-Alt+D endi Hyprland'ga o'xshash to'liq tiling desktop'ni ochadi:
-
-- **Tepa panel**: chapda workspace raqamlari (hozirgisi ko'k, oynasi bor workspace
-  ostida nuqta; bosilsa o'shanga o'tiladi) va fokusdagi oyna nomi. O'rtada sana va
-  soat. O'ngda til (bir nechta til sozlangan bo'lsa), ovoz, Wi-Fi (ulangan bo'lsa) va
-  batareya. Ikonkalar oddiy shakllar bilan chiziladi; batareya kam qolsa sariq, keyin
-  qizil bo'ladi, quvvat olayotganda yashil. Ovoz har 15 soniyada fonda o'qiladi.
-- **Tiling**: bitta oyna butun maydonni egallaydi. Ko'proq bo'lsa, birinchisi chapda
-  katta (master, 55%), qolganlari o'ngda ustma-ust turadi. Oynalar orasida 8 px
-  bo'shliq bor, fokusdagi oyna ko'k ramka bilan ajralib turadi.
-- **Tugmalar**:
-  - Alt+1…9: workspace'ni almashtirish;
-  - Alt+Shift+1…9: oynani boshqa workspace'ga yuborish;
-  - Alt+strelkalar: fokusni qo'shni oynaga o'tkazish;
-  - Alt+Shift+strelkalar: oynani qo'shnisi bilan almashtirish;
-  - Alt+V: oynani suzuvchi qilish (ekran markazida) yoki tiling'ga qaytarish;
-  - Alt+F: fullscreen (panel ham yashiriladi);
-  - Alt+tortish: oynani surish (oyna suzuvchiga aylanadi), Alt+o'ng tugma bilan
-    tortish: o'lchamni o'zgartirish.
-- **3D bilan bog'liqlik**: oynalar ro'yxati bitta. 3D'da ochilgan oyna ham hozirgi
-  workspace'ga tushadi (3D'da Alt+N bosilsa, keyingi oynalar o'sha workspace'ga
-  tushishi haqida xabar chiqadi). Bitta oynaning faqat bitta o'lchami bo'lishi mumkin,
-  shuning uchun 2D'ga o'tishda har bir oynaning 3D o'lchami eslab qolinadi va 3D'ga
-  qaytganda tiklanadi.
-- Boshqa workspace'lardagi oynalar ekrandan tashqarida kutib turadi. X11 ilovalari
-  (Telegram, VS Code) ham tiling'ga bo'ysunadi: ular o'z o'lchamini o'zlari
-  o'zgartira olmaydi.
-- Eski config'dagi `select_block` kaliti endi `workspace` deb ataladi, eski nomi ham
-  qabul qilinadi. `spacectl --json list` har bir oyna uchun `workspace` va `rect_2d` ni
-  ko'rsatadi.
-
 ### Qo'shimcha qulayliklar
 
 - **Oynalar ro'yxati (Mod+Tab / Mod+`)**: Mod'ni bosib turib ` (yoki Tab) bosing.
   Barcha oynalar ikonka, nom, sarlavha va workspace bilan ro'yxat bo'lib chiqadi.
   Oxirgi ishlatilgan oyna tepada turadi, kursor esa oldingi oynada bo'ladi. ` ni
   takror bossangiz pastga tushasiz, Mod'ni qo'yib yuborsangiz tanlangan oynaga
-  o'tasiz. 3D'da oyna oldingizga keladi, 2D'da uning workspace'i ochiladi va fokus
-  unga o'tadi. Strelkalar, Enter, sichqoncha va Esc (bekor qilish) ham ishlaydi.
+  o'tasiz va oyna oldingizga keladi. Strelkalar, Enter, sichqoncha va Esc (bekor qilish) ham ishlaydi.
   Avvalgi "keyingi oynaga burilish" o'rnini shu egalladi.
 - **Xush kelibsiz**: spacewm haqiqiy foydalanishda birinchi marta ochilganda tugmalar
   ro'yxati (Alt+K oynasi) "Welcome to spacewm!" sarlavhasi bilan o'zi chiqadi. Bu bir
   marta bo'ladi: `~/.local/state/spacewm/welcomed` belgisi yaratiladi. Testlarda chiqmaydi.
-- **Paneldagi ovoz (2D)**: panel ustida g'ildirakni aylantirsangiz ovoz o'zgaradi,
-  ovoz yozuvini bossangiz ovoz o'chadi yoki yoqiladi.
-- **Workspace'lar eslab qolinadi**: har bir oynaning workspace'i layout faylida
-  saqlanadi. spacewm qayta ishga tushganda avtomatik qayta ochilgan dasturlar o'z
-  workspace'lariga qaytadi.
+
+### Alt+D va 2D olam olib tashlandi
+
+Foydalanuvchiga yoqmagani uchun Alt+D (2D desktop: workspace'lar, tiling, tepa panel,
+2D'dagi Mod+tortish) to'liq olib tashlandi. spacewm faqat 3D olamda ishlaydi.
+`spacewm --render 2d` buyrug'i faqat dasturchilar va testlar uchun oddiy rejim sifatida
+qoldi, unga tugma bilan o'tib bo'lmaydi. Alt+1…5 yana faqat qurilish yoqilganda blok
+tanlaydi.

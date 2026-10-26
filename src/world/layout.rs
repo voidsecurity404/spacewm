@@ -35,9 +35,6 @@ pub struct SavedPanel {
     pub pixels_per_unit: f32,
     #[serde(default)]
     pub hidden: bool,
-    /// Its workspace on the 2D desktop (0: unknown).
-    #[serde(default)]
-    pub workspace: u8,
 }
 
 impl SavedPanel {
@@ -208,7 +205,6 @@ mod tests {
             rotation: [0.0, std::f32::consts::FRAC_1_SQRT_2, 0.0, std::f32::consts::FRAC_1_SQRT_2],
             pixels_per_unit: 800.0,
             hidden: false,
-            workspace: 0,
         }
     }
 
