@@ -48,9 +48,85 @@ pub fn set_ipc_socket(path: Option<PathBuf>) {
     }
 }
 
+/// The gate folder (see `make_gate`), put in front of our children's PATH.
+static GATE_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+/// Make the gate: a folder with a link to spacectl for every installed app (from the
+/// .desktop files; not terminals or terminal programs), put in front of PATH for every
+/// program spacewm starts. Typing `firefox` in a terminal in spacewm, or a script running
+/// `chromium`, then goes through spacectl, which asks spacewm before the real program runs
+/// (bin/spacectl.rs `gate`): an app open outside spacewm is held back instead of opening its
+/// window there. The folder lives in XDG_RUNTIME_DIR and goes away with spacewm.
+pub fn make_gate(entries: &[crate::launcher::desktop::DesktopEntry]) {
+    let Some(spacectl) = find_spacectl() else {
+        tracing::warn!("spacectl not found: programs typed in terminals are not checked");
+        return;
+    };
+    let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from) else { return };
+    let dir = runtime.join(format!("spacewm-gate-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        tracing::warn!("gate folder: {e}");
+        return;
+    }
+    let mut names: Vec<String> = vec!["flatpak".into()];
+    for e in entries.iter().filter(|e| !e.terminal && !e.terminal_emulator) {
+        let Some(first) = shell_words::split(&e.exec).ok().and_then(|w| w.into_iter().next())
+        else {
+            continue;
+        };
+        // The name it is typed as, and the program file it really is.
+        let typed = first.rsplit('/').next().unwrap_or(&first).to_string();
+        names.push(typed);
+        names.extend(crate::isolate::program_name(&first));
+    }
+    names.sort();
+    names.dedup();
+    names.retain(|n| crate::isolate::may_gate(n) && !n.contains('/') && n != "spacectl");
+    let mut made = 0;
+    for name in &names {
+        if std::os::unix::fs::symlink(&spacectl, dir.join(name)).is_ok() {
+            made += 1;
+        }
+    }
+    tracing::info!(dir = %dir.display(), programs = made, "gate ready");
+    if let Ok(mut g) = GATE_DIR.lock() {
+        *g = Some(dir);
+    }
+}
+
+/// Remove the gate folder (spacewm is exiting).
+pub fn remove_gate() {
+    if let Some(dir) = GATE_DIR.lock().ok().and_then(|mut g| g.take()) {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+/// spacectl next to spacewm (as built and installed), else in PATH.
+fn find_spacectl() -> Option<PathBuf> {
+    let next = std::env::current_exe().ok().map(|e| e.with_file_name("spacectl"));
+    next.filter(|p| p.is_file()).or_else(|| resolve(OsStr::new("spacectl")))
+}
+
+/// A program name -> its file, searched in OUR PATH (not the gate's): spacewm's own
+/// starts are checked already and must not go through the gate again.
+fn resolve(program: &OsStr) -> Option<PathBuf> {
+    let paths = std::env::var_os("PATH")?;
+    std::env::split_paths(&paths).map(|d| d.join(program)).find(|p| p.is_file())
+}
+
 /// The environment our children need: our Wayland socket, our X display (or none, so
-/// they never reach a host X server), our IPC socket.
+/// they never reach a host X server), our IPC socket, the gate in front of PATH.
 fn session_env(command: &mut Command, socket: &OsStr) {
+    if let Some(gate) = GATE_DIR.lock().ok().and_then(|g| g.clone()) {
+        let mut paths = vec![gate.clone()];
+        if let Some(p) = std::env::var_os("PATH") {
+            paths.extend(std::env::split_paths(&p));
+        }
+        if let Ok(joined) = std::env::join_paths(paths) {
+            command.env("PATH", joined).env("SPACEWM_GATE_DIR", gate);
+        }
+    }
     command.env("WAYLAND_DISPLAY", socket);
     match x_display() {
         Some(display) => command.env("DISPLAY", display),
@@ -65,7 +141,9 @@ fn session_env(command: &mut Command, socket: &OsStr) {
 /// A `Command` for a helper tool (wpctl, grim...) with our session environment and a
 /// clean signal mask. Safe to build on any thread.
 pub fn session_command(program: &str, socket: &OsStr) -> Command {
-    let mut command = Command::new(program);
+    // Our PATH, not the gate's (helpers are no apps to check).
+    let mut command = Command::new(resolve(OsStr::new(program)).unwrap_or_else(|| program.into()));
+    command.arg0(program);
     session_env(&mut command, socket);
     // SAFETY: only async-signal-safe libc calls between fork and exec.
     unsafe {
@@ -84,19 +162,36 @@ pub fn session_command(program: &str, socket: &OsStr) -> Command {
 /// Run `cmd` (split like a shell would, but without a shell) as a client of our socket.
 /// Errors are logged, never fatal.
 pub fn spawn(cmd: &str, socket: &OsStr) -> Result<u32, String> {
+    spawn_in(cmd, socket, None)
+}
+
+/// `spawn` in the folder `cwd` (a command typed in a terminal runs where it was typed).
+pub fn spawn_in(cmd: &str, socket: &OsStr, cwd: Option<&std::path::Path>) -> Result<u32, String> {
     let args = shell_words::split(cmd).map_err(|e| format!("bad command '{cmd}': {e}"))?;
-    spawn_args(&args, cmd, socket)
+    spawn_args(&args, cmd, socket, cwd)
 }
 
 /// Run `cmd` through `sh -c` (pipes, redirections, `&&`). Only for callers the user
 /// allowed to (config `general.ipc_allow_shell`).
 pub fn spawn_shell(cmd: &str, socket: &OsStr) -> Result<u32, String> {
-    spawn_args(&["sh".into(), "-c".into(), cmd.into()], cmd, socket)
+    spawn_args(&["sh".into(), "-c".into(), cmd.into()], cmd, socket, None)
 }
 
-fn spawn_args(args: &[String], label: &str, socket: &OsStr) -> Result<u32, String> {
+fn spawn_args(
+    args: &[String],
+    label: &str,
+    socket: &OsStr,
+    cwd: Option<&std::path::Path>,
+) -> Result<u32, String> {
     let (program, rest) = args.split_first().ok_or_else(|| "empty command".to_string())?;
-    let mut command = Command::new(program);
+    // Found in our own PATH: the child's PATH starts with the gate (see `make_gate`).
+    let file = if program.contains('/') { None } else { resolve(OsStr::new(program)) };
+    let mut command = Command::new(file.as_deref().unwrap_or(std::path::Path::new(program)));
+    // The program still sees its own name, not the whole path.
+    command.arg0(program);
+    if let Some(dir) = cwd.filter(|d| d.is_dir()) {
+        command.current_dir(dir);
+    }
     command.args(rest).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     session_env(&mut command, socket);
     // SAFETY: only async-signal-safe libc calls between fork and exec.
@@ -165,10 +260,20 @@ impl SpaceState {
     /// If the app is open outside spacewm it is not started (its window would open there):
     /// a question offers to move it here instead, and Ok(0) is returned.
     pub fn launch_named(&mut self, cmd: &str, name: &str) -> Result<u32, String> {
-        if self.hold_back_launch(cmd, name) {
+        self.launch_named_in(cmd, name, None)
+    }
+
+    /// `launch_named` in the folder `cwd`.
+    pub fn launch_named_in(
+        &mut self,
+        cmd: &str,
+        name: &str,
+        cwd: Option<PathBuf>,
+    ) -> Result<u32, String> {
+        if self.hold_back_launch(cmd, name, cwd.clone()) {
             return Ok(0);
         }
-        match self.launch_untracked(cmd) {
+        match spawn_in(cmd, &self.socket_name, cwd.as_deref()) {
             Ok(pid) => {
                 self.launch_started(pid, name.to_string(), cmd.to_string());
                 Ok(pid)

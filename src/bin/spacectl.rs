@@ -284,6 +284,7 @@ fn print_human(response: &Response) {
         Response::Error { message } => eprintln!("error: {message}"),
         Response::Version { version, backend } => println!("spacewm {version} ({backend})"),
         Response::Spawned { pid } => println!("started pid {pid}"),
+        Response::Gate { allow } => println!("{}", if *allow { "allowed" } else { "held back" }),
         Response::Screenshot { path, width, height } => println!("{path} ({width}x{height})"),
         Response::Panels { panels } => {
             println!(
@@ -376,7 +377,64 @@ fn run() -> Result<bool, String> {
     }
 }
 
+/// The gate: spacewm puts a folder in front of PATH for the programs started in it, with
+/// a link named after each installed app pointing here. So `firefox` typed in a
+/// terminal in spacewm (or run by a launcher script) runs spacectl as "firefox": it asks
+/// spacewm first. If that app is open outside spacewm it would open its window there:
+/// spacewm holds it back and asks to move it (and starts it itself if you say yes).
+/// Otherwise (or when spacewm can't be reached) the real program runs, found in PATH
+/// without the gate folder, with the same arguments.
+fn gate(name: &str) -> ExitCode {
+    use std::os::unix::process::CommandExt;
+    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    let gate_dir = std::env::var_os("SPACEWM_GATE_DIR").map(PathBuf::from);
+    let allowed = (|| -> Option<bool> {
+        let path = PathBuf::from(std::env::var_os("SPACEWM_SOCKET")?);
+        let request = Request::Gate {
+            program: name.to_string(),
+            args: args.iter().map(|a| a.to_string_lossy().into_owned()).collect(),
+            cwd: std::env::current_dir().ok().map(|d| d.to_string_lossy().into_owned()),
+        };
+        let mut stream = UnixStream::connect(path).ok()?;
+        let mut line = serde_json::to_string(&request).ok()?;
+        line.push('\n');
+        stream.write_all(line.as_bytes()).ok()?;
+        let mut buf = String::new();
+        BufReader::new(stream).read_line(&mut buf).ok()?;
+        match serde_json::from_str(buf.trim()).ok()? {
+            Response::Gate { allow } => Some(allow),
+            _ => None,
+        }
+    })()
+    .unwrap_or(true);
+    if !allowed {
+        eprintln!("spacewm: {name} is open outside spacewm; answer the question in spacewm.");
+        return ExitCode::SUCCESS;
+    }
+    // The real program: PATH without the gate folder (also for what it starts).
+    let paths: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).filter(|d| Some(d) != gate_dir.as_ref()).collect())
+        .unwrap_or_default();
+    let Some(real) = paths.iter().map(|d| d.join(name)).find(|p| p.is_file()) else {
+        eprintln!("spacewm gate: {name}: command not found");
+        return ExitCode::from(127);
+    };
+    let path = std::env::join_paths(&paths).unwrap_or_default();
+    let err = std::process::Command::new(&real).arg0(name).args(&args).env("PATH", path).exec();
+    eprintln!("spacewm gate: {}: {err}", real.display());
+    ExitCode::from(126)
+}
+
 fn main() -> ExitCode {
+    // Run under another name (a link in spacewm's gate folder): be the gate.
+    let argv0 = std::env::args_os().next().unwrap_or_default();
+    let name = std::path::Path::new(&argv0)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if !name.is_empty() && name != "spacectl" && std::env::var_os("SPACEWM_GATE_DIR").is_some() {
+        return gate(&name);
+    }
     match run() {
         Ok(true) => ExitCode::SUCCESS,
         Ok(false) => ExitCode::FAILURE,

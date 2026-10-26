@@ -105,6 +105,10 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         config_path.clone(),
     )?;
     state.apply_config(config, true);
+    // The gate in front of our children's PATH (spawn.rs `make_gate`): before anything
+    // is started, so terminals and scripts get it.
+    state.ensure_entries();
+    spawn::make_gate(state.dock.entries.as_deref().unwrap_or(&[]));
     // The world: --map wins over the config at startup.
     state.set_world_map(state.cli.map.unwrap_or(state.config.world.map));
     match config::watch::watch(&config_path, &loop_handle) {
@@ -240,6 +244,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     }
 
     state.save_layout();
+    spawn::remove_gate();
     // GL objects can only be freed while the context exists, i.e. before the backend drops.
     if let Some(scene) = state.view.scene.take() {
         scene.destroy(state.backend.renderer());

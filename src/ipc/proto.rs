@@ -19,6 +19,17 @@ pub enum Request {
     ClosePanel {
         id: u64,
     },
+    /// May `program` (typed in a terminal in spacewm, or run by a script there) start now?
+    /// No when it is open outside spacewm: it would open its window there; spacewm then asks
+    /// to move it here and starts it itself (in `cwd`) if you say yes. Sent by spacectl's
+    /// gate (see bin/spacectl.rs).
+    Gate {
+        program: String,
+        #[serde(default)]
+        args: Vec<String>,
+        #[serde(default)]
+        cwd: Option<String>,
+    },
     /// Start a program. `command` is split like a shell would but run WITHOUT one;
     /// `shell: true` runs it through `sh -c` and needs `general.ipc_allow_shell`.
     Spawn {
@@ -209,15 +220,42 @@ pub struct PanelInfo {
 #[serde(tag = "response", rename_all = "snake_case")]
 pub enum Response {
     Ok,
-    Error { message: String },
-    Version { version: String, backend: String },
-    Panels { panels: Vec<PanelInfo> },
-    Spawned { pid: u32 },
-    Screenshot { path: String, width: u32, height: u32 },
-    Event { event: Event },
-    Block { block: String },
-    Stats { stats: Stats },
-    Camera { position: [f64; 3], yaw_deg: f64, pitch_deg: f64 },
+    Error {
+        message: String,
+    },
+    Version {
+        version: String,
+        backend: String,
+    },
+    Panels {
+        panels: Vec<PanelInfo>,
+    },
+    Spawned {
+        pid: u32,
+    },
+    /// The answer to Gate.
+    Gate {
+        allow: bool,
+    },
+    Screenshot {
+        path: String,
+        width: u32,
+        height: u32,
+    },
+    Event {
+        event: Event,
+    },
+    Block {
+        block: String,
+    },
+    Stats {
+        stats: Stats,
+    },
+    Camera {
+        position: [f64; 3],
+        yaw_deg: f64,
+        pitch_deg: f64,
+    },
 }
 
 /// Performance over the last seconds (frame times: CPU ms per rendered frame).

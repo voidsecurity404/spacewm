@@ -405,6 +405,14 @@ fn handle_request(state: &mut SpaceState, id: ConnectionId, request: Request) ->
             }
             None => Response::error(format!("no panel {panel}")),
         },
+        Request::Gate { program, args, cwd } => {
+            let cmd = shell_words::join(
+                std::iter::once(program.as_str()).chain(args.iter().map(String::as_str)),
+            );
+            let app = program.rsplit('/').next().unwrap_or(&program).to_string();
+            let held = state.hold_back_launch(&cmd, &app, cwd.map(std::path::PathBuf::from));
+            Response::Gate { allow: !held }
+        }
         Request::Spawn { command, shell } => {
             if shell && !state.config.general.ipc_allow_shell {
                 return Some(Response::error(

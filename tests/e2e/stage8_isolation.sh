@@ -67,6 +67,13 @@ cfg() {
         "$1" "$F/spacefake-launcher" "$F/app/spacefake" >"$OUT/iso-config-$$.toml"
 }
 
+# spacefake is "installed": on PATH and with a .desktop file (in this throwaway home), so
+# spacewm puts it behind its gate for programs typed in terminals.
+export PATH="$F/app:$PATH"
+mkdir -p "$XDG_DATA_HOME/applications"
+printf '[Desktop Entry]\nType=Application\nName=Spacefake\nExec=spacefake\n' \
+    >"$XDG_DATA_HOME/applications/spacefake.desktop"
+
 cfg ask
 space_start --render 3d --log-level info --config "$OUT/iso-config-$$.toml"
 start_outside
@@ -136,6 +143,31 @@ kill "$(cat "$F/lock")" 2>/dev/null || true # the copy this test opened outside
 # app the user has open, like their Nautilus, must never be closed by a test.)
 cfg move
 space_start --render 3d --log-level info --config "$OUT/iso-config-$$.toml"
+
+# ---- Typed in a terminal in spacewm: the gate asks spacewm first; it is held back, and
+# (running_elsewhere = move) the copy outside is closed and it opens here instead.
+kill "$(cat "$F/lock")" 2>/dev/null || true
+sleep 0.3
+start_outside
+OUTSIDE=$(cat "$F/lock")
+grep -q "gate ready" "$OUT/spacewm.log" || fail "no gate"
+kc spawn foot >/dev/null
+for _ in $(seq 50); do [ "$(count)" -ge 1 ] && break; sleep 0.1; done
+sleep 0.8
+N0=$(count)
+kc input type "cd /tmp && spacefake"
+kc input key Return
+logged "not started, it would open there" || fail "spacefake typed in a terminal was not held back"
+[ "$(counta)" -le 1 ] || fail "something new opened on the other desktop"
+logged "closed outside spacewm; opening it here" 100 || fail "not moved here"
+for _ in $(seq 80); do [ "$(count)" -gt "$N0" ] && break; sleep 0.1; done
+[ "$(count)" -gt "$N0" ] || fail "the typed program did not open in spacewm"
+kill -0 "$OUTSIDE" 2>/dev/null && fail "the copy outside is still running"
+[ "$(counta)" = 0 ] || fail "its window is still on the other desktop"
+grep -q 'spawned.*args=\["spacefake"\]' "$OUT/spacewm.log" || fail "spacewm did not start it itself"
+shot s8-iso-gate >/dev/null
+pass "a program typed in a terminal in spacewm is held back by the gate, moved here (nothing opens outside)"
+kill "$(cat "$F/lock")" 2>/dev/null || true
 
 # ---- A program that is not single-instance (foot) open elsewhere: nothing to do.
 WAYLAND_DISPLAY="$WLA" foot >/dev/null 2>&1 &

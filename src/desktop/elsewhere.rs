@@ -34,11 +34,9 @@ pub struct Moving {
     pub app: String,
     pub cmd: String,
     pub pids: Vec<u32>,
-    /// The programs it runs as: their helper processes must be gone too.
-    pub names: Vec<String>,
     pub since: Instant,
-    /// Clock ticks when it began: copies started before then are the ones outside.
-    pub before: u64,
+    /// Where to start it (the folder it was typed in).
+    pub cwd: Option<std::path::PathBuf>,
 }
 
 impl SpaceState {
@@ -72,6 +70,13 @@ impl SpaceState {
 
     /// Copies of what `cmd` runs that are open outside spacewm (none for terminals).
     pub fn outside_copies(&mut self, cmd: &str) -> Vec<u32> {
+        // `flatpak run APP`: the same app in a sandbox started outside.
+        let words = shell_words::split(cmd).unwrap_or_default();
+        if words.first().and_then(|w| w.rsplit('/').next()) == Some("flatpak") {
+            return crate::isolate::flatpak_app(&words)
+                .map(crate::isolate::flatpak_elsewhere)
+                .unwrap_or_default();
+        }
         let Some((program, names)) = Self::program_names(cmd) else { return Vec::new() };
         if self.is_terminal(&program) {
             return Vec::new();
@@ -81,7 +86,12 @@ impl SpaceState {
 
     /// Before starting `cmd`: if it is open outside spacewm, don't start it (it would open
     /// there); ask to move it instead. Returns true when the start was held back.
-    pub fn hold_back_launch(&mut self, cmd: &str, app: &str) -> bool {
+    pub fn hold_back_launch(
+        &mut self,
+        cmd: &str,
+        app: &str,
+        cwd: Option<std::path::PathBuf>,
+    ) -> bool {
         if self.config.desktop.running_elsewhere == RunningElsewhere::Leave {
             return false;
         }
@@ -94,7 +104,7 @@ impl SpaceState {
             self.show_info(format!("{app} is open outside spacewm: answer the question first."));
             return true;
         }
-        self.offer_move(app.to_string(), cmd.to_string(), pids, true);
+        self.offer_move(app.to_string(), cmd.to_string(), pids, true, cwd);
         true
     }
 
@@ -123,18 +133,25 @@ impl SpaceState {
                 .collect();
             crate::isolate::learn(&program, &outside);
         }
-        self.offer_move(p.name.clone(), p.cmd.clone(), pids, false);
+        self.offer_move(p.name.clone(), p.cmd.clone(), pids, false, None);
     }
 
     /// `before`: asked before starting it (nothing opened outside); else afterwards.
-    fn offer_move(&mut self, app: String, cmd: String, pids: Vec<u32>, before: bool) {
+    fn offer_move(
+        &mut self,
+        app: String,
+        cmd: String,
+        pids: Vec<u32>,
+        before: bool,
+        cwd: Option<std::path::PathBuf>,
+    ) {
         let first_line = if before {
             "It runs only once: started here, its window would open there.".to_string()
         } else {
             "It opened its window there, not here.".to_string()
         };
         match self.config.desktop.running_elsewhere {
-            RunningElsewhere::Move => self.move_here(app, cmd, pids),
+            RunningElsewhere::Move => self.move_here(app, cmd, pids, cwd),
             RunningElsewhere::Leave => {
                 self.show_info(format!(
                     "{app} is already open outside spacewm and opened its window there."
@@ -149,18 +166,22 @@ impl SpaceState {
                 ],
                 "Close there, open here".into(),
                 if before { "Cancel".into() } else { "Leave it".into() },
-                ConfirmAction::MoveHere { app, cmd, pids },
+                ConfirmAction::MoveHere { app, cmd, pids, cwd },
             ),
         }
     }
 
     /// Ask the copies outside to quit; once they are gone, start the app here.
-    pub fn move_here(&mut self, app: String, cmd: String, pids: Vec<u32>) {
+    pub fn move_here(
+        &mut self,
+        app: String,
+        cmd: String,
+        pids: Vec<u32>,
+        cwd: Option<std::path::PathBuf>,
+    ) {
         if self.desktop.moving.is_some() {
             return; // one at a time
         }
-        let names = Self::program_names(&cmd).map(|(_, n)| n).unwrap_or_default();
-        let before = crate::isolate::now_ticks();
         for &pid in &pids {
             crate::isolate::ask_to_quit(pid);
         }
@@ -168,12 +189,12 @@ impl SpaceState {
             format!("Closing {app} outside spacewm, then opening it here ..."),
             WAIT_AT_MOST.as_secs(),
         );
-        self.desktop.moving = Some(Moving { app, cmd, pids, names, since: Instant::now(), before });
+        self.desktop.moving = Some(Moving { app, cmd, pids, since: Instant::now(), cwd });
         let _ = self.loop_handle.insert_source(Timer::from_duration(CHECK_EVERY), |_, _, state| {
             let Some(m) = state.desktop.moving.clone() else { return TimeoutAction::Drop };
             // Gone means all of it: a browser's helper processes linger a moment.
             let left = m.pids.iter().any(|&pid| crate::isolate::alive(pid))
-                || !crate::isolate::running_elsewhere(&m.names, m.before).is_empty();
+                || !state.outside_copies(&m.cmd).is_empty();
             if left {
                 if m.since.elapsed() < WAIT_AT_MOST {
                     return TimeoutAction::ToDuration(CHECK_EVERY);
@@ -191,7 +212,7 @@ impl SpaceState {
             state.clear_notice();
             state.expect_window_until =
                 Some(Instant::now() + crate::input::mode::SPAWN_FOCUS_WINDOW);
-            let _ = state.launch_named(&m.cmd, &m.app);
+            let _ = state.launch_named_in(&m.cmd, &m.app, m.cwd);
             TimeoutAction::Drop
         });
     }

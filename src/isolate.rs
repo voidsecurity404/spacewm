@@ -134,6 +134,37 @@ pub fn tree(root: u32) -> Vec<(u32, String)> {
     out
 }
 
+/// A program the gate may stand in front of (no shell or helper).
+pub fn may_gate(name: &str) -> bool {
+    !NEVER.contains(&name)
+}
+
+/// The apps of a flatpak `app_id` running now, not started by spacewm: their pids (the
+/// app inside the sandbox, as seen from here: `flatpak ps` "child-pid").
+pub fn flatpak_elsewhere(app_id: &str) -> Vec<u32> {
+    let me = std::process::id();
+    let out = std::process::Command::new("flatpak")
+        .args(["ps", "--columns=child-pid,application"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output();
+    let Ok(out) = out else { return Vec::new() };
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| {
+            let mut cols = l.split_whitespace();
+            let pid: u32 = cols.next()?.parse().ok()?;
+            (cols.next()? == app_id && !is_descendant_of(pid, me) && alive(pid)).then_some(pid)
+        })
+        .collect()
+}
+
+/// The app id in `flatpak run [options] APP [args]`.
+pub fn flatpak_app(args: &[String]) -> Option<&str> {
+    let run = args.iter().position(|a| a == "run")?;
+    args[run + 1..].iter().map(String::as_str).find(|a| !a.starts_with('-'))
+}
+
 /// Clock ticks since boot now (the unit of a process start time).
 pub fn now_ticks() -> u64 {
     // SAFETY: sysconf has no preconditions.
@@ -243,6 +274,20 @@ mod tests {
         assert!(alive(me));
         // Our own tree has us in it (the test binary isn't a helper).
         assert!(tree(me).iter().any(|(pid, _)| *pid == me));
+    }
+
+    #[test]
+    fn flatpak_commands() {
+        let v = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            flatpak_app(&v(&["flatpak", "run", "org.mozilla.firefox"])),
+            Some("org.mozilla.firefox")
+        );
+        assert_eq!(
+            flatpak_app(&v(&["flatpak", "run", "--branch=stable", "--command=fx", "org.x.Y", "a"])),
+            Some("org.x.Y")
+        );
+        assert_eq!(flatpak_app(&v(&["flatpak", "list"])), None);
     }
 
     #[test]

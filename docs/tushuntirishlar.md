@@ -764,3 +764,35 @@ Firefox'da shunday bo'ldi. Endi tartib teskari:
 - `"ask"` (standart): savol beradi;
 - `"move"`: so'ramasdan ko'chiradi;
 - `"leave"`: tekshirmaydi.
+
+### Darvozachi (gate): terminal, skript va flatpak ham tekshiriladi
+
+Oldingi bo'limdagi tekshiruv faqat spacewm'ning o'zi ochadigan dasturlarga (launcher,
+dock, tugma) ishlardi. Endi qolgan uch holat ham yopildi:
+
+1. **spacewm ichidagi terminalda yozilgan buyruq** (`firefox`, `steam`, `code .`) va
+2. **skript chaqirgan dastur.** Masalan, omarchy web-app skripti `chromium` ni
+   chaqiradi.
+
+   Ikkalasi bir xil ishlaydi. spacewm ishga tushganda `$XDG_RUNTIME_DIR/spacewm-gate-<pid>/`
+   papkasini yaratadi. Unda o'rnatilgan har bir ilova nomi bilan `spacectl` ga symlink
+   bo'ladi. Ro'yxat qo'lda yozilmaydi, `.desktop` fayllardan olinadi. Terminallar va
+   terminal ichida ishlaydigan dasturlar (`Terminal=true`) bunga kirmaydi. spacewm
+   ochadigan **har bir** dasturning `PATH` boshiga shu papka qo'yiladi. Shuning uchun
+   terminal yoki skript `firefox` ni chaqirganda, aslida "firefox" nomi bilan `spacectl`
+   ishga tushadi. U spacewm'dan IPC orqali `Gate` so'rovi bilan so'raydi:
+   - **ruxsat berilsa,** haqiqiy dastur darhol ishga tushadi. Uning `PATH` idan
+     darvozachi olib tashlanadi, shu bilan bir xil argumentlar beriladi;
+   - **tashqarida ochiq bo'lsa,** dastur ishga tushmaydi. spacewm'da savol chiqadi, siz
+     rozi bo'lsangiz, spacewm o'zi uni shu papkada (`cwd`) ochadi;
+   - **spacewm javob bermasa,** dastur odatdagidek ishga tushadi, hech narsa buzilmaydi.
+
+   spacewm o'zi ochadigan dasturlarni o'z `PATH` idan topadi, shuning uchun ular
+   darvozachidan ikkinchi marta o'tmaydi.
+3. **Flatpak:** `flatpak run <APP>` uchun `flatpak ps --columns=child-pid,application`
+   orqali shu ilovaning spacewm'dan tashqaridagi nusxasi qidiriladi. `flatpak` ning o'zi
+   ham darvozachi orqasida turadi.
+
+**Bitta chegara qoldi:** dasturni to'liq yo'li bilan ochish, masalan
+`/usr/lib/firefox/firefox`. Bunda `PATH` umuman ishlatilmagani uchun darvozachidan
+o'tmaydi. Shunda ham spacewm buni ochilgandan keyin payqaydi va avvalgidek o'rganib oladi.

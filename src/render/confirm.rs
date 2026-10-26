@@ -26,7 +26,8 @@ const BUTTON_GAP: i32 = 14;
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConfirmAction {
     /// Close the app's copy outside spacewm and open it here.
-    MoveHere { app: String, cmd: String, pids: Vec<u32> },
+    /// `cwd`: where it was typed (a terminal), to start it there.
+    MoveHere { app: String, cmd: String, pids: Vec<u32>, cwd: Option<std::path::PathBuf> },
 }
 
 pub struct Confirm {
@@ -107,7 +108,7 @@ impl SpaceState {
             return;
         }
         match c.action {
-            ConfirmAction::MoveHere { app, cmd, pids } => self.move_here(app, cmd, pids),
+            ConfirmAction::MoveHere { app, cmd, pids, cwd } => self.move_here(app, cmd, pids, cwd),
         }
     }
 
@@ -244,6 +245,7 @@ mod tests {
                 app: "Steam".into(),
                 cmd: "steam".into(),
                 pids: vec![],
+                cwd: None,
             },
             on_yes: true,
             image: None,
