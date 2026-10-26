@@ -192,10 +192,15 @@ fn set_activated(window: &Window, activated: bool) {
 pub fn update_hover(state: &mut SpaceState) {
     let ray = raycast::camera_center_ray(&state.view.camera);
     let reach = state.input_settings.reach_distance;
-    // Blocks occlude panels: a panel behind a wall can't be hovered or clicked.
-    let block = raycast::voxel_ray(&ray, 128.0, |c| state.voxels.solid(c));
+    // Walls and blocks occlude panels: a panel behind a wall can't be hovered or clicked.
+    let wall = state.world_ray(&ray, 128.0);
     let panel = raycast::pick(&ray, &state.world, 1000.0);
-    state.hover = panel.filter(|p| block.is_none_or(|b| p.t < b.t));
+    state.hover = panel.filter(|p| wall.is_none_or(|w| p.t < w.t));
+    // Blocks to break or place on: only in the block world.
+    let block = match state.map {
+        Some(_) => None,
+        None => raycast::voxel_ray(&ray, 128.0, |c| state.voxels.solid(c)),
+    };
     let target = block
         .filter(|b| b.t <= reach && state.mode == InputMode::Walk && state.grab.is_none())
         .filter(|b| state.hover.is_none_or(|p| b.t < p.t));

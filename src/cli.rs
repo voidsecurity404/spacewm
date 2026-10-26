@@ -67,6 +67,11 @@ pub struct Cli {
     #[arg(long)]
     pub world_seed: Option<u64>,
 
+    /// The world to start in: dust (the desert town) or voxel (the block world).
+    /// Overrides `world.map` from the config at startup.
+    #[arg(long, value_enum)]
+    pub map: Option<crate::config::WorldMap>,
+
     /// DRM backend: GPU to use (default: the boot GPU of the seat), e.g. /dev/dri/card1.
     #[arg(long)]
     pub gpu: Option<PathBuf>,

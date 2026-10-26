@@ -53,6 +53,8 @@ xcursor = "0.3"
 # EGL window surfaces on a Wayland host (our own nested backend, see backend/winit.rs).
 wayland-egl = "0.32"
 png = "0.18"
+# The map textures (resources/maps/*/textures) are JPEGs: a small, pure-Rust decoder.
+zune-jpeg = "0.4"
 # Safe casts of vertex structs to bytes for GL buffer uploads.
 bytemuck = { version = "1", features = ["derive"] }
 notify = { version = "8", default-features = false }

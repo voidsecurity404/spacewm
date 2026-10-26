@@ -129,7 +129,7 @@ pub fn help_columns(
         Line::default(),
         header("spacewm"),
         row(&keys(&binds.help), "this help"),
-        row(&keys(&binds.settings), "settings"),
+        row(&keys(&binds.settings), "settings (walking: Esc)"),
         row(&keys(&binds.hud), "clock line on/off"),
         row(&keys(&binds.debug), "fps in the log"),
         row(&keys(&binds.quit), "quit spacewm"),

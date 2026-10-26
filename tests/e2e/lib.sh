@@ -22,8 +22,12 @@ space_start() {
     # Same for the config: tests must never create or read ~/.config/spacewm/config.toml.
     local config=(--config "$OUT/config-$$.toml")
     case " $* " in *" --config "*) config=() ;; esac
+    # Tests were written for the block world (its terrain, spawn and building): that is
+    # their default; the map's own test passes --map dust.
+    local map=(--map voxel)
+    case " $* " in *" --map "*) map=() ;; esac
     "$SPACEWM" --backend headless --allow-input-injection --ipc-socket "$SOCK" \
-        "${layout[@]}" "${config[@]}" "$@" >"$OUT/spacewm.log" 2>&1 &
+        "${layout[@]}" "${config[@]}" "${map[@]}" "$@" >"$OUT/spacewm.log" 2>&1 &
     SPACE_PID=$!
     for _ in $(seq 50); do
         [ -S "$SOCK" ] && kc version >/dev/null 2>&1 && return 0

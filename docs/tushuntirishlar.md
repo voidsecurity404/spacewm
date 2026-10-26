@@ -595,3 +595,78 @@ Undan kattaroq oynaga orqaga chekinib qarash mumkin.
 
 Avvalgi "burchak nishon chizig'iga ergashadi" usuli foydalanuvchiga noqulay bo'lgani
 uchun olib tashlandi.
+
+### Dust xaritasi: cho'l shaharchasi (src/world/map.rs, src/render/map.rs)
+
+Endi standart olam ikki bombalash joyi bo'lgan klassik xaritalar uslubidagi cho'l
+shaharchasi. Unda quyidagi joylar bor: T spawn (janubda), Long A va uning darvozalari,
+balandroqda joylashgan A site, Mid va mid darvozalari, Catwalk, CT spawn, B darvozalari,
+B site, yuqori va pastki tunnellar. Voksel (Minecraft) olam ham saqlanib qolgan:
+Esc → World → Blocks.
+
+**Assetlar (tayyor, internetdan, CC0):** 8 ta material teksturasi Poly Haven'dan
+olingan. Ular qumtosh, suvoq, hoshiya toshi, qum, yo'lak toshi, quti yog'ochi, darvoza
+yog'ochi va bo'yalgan metall. Har biriga normal map ham bor. Hammasi 512×512 JPEG,
+jami 1.3 MB, `resources/maps/dust/LICENSE.md` da ro'yxati bor. Hech qaysi o'yindan
+geometriya, tekstura yoki nom ko'chirilmagan. Asl Dust2 Valve'ga tegishli bo'lgani uchun
+uning faqat uslubi olingan.
+
+**Xarita fayli** (`resources/maps/dust/map.txt`): 2 metrlik kataklardan iborat panjara
+(48×52 katak). U qattiq devordan buyruqlar bilan "o'yib" chiqiladi:
+- `fill`: bir xil turdagi to'rtburchak, masalan `.` qum, `,` yo'lak toshi, `A` arka,
+  `T` tunnel, `c`/`C` qutilar, `d`/`D` darvoza tavaqasi, `w` past devor, `m` metall
+  do'kon qutisi.
+- `stairs`: balandligi bosqichma-bosqich o'sadigan zina, har bosqichi 0.35 m.
+- `spawn`: boshlanish nuqtasi.
+
+**Greedy meshing:** bir xil qo'shni kataklar eng katta to'rtburchaklarga birlashtiriladi.
+Natijada butun xarita bor-yo'g'i **~140 ta quti va ~1500 ta uchburchakdan** iborat.
+Shu qutilar ham ko'rinadigan geometriya, ham to'qnashuv uchun ishlatiladi, shuning uchun
+ko'rinish va fizika hech qachon bir-biridan farq qilmaydi. Teksturalar dunyo
+koordinatalari bo'yicha qo'yiladi, shuning uchun devor teksturasi bir qutidan
+ikkinchisiga uzilmasdan davom etadi. Devorlarning balandligi va rangi biroz farq qiladi.
+Devor tepasida tosh karniz bor.
+
+**Render (kompyuterga deyarli yuk yo'q):**
+- Butun xarita **bitta draw call** bilan chiziladi.
+- Teksturalar texture array'da saqlanadi, mipmap va 8× anizotropik filtr bilan. Shu
+  tufayli pol past burchakdan qaralganda ham tiniq ko'rinadi.
+- Yorug'lik: quyosh + osmon va qumdan qaytgan yorug'lik (hemisphere ambient) + normal
+  map + devor tagidagi qorong'ilik (AO). Yorqin joylar oqarib ketmasligi uchun yumshoq
+  tonemap ishlatiladi.
+- **Soyalar:** quyoshdan qaralgan chuqurlik rasmi (2048² shadow map). U faqat xarita
+  yuklanganda va kun vaqti o'zgarganda bir marta chiziladi, har kadrda emas. Shuning uchun
+  soyalar deyarli bepul.
+- **Osmon:** gradient (ufqdan zenitgacha) va quyosh atrofidagi yorug'lik. U bitta to'liq
+  ekranli uchburchak bilan chiziladi.
+- Hech narsa qimirlamasa, kadr umuman chizilmaydi (testda tik turganda 0 fps).
+
+**Fizika:** o'yinchi endi `Solids` interfeysi orqali to'qnashadi: voksel kataklar ham,
+xarita qutilari ham shu bitta interfeys orqali ishlaydi. Xaritada 0.45 m gacha
+balandlikdagi zinalarga sakramasdan chiqiladi. Zinadan tushayotganda o'yinchi yerdan
+uzilmaydi va kamera har zinada sakramaydi, silliq suzib boradi (2.5 m/s).
+
+**Esc menyusi:** Walk rejimida Esc bosilsa, o'yindagi kabi Settings ochiladi. Yangi
+bandlar:
+- **World:** Desert town / Blocks. Olam spacewm'ni qayta ishga tushirmasdan almashadi.
+- **Time of day:** Day / Afternoon / Evening. Quyosh, osmon va soyalar o'zgaradi.
+- **Sun shadows:** soyalarni yoqish yoki o'chirish.
+
+Bular config'ning `[world]` bo'limiga yoziladi (`map`, `time_of_day`, `shadows`).
+
+**Olam almashganda oynalar:** har bir oynaning joyi qaysi olamda saqlangani bilan birga
+yoziladi (layout.json'da `world`). Olam almashganda ochiq oynalar o'sha olamdagi eski
+joyiga qaytadi. Agar u olamda hali bo'lmagan bo'lsa, oldingizga yoy shaklida teriladi.
+Voksel olamdagi joylar o'zgarishsiz saqlanib qoladi.
+
+Test: `tests/e2e/stage13_dust.sh` quyidagilarni tekshiradi:
+- yuklanish va uchburchaklar soni;
+- tik turganda 0 fps;
+- devor to'xtatishi;
+- A site'ga zinadan chiqish;
+- oynani devorga osish;
+- Esc menyusi;
+- kun vaqti almashganda soyaning qayta chizilishi;
+- olamni jonli almashtirish.
+
+Boshqa testlar voksel olamga moslab yozilgani uchun `--map voxel` bilan ishga tushadi.

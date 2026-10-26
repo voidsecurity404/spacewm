@@ -105,6 +105,8 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         config_path.clone(),
     )?;
     state.apply_config(config, true);
+    // The world: --map wins over the config at startup.
+    state.set_world_map(state.cli.map.unwrap_or(state.config.world.map));
     match config::watch::watch(&config_path, &loop_handle) {
         Ok(watcher) => state.config_watcher = Some(watcher),
         Err(err) => tracing::warn!("config changes won't be picked up live: {err:#}"),

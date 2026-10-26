@@ -162,10 +162,11 @@ pub fn route_key(
         (false, _) => KeyRoute::Forward,
         (true, InputMode::Window { .. }) => KeyRoute::Forward,
         (true, InputMode::Walk) => {
-            // Minecraft keys, only while walking (in a window they are ordinary typing):
-            // E opens the inventory, 1..9 pick a hotbar slot.
+            // Game keys, only while walking (in a window they are ordinary typing):
+            // Escape opens the settings, E the inventory, 1..9 pick a hotbar slot.
             let plain = !(mods.mod_ || mods.ctrl || mods.alt || mods.super_);
             match sym.map(|s| s.raw()) {
+                Some(keysyms::KEY_Escape) if plain => return KeyRoute::Bind(Action::Settings),
                 Some(keysyms::KEY_e | keysyms::KEY_E) if plain => {
                     return KeyRoute::Bind(Action::Inventory)
                 }
@@ -564,7 +565,9 @@ pub fn before_frame(state: &mut SpaceState) {
         state.view.dirty = true;
     }
     let eye = state.player.eye();
-    state.voxels.dispatch_dirty(eye);
+    if state.map.is_none() {
+        state.voxels.dispatch_dirty(eye);
+    }
 
     // Physics time step. After an idle period (nothing animating, no frames), take one
     // frame's worth instead of the whole gap.
@@ -581,12 +584,17 @@ pub fn before_frame(state: &mut SpaceState) {
     };
     let forward = state.view.camera.forward_flat();
     state.player.walk_speed = state.input_settings.walk_speed;
-    let voxels = &state.voxels;
-    let moved =
-        state.player.update(dt, intent, forward, &|c| voxels.solid(c), &|c| voxels.water(c));
+    let moved = match state.map.as_deref() {
+        Some(map) => state.player.update(dt, intent, forward, map),
+        None => {
+            let voxels = &state.voxels;
+            let cells = crate::world::player::Cells(|c| voxels.solid(c), |c| voxels.water(c));
+            state.player.update(dt, intent, forward, &cells)
+        }
+    };
     // Fell off the world: back to the spawn point.
     if state.player.pos.y < -40.0 {
-        state.player = crate::world::player::Player::new(state.voxels.spawn);
+        state.respawn();
     }
     // While the view is gliding to / sitting in front of a window, it is not at the
     // player's eyes (focus_view.rs).
@@ -1021,8 +1029,11 @@ mod tests {
         let walk = InputMode::Walk;
         assert_eq!(route_key(D3, walk, &b, NONE, Some(Keysym::w)), KeyRoute::Camera);
         assert_eq!(route_key(D3, walk, &b, NONE, Some(Keysym::x)), KeyRoute::Swallow);
-        // Plain Escape in Walk mode does nothing special and isn't forwarded.
-        assert_eq!(route_key(D3, walk, &b, NONE, Some(Keysym::Escape)), KeyRoute::Swallow);
+        // Plain Escape while walking opens the settings (like a game's menu).
+        assert_eq!(
+            route_key(D3, walk, &b, NONE, Some(Keysym::Escape)),
+            KeyRoute::Bind(Action::Settings)
+        );
         // Binds still work while walking.
         assert_eq!(
             route_key(D3, walk, &b, MOD, Some(Keysym::Return)),

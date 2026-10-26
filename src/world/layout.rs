@@ -35,6 +35,14 @@ pub struct SavedPanel {
     pub pixels_per_unit: f32,
     #[serde(default)]
     pub hidden: bool,
+    /// The world it was in ("dust", "voxel"): a spot in one means nothing in the other.
+    /// Files from before there were maps are the block world.
+    #[serde(default = "block_world")]
+    pub world: String,
+}
+
+fn block_world() -> String {
+    "voxel".into()
 }
 
 impl SavedPanel {
@@ -120,10 +128,15 @@ impl Layout {
         Self { path: Some(path), pool, edits, dirty: false, apps }
     }
 
-    /// The saved placement for a new window of `app_id`, if there is an unused one. With
-    /// several candidates, one whose title matches wins.
-    pub fn take_placement(&mut self, app_id: &str, title: Option<&str>) -> Option<SavedPanel> {
-        let matches = |p: &SavedPanel| p.app_id == app_id;
+    /// The saved placement for a new window of `app_id` in `world`, if there is an unused
+    /// one. With several candidates, one whose title matches wins.
+    pub fn take_placement(
+        &mut self,
+        app_id: &str,
+        title: Option<&str>,
+        world: &str,
+    ) -> Option<SavedPanel> {
+        let matches = |p: &SavedPanel| p.app_id == app_id && p.world == world;
         let index = title
             .and_then(|t| {
                 self.pool.iter().position(|p| matches(p) && p.title_hint.as_deref() == Some(t))
@@ -205,7 +218,25 @@ mod tests {
             rotation: [0.0, std::f32::consts::FRAC_1_SQRT_2, 0.0, std::f32::consts::FRAC_1_SQRT_2],
             pixels_per_unit: 800.0,
             hidden: false,
+            world: "voxel".into(),
         }
+    }
+
+    #[test]
+    fn placements_belong_to_their_world() {
+        let mut layout = Layout::default();
+        let mut dust = panel("foot", 5.0, None);
+        dust.world = "dust".into();
+        layout.remember(panel("foot", 1.0, None));
+        layout.remember(dust);
+        assert_eq!(layout.take_placement("foot", None, "dust").map(|p| p.position[0]), Some(5.0));
+        assert_eq!(layout.take_placement("foot", None, "voxel").map(|p| p.position[0]), Some(1.0));
+        // Old files (no "world") are the block world.
+        let old: SavedPanel = serde_json::from_str(
+            r#"{"app_id":"x","position":[0,0,0],"rotation":[0,0,0,1],"pixels_per_unit":800}"#,
+        )
+        .expect("old entry");
+        assert_eq!(old.world, "voxel");
     }
 
     #[test]
@@ -222,9 +253,9 @@ mod tests {
         let mut again = Layout::load(path);
         assert_eq!(again.edits.get(&IVec3::new(-3, 7, 2)), Some(&Block::Glass));
         assert_eq!(again.edits.get(&IVec3::new(1, 9, 1)), Some(&Block::Air));
-        let p = again.take_placement("foot", None).expect("restored");
+        let p = again.take_placement("foot", None, "voxel").expect("restored");
         assert_eq!(p.position, [1.0, 10.0, -3.0]);
-        assert!(again.take_placement("foot", None).is_none(), "each entry is used once");
+        assert!(again.take_placement("foot", None, "voxel").is_none(), "each entry is used once");
     }
 
     #[test]
@@ -237,10 +268,13 @@ mod tests {
             ],
             ..Layout::default()
         };
-        assert_eq!(layout.take_placement("foot", Some("vim")).map(|p| p.position[0]), Some(2.0));
-        assert_eq!(layout.take_placement("foot", None).map(|p| p.position[0]), Some(1.0));
-        assert!(layout.take_placement("foot", None).is_none());
-        assert!(layout.take_placement("firefox", None).is_some());
+        assert_eq!(
+            layout.take_placement("foot", Some("vim"), "voxel").map(|p| p.position[0]),
+            Some(2.0)
+        );
+        assert_eq!(layout.take_placement("foot", None, "voxel").map(|p| p.position[0]), Some(1.0));
+        assert!(layout.take_placement("foot", None, "voxel").is_none());
+        assert!(layout.take_placement("firefox", None, "voxel").is_some());
     }
 
     #[test]
@@ -270,6 +304,9 @@ mod tests {
         write_atomic(&path, &file).expect("write");
         let mut layout = Layout::load(path);
         assert_eq!(layout.pool.len(), 1);
-        assert_eq!(layout.take_placement("foot", None).map(|p| p.rotation()), Some(Quat::IDENTITY));
+        assert_eq!(
+            layout.take_placement("foot", None, "voxel").map(|p| p.rotation()),
+            Some(Quat::IDENTITY)
+        );
     }
 }

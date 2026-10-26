@@ -67,6 +67,11 @@ apps ...). spacewm notices it from what the start did and asks whether to close 
 and open it here (`[desktop] running_elsewhere = "ask" | "move" | "leave"`). See
 `src/isolate.rs` and `src/desktop/elsewhere.rs`.
 
+The world is a desert town map by default (CC0 Poly Haven textures, about 1500
+triangles drawn in one call, sun shadows drawn once): Escape while walking opens the
+settings, where the world (town or blocks), time of day and shadows change live.
+See `src/world/map.rs` and `resources/maps/dust/`.
+
 ## Config
 
 `~/.config/spacewm/config.toml` is created with every option and its default on first

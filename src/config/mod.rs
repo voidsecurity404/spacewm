@@ -31,6 +31,7 @@ pub struct Config {
     pub general: General,
     pub input: Input,
     pub render: Render,
+    pub world: World,
     pub panels: Panels,
     pub desktop: Desktop,
     pub dock: Dock,
@@ -38,6 +39,50 @@ pub struct Config {
     #[serde(rename = "output")]
     pub outputs: Vec<OutputConfig>,
     pub keybinds: keys::KeybindsConfig,
+}
+
+/// The 3D world you walk in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, clap::ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum WorldMap {
+    /// The desert town (world/map.rs).
+    Dust,
+    /// The block world (world/voxels.rs).
+    Voxel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TimeOfDay {
+    Day,
+    Afternoon,
+    Evening,
+}
+
+impl TimeOfDay {
+    pub fn name(self) -> &'static str {
+        match self {
+            TimeOfDay::Day => "day",
+            TimeOfDay::Afternoon => "afternoon",
+            TimeOfDay::Evening => "evening",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct World {
+    pub map: WorldMap,
+    /// Sun shadows on the map (drawn once: almost free).
+    pub shadows: bool,
+    /// Where the sun is on the map.
+    pub time_of_day: TimeOfDay,
+}
+
+impl Default for World {
+    fn default() -> Self {
+        Self { map: WorldMap::Dust, shadows: true, time_of_day: TimeOfDay::Day }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

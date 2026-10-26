@@ -237,6 +237,10 @@ pub struct SpaceState {
 
     /// The block world and the mesher.
     pub voxels: crate::world::voxels::VoxelWorld,
+    /// The map you walk in instead of the block world (world.map = "dust").
+    pub map: Option<std::rc::Rc<crate::world::map::Map>>,
+    /// Counts map changes, so the renderer knows to upload the new one.
+    pub map_generation: u64,
     pub player: crate::world::player::Player,
     /// The block under the crosshair within reach (outline, break, place).
     pub target_block: Option<crate::input::raycast::VoxelHit>,
@@ -459,6 +463,8 @@ impl SpaceState {
             crosshair: Default::default(),
             expect_window_until: None,
             voxels,
+            map: None,
+            map_generation: 0,
             player,
             target_block: None,
             grab: None,
@@ -603,7 +609,8 @@ impl SpaceState {
         if !self.layout.dirty {
             return;
         }
-        let open = self.world.panels().iter().filter_map(saved_panel).collect();
+        let world = self.world_name();
+        let open = self.world.panels().iter().filter_map(|p| saved_panel(p, world)).collect();
         let apps = self.open_apps();
         self.layout.save(open, apps);
     }
@@ -642,7 +649,8 @@ impl SpaceState {
             return;
         };
         let panel_id = panel.id;
-        let mut saved = self.layout.take_placement(&app_id, title.as_deref());
+        let world = self.world_name();
+        let mut saved = self.layout.take_placement(&app_id, title.as_deref(), world);
         // A window the user just asked for (a key, the launcher, the dock) opens in front
         // of them, where they are now: an old spot may be behind them, or far away where
         // they were standing before. The spot stays remembered for reopening at startup.
@@ -811,7 +819,10 @@ pub fn window_names(window: &Window) -> (Option<String>, Option<String>) {
 
 /// What gets saved about a panel (nothing for windows without an app_id: we couldn't
 /// match them again anyway).
-pub fn saved_panel(p: &crate::world::panel::Panel) -> Option<crate::world::layout::SavedPanel> {
+pub fn saved_panel(
+    p: &crate::world::panel::Panel,
+    world: &str,
+) -> Option<crate::world::layout::SavedPanel> {
     let (app_id, title) = window_names(&p.window);
     let app_id = app_id.or_else(|| p.names.0.clone());
     let title = title.or_else(|| p.names.1.clone());
@@ -822,5 +833,6 @@ pub fn saved_panel(p: &crate::world::panel::Panel) -> Option<crate::world::layou
         rotation: p.rotation.to_array(),
         pixels_per_unit: p.pixels_per_unit,
         hidden: !p.visible,
+        world: world.to_string(),
     })
 }

@@ -6,10 +6,11 @@ use smithay::input::keyboard::ModifiersState;
 
 use super::{
     mode::{set_mode, InputMode},
-    raycast::{self, VoxelHit},
+    raycast,
 };
 use crate::{
     state::SpaceState,
+    world::scenery::WorldHit,
     world::{
         block::Block,
         panel::{orientation, PanelId},
@@ -144,16 +145,14 @@ pub fn update_grab(state: &mut SpaceState) {
     let mut rotation = face_camera(position);
     if snap {
         let ray = raycast::camera_center_ray(&camera);
-        let hit = raycast::voxel_ray(&ray, g.distance + 0.5, |c| state.voxels.solid(c));
-        if let Some(VoxelHit { normal, t, .. }) = hit {
+        if let Some(WorldHit { normal: n, t }) = state.world_ray(&ray, g.distance + 0.5) {
             let point = ray.origin + ray.dir * t;
-            if normal.y == 0 && normal != glam::IVec3::ZERO {
+            if n.y.abs() < 0.5 && n != Vec3::ZERO {
                 // A wall: flat against it, facing out along the face normal.
                 // Tilted, its lower half would go into the wall: out by that much.
-                let n = normal.as_vec3();
                 position = point + n * (WALL_GAP + height / 2.0 * tilt.sin().abs());
                 rotation = orientation(n.x.atan2(n.z) + g.yaw_offset, tilt);
-            } else if normal.y > 0 {
+            } else if n.y > 0.5 {
                 // The ground: stand the panel on it (a tilted one is a bit lower).
                 position = point + Vec3::new(0.0, height / 2.0 * tilt.cos() + WALL_GAP, 0.0);
                 let d = camera.position - position;

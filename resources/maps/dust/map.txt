@@ -1,0 +1,87 @@
+# spacewm "dust": a desert town in the style of classic two-site maps.
+#
+# The map is a grid of cells, carved out of solid walls by the commands below.
+#   size COLS ROWS CELL_METRES WALL_HEIGHT
+#   fill CHAR C0 R0 C1 R1          every cell from column C0..C1, row R0..R1 (inclusive)
+#   stairs DIR C0 R0 C1 R1 A B      raised paving whose level goes from A to B along DIR
+#                                   (x+ east, x- west, z+ south, z- north)
+#   spawn C R YAW                   where you start (yaw 0 looks north, 90 east)
+# Columns go west -> east, rows north -> south. Cell chars:
+#   #  wall (the default)            .  sand          ,  paving
+#   1-9 paving raised that many steps (0.35 m each: walkable stairs)
+#   A  archway: open below, wall above the opening
+#   T  tunnel: open below, a roof and the building above
+#   c  crate   C  two crates stacked   w  low wall you can look over
+#   d  door leaf across a north-south passage   D  door leaf across an east-west one
+#   m  a painted metal box (a shut market stall)
+size 48 52 2 8
+
+# ---- T spawn (south) and its exits
+fill . 13 41 34 49
+fill , 18 44 28 48
+fill c 15 43 15 43
+fill C 31 46 31 46
+fill m 13 47 13 47
+fill m 34 41 34 41
+spawn 23 47 0
+
+# ---- Outside long, long corner and long A (east edge, going north)
+fill . 35 39 44 45
+fill c 43 44 43 44
+fill . 39 16 44 38
+fill C 44 20 44 20
+fill c 39 24 39 24
+fill m 44 33 44 33
+# Long doors: a wall across long with an archway, one leaf shut.
+fill # 39 31 44 31
+fill A 41 31 43 31
+fill d 41 31 41 31
+# Up the ramp onto A.
+stairs z- 39 14 44 17 1 4
+
+# ---- A site (north-east, raised)
+fill 4 32 2 45 13
+fill C 37 6 38 6
+fill c 37 7 37 7
+fill c 42 10 42 10
+fill C 44 3 44 3
+fill w 34 9 35 9
+
+# ---- CT spawn (north) and the way up to A
+fill , 18 2 27 8
+fill c 19 3 19 3
+stairs x+ 28 3 31 7 1 4
+
+# ---- Mid: from top mid (T side) to CT, with mid doors
+fill . 21 9 25 40
+fill C 23 24 23 24
+fill # 21 14 25 14
+fill A 22 14 24 14
+fill d 22 14 22 14
+fill d 24 14 24 14
+
+# ---- Catwalk / short A: stairs up from mid, then north onto A
+stairs x+ 26 18 29 20 1 4
+fill 4 29 10 31 20
+
+# ---- CT mid to B doors, and B site (north-west)
+fill . 14 9 20 11
+fill # 14 9 14 11
+fill A 14 9 14 11
+fill D 14 9 14 9
+fill . 2 2 13 14
+fill , 4 4 11 11
+fill 3 3 3 6 6
+fill C 8 7 9 7
+fill c 8 8 8 8
+fill c 11 11 11 11
+fill w 3 9 3 13
+
+# ---- B tunnels: outside tunnels, upper tunnels, the way into B
+fill . 6 40 12 47
+fill T 6 27 9 39
+fill T 5 20 9 26
+fill . 5 15 9 19
+fill c 9 16 9 16
+# Lower tunnels: from the upper tunnels to mid.
+fill T 10 28 20 30

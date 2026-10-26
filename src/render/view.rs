@@ -91,6 +91,8 @@ pub struct View3D {
     /// of retrying (and logging) every frame.
     failed: bool,
     last_size: Size<i32, Physical>,
+    /// The map light last drawn with (None: the block world).
+    last_look: Option<super::map::MapLook>,
 }
 
 pub struct Prepared {
@@ -122,6 +124,16 @@ pub struct SceneInputs<'a> {
     pub chunk_meshes: &'a mut Vec<ChunkMeshData>,
     /// The block the crosshair is on (gets an outline).
     pub outline: Option<IVec3>,
+    /// The map, when you walk in one instead of the block world.
+    pub map: Option<MapInput<'a>>,
+}
+
+/// The map to draw and how it is lit.
+pub struct MapInput<'a> {
+    pub map: &'a crate::world::map::Map,
+    /// Changes whenever the map is replaced (a new upload is needed).
+    pub generation: u64,
+    pub look: super::map::MapLook,
 }
 
 /// Border colors (straight RGBA) and widths in window px.
@@ -139,15 +151,21 @@ pub struct RenderSettings {
     pub render_distance: i32,
     /// Fog start/end in metres.
     pub fog: (f32, f32),
+    /// The same on the map (small, so only a light haze far away).
+    pub map_fog: (f32, f32),
     pub dim_unfocused: bool,
     pub mipmaps: bool,
 }
+
+/// Map fog: the far side of the town fades a little into the sky.
+const MAP_FOG: (f32, f32) = (70.0, 260.0);
 
 impl Default for RenderSettings {
     fn default() -> Self {
         Self {
             render_distance: RENDER_DISTANCE,
             fog: super::scene::DEFAULT_FOG,
+            map_fog: MAP_FOG,
             dim_unfocused: true,
             mipmaps: true,
         }
@@ -161,9 +179,11 @@ impl RenderSettings {
         // with fog off it starts beyond anything drawn.
         let end = (distance * crate::world::chunk::CHUNK) as f32 - 8.0;
         let fog = if config.render.fog { (end / 3.0, end) } else { (1.0e5, 1.0e6) };
+        let map_fog = if config.render.fog { MAP_FOG } else { (1.0e5, 1.0e6) };
         Self {
             render_distance: distance,
             fog,
+            map_fog,
             dim_unfocused: config.panels.dim_unfocused,
             mipmaps: config.render.panel_mipmaps,
         }
@@ -195,6 +215,7 @@ impl View3D {
             pending_shader_reload: false,
             failed: false,
             last_size: Size::default(),
+            last_look: None,
         }
     }
 
@@ -211,7 +232,7 @@ impl View3D {
         size: Size<i32, Physical>,
         inputs: SceneInputs<'_>,
     ) -> Prepared {
-        let SceneInputs { world, highlight, cursor, chunk_meshes, outline } = inputs;
+        let SceneInputs { world, highlight, cursor, chunk_meshes, outline, map } = inputs;
         if size != self.last_size {
             self.camera.set_aspect(size.w, size.h);
             self.last_size = size;
@@ -306,8 +327,21 @@ impl View3D {
             None => None,
         };
 
-        // Newly meshed chunks (a few per frame).
-        let chunk_uploads = {
+        // The map: uploaded once (again only when it is replaced); a new time of day
+        // means a new picture.
+        if scene.sync_map(renderer, map.as_ref().map(|m| (m.map, m.generation))) {
+            self.dirty = true;
+        }
+        let look = map.as_ref().map(|m| m.look);
+        if look != self.last_look {
+            self.last_look = look;
+            self.dirty = true;
+        }
+        // Newly meshed chunks (a few per frame). Not while on the map: the block world
+        // waits until you go back to it.
+        let chunk_uploads = if look.is_some() {
+            0
+        } else {
             let _span = tracing::trace_span!("chunk_upload").entered();
             scene.upload_chunks(renderer, chunk_meshes) as u32
         };
@@ -321,16 +355,20 @@ impl View3D {
                 panel_draws(world, textures, &self.camera, highlight, self.settings.dim_unfocused);
             draws.extend(cursor_draw);
             let settings = self.settings;
-            let voxel_frame = scene.voxels.visible(&self.camera, settings.render_distance, outline);
+            let voxel_frame = match look {
+                Some(_) => Default::default(),
+                None => scene.voxels.visible(&self.camera, settings.render_distance, outline),
+            };
             let _span = tracing::trace_span!("scene_render").entered();
-            match scene.render(renderer, &self.camera, size, &draws, &voxel_frame, settings.fog) {
+            let fog = if look.is_some() { settings.map_fog } else { settings.fog };
+            match scene.render(renderer, &self.camera, size, &draws, &voxel_frame, fog, look) {
                 Ok(()) => scene_rendered = true,
                 Err(err) => tracing::error!("scene render failed: {err}"),
             }
             self.dirty = false;
         }
         // More meshes waiting: come back next frame.
-        let continuous = continuous || !chunk_meshes.is_empty();
+        let continuous = continuous || (look.is_none() && !chunk_meshes.is_empty());
         let panel_updates = self.panel_textures.as_ref().map_or(0, |t| t.updates);
         Prepared {
             element: scene.element(),

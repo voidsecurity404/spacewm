@@ -13,6 +13,7 @@ pub mod frustum;
 pub mod gl;
 pub mod help;
 pub mod hud;
+pub mod map;
 pub mod menu;
 pub mod notice;
 pub mod panel_texture;
@@ -188,7 +189,14 @@ where
     if let Some(((buffer, _), at)) = inputs.dock_tooltip {
         elements.extend(boxed(renderer, buffer, at));
     }
-    if let Some(((buffer, _), at)) = inputs.dock {
+    // (Elements earlier in the list are on top.) A box in the middle of the screen
+    // hides the dock, or the dock would cover its bottom rows.
+    let boxed_open = inputs.settings.is_some()
+        || inputs.help.is_some()
+        || inputs.switcher.is_some()
+        || inputs.confirm.is_some()
+        || inputs.inventory.is_some();
+    if let Some(((buffer, _), at)) = inputs.dock.filter(|_| !boxed_open) {
         elements.extend(boxed(renderer, buffer, at));
     }
     if let Some((buffer, size)) = inputs.drag_hint {
@@ -457,6 +465,15 @@ macro_rules! scene_inputs {
             },
             chunk_meshes: &mut $state.voxels.pending,
             outline: $state.target_block.map(|b| b.block),
+            map: $state.map.as_deref().map(|map| $crate::render::view::MapInput {
+                map,
+                generation: $state.map_generation,
+                // Field by field (not map_look()): the other inputs borrow parts of state.
+                look: $crate::render::map::MapLook::for_time(
+                    $state.config.world.time_of_day.name(),
+                    $state.config.world.shadows,
+                ),
+            }),
         }
     };
 }

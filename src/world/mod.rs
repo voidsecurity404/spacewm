@@ -7,9 +7,11 @@
 pub mod block;
 pub mod chunk;
 pub mod layout;
+pub mod map;
 pub mod mesh;
 pub mod panel;
 pub mod player;
+pub mod scenery;
 pub mod terrain;
 pub mod voxels;
 

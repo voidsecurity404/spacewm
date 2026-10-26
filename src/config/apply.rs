@@ -37,6 +37,7 @@ impl SpaceState {
                 ("general", old.general != new.general),
                 ("input", old.input != new.input),
                 ("render", old.render != new.render),
+                ("world", old.world != new.world),
                 ("panels", old.panels != new.panels),
                 ("output", old.outputs != new.outputs),
                 ("keybinds", old.keybinds != new.keybinds),
@@ -87,6 +88,14 @@ impl SpaceState {
         }
         self.keybinds = Keybinds::new(&new.keybinds);
         self.world.default_ppu = new.panels.default_pixels_per_unit;
+
+        // The world: switching maps (the look is read every frame).
+        if !initial && old.world.map != new.world.map {
+            self.set_world_map(new.world.map);
+        }
+        if !initial && old.world != new.world {
+            self.view.dirty = true;
+        }
 
         // Rendering.
         if !new.render.vsync && (initial || old.render.vsync) {

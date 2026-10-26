@@ -36,6 +36,7 @@ use smithay::{
 use super::{
     camera::Camera,
     gl::{build_program, gl_check, Attrib, Gl, Mesh, Program, Vertex},
+    map::{MapLook, MapRenderer},
     voxels::{VoxelFrame, VoxelRenderer, UPLOADS_PER_FRAME},
 };
 use crate::{error::SpaceError, world::mesh::ChunkMeshData};
@@ -62,6 +63,24 @@ const VOXEL: ShaderSource = ShaderSource {
     name: "voxel",
     vert: include_str!("shaders/voxel.vert"),
     frag: include_str!("shaders/voxel.frag"),
+};
+
+const MAP: ShaderSource = ShaderSource {
+    name: "map",
+    vert: include_str!("shaders/map.vert"),
+    frag: include_str!("shaders/map.frag"),
+};
+
+const MAP_SHADOW: ShaderSource = ShaderSource {
+    name: "map_shadow",
+    vert: include_str!("shaders/map_shadow.vert"),
+    frag: include_str!("shaders/map_shadow.frag"),
+};
+
+const SKY: ShaderSource = ShaderSource {
+    name: "sky",
+    vert: include_str!("shaders/sky.vert"),
+    frag: include_str!("shaders/sky.frag"),
 };
 
 const PANEL: ShaderSource = ShaderSource {
@@ -116,6 +135,11 @@ pub struct SceneRenderer {
     panel: Program,
     voxel: Program,
     pub voxels: VoxelRenderer,
+    map_program: Program,
+    map_shadow: Program,
+    sky: Program,
+    /// The map on the GPU, while you are on one.
+    map: Option<MapRenderer>,
     quad: Mesh,
     targets: Option<SceneTargets>,
     /// MSAA sample count (0 = off).
@@ -156,17 +180,34 @@ impl SceneRenderer {
             let basic = load_program(gl, &BASIC, shader_dir.as_ref())?;
             let panel = load_program(gl, &PANEL, shader_dir.as_ref())?;
             let voxel = load_program(gl, &VOXEL, shader_dir.as_ref())?;
+            let map_program = load_program(gl, &MAP, shader_dir.as_ref())?;
+            let map_shadow = load_program(gl, &MAP_SHADOW, shader_dir.as_ref())?;
+            let sky = load_program(gl, &SKY, shader_dir.as_ref())?;
             let voxels = VoxelRenderer::new(gl)?;
             let quad = quad_mesh(gl)?;
             // How many samples the driver supports for MSAA renderbuffers.
             let max_samples = unsafe { gl.get_parameter_i32(glow::MAX_SAMPLES) };
-            Ok((basic, panel, voxel, voxels, quad, max_samples.min(4)))
+            let maps = (map_program, map_shadow, sky);
+            Ok((basic, panel, voxel, voxels, quad, max_samples.min(4), maps))
         });
-        let (basic, panel, voxel, voxels, quad, samples) =
+        let (basic, panel, voxel, voxels, quad, samples, (map_program, map_shadow, sky)) =
             gl_result.map_err(|e| SpaceError::Render(format!("GL context: {e}")))??;
         let samples = if samples >= 2 { samples } else { 0 };
         tracing::info!(msaa = samples, "3D scene renderer ready");
-        Ok(Self { basic, panel, voxel, voxels, quad, targets: None, samples, shader_dir })
+        Ok(Self {
+            basic,
+            panel,
+            voxel,
+            voxels,
+            map_program,
+            map_shadow,
+            sky,
+            map: None,
+            quad,
+            targets: None,
+            samples,
+            shader_dir,
+        })
     }
 
     /// Recompile shaders from `--shader-dir`. On error the old program stays in use.
@@ -175,8 +216,14 @@ impl SceneRenderer {
             tracing::info!("shader reload needs --shader-dir");
             return;
         };
-        let slots =
-            [(&BASIC, &mut self.basic), (&PANEL, &mut self.panel), (&VOXEL, &mut self.voxel)];
+        let slots = [
+            (&BASIC, &mut self.basic),
+            (&PANEL, &mut self.panel),
+            (&VOXEL, &mut self.voxel),
+            (&MAP, &mut self.map_program),
+            (&MAP_SHADOW, &mut self.map_shadow),
+            (&SKY, &mut self.sky),
+        ];
         for (src, slot) in slots {
             match renderer.with_context(|gl| load_program(gl, src, Some(&dir))) {
                 Ok(Ok(program)) => {
@@ -308,7 +355,32 @@ impl SceneRenderer {
         }
     }
 
-    /// Draw the scene into the offscreen texture.
+    /// Have the GPU hold `map` (with its generation), or nothing. Returns true if that
+    /// changed what is drawn.
+    pub fn sync_map(
+        &mut self,
+        renderer: &mut GlowRenderer,
+        map: Option<(&crate::world::map::Map, u64)>,
+    ) -> bool {
+        let have = self.map.as_ref().map(|m| m.generation);
+        if have == map.map(|(_, g)| g) {
+            return false;
+        }
+        if let Some(mut old) = self.map.take() {
+            let _ = renderer.with_context(|gl| old.destroy(gl));
+        }
+        if let Some((map, generation)) = map {
+            match renderer.with_context(|gl| MapRenderer::new(gl, map, generation)) {
+                Ok(Ok(m)) => self.map = Some(m),
+                Ok(Err(e)) => tracing::error!("map upload failed: {e}"),
+                Err(e) => tracing::error!("map upload: {e}"),
+            }
+        }
+        true
+    }
+
+    /// Draw the scene into the offscreen texture. `look`: on the map, its light.
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
         renderer: &mut GlowRenderer,
@@ -317,6 +389,7 @@ impl SceneRenderer {
         panels: &[PanelDraw],
         voxel_frame: &VoxelFrame,
         (fog_start, fog_end): (f32, f32),
+        look: Option<MapLook>,
     ) -> Result<(), SpaceError> {
         self.ensure_targets(renderer, size)?;
         let Some(targets) = self.targets.as_mut() else {
@@ -326,8 +399,17 @@ impl SceneRenderer {
         let panel_program = &mut self.panel;
         let voxel_program = &mut self.voxel;
         let voxels = &self.voxels;
+        let map_program = &mut self.map_program;
+        let map_shadow = &mut self.map_shadow;
+        let sky_program = &mut self.sky;
+        // The map is drawn only once it is on the GPU, with its light.
+        let map = self.map.as_mut().zip(look);
         let quad = &self.quad;
-        let fog = (Vec3::from(SKY_COLOR), fog_start, fog_end);
+        let sky = match &map {
+            Some((_, look)) => look.sky,
+            None => Vec3::from(SKY_COLOR),
+        };
+        let fog = (sky, fog_start, fog_end);
         let (w, h) = (size.w, size.h);
         // Flip Y (see module docs) so the texture comes out top-row-first.
         let proj = Mat4::from_scale(Vec3::new(1.0, -1.0, 1.0)) * camera.projection_matrix();
@@ -338,6 +420,12 @@ impl SceneRenderer {
 
         renderer
             .with_context(|gl| unsafe {
+                // The sun's shadow map first (only when the sun moved): it has its own
+                // framebuffer and viewport.
+                let mut map = map;
+                if let Some((m, look)) = map.as_mut() {
+                    m.update_shadow(gl, map_shadow, look);
+                }
                 // Draw into our framebuffer, covering all of it.
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(draw_fbo));
                 gl.viewport(0, 0, w, h);
@@ -352,21 +440,28 @@ impl SceneRenderer {
                 gl.cull_face(glow::BACK);
                 gl.front_face(glow::CW);
 
-                gl.clear_color(SKY_COLOR[0], SKY_COLOR[1], SKY_COLOR[2], 1.0);
+                gl.front_face(glow::CW);
+                gl.clear_color(sky.x, sky.y, sky.z, 1.0);
                 gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
+                if let Some((m, look)) = &map {
+                    m.draw_sky(gl, sky_program, &(proj * view), camera.position, look);
+                }
 
                 basic.bind(gl);
                 basic.set_mat4(gl, "u_view", &view);
                 basic.set_mat4(gl, "u_proj", &proj);
                 basic.set_mat4(gl, "u_model", &Mat4::IDENTITY);
                 basic.set_vec3(gl, "u_camera_pos", camera.position);
-                basic.set_vec3(gl, "u_fog_color", Vec3::from(SKY_COLOR));
+                basic.set_vec3(gl, "u_fog_color", sky);
                 basic.set_f32(gl, "u_fog_start", fog_start);
                 basic.set_f32(gl, "u_fog_end", fog_end);
                 // Draw order matters for transparency:
                 // 1. opaque blocks (and alpha-tested leaves), 2. the aimed-at block's outline,
                 // 3. opaque panels, 4. glass/water far to near, 5. translucent panels and the
                 // cursor — each blended layer over everything behind it.
+                if let Some((m, look)) = &map {
+                    m.draw(gl, map_program, &view, &proj, camera.position, fog, look);
+                }
                 voxels.draw_opaque(
                     gl,
                     voxel_program,
@@ -477,7 +572,7 @@ impl SceneRenderer {
             let depth = if t.resolve_depth.is_some() { px * 4 } else { 0 };
             msaa + px * 4 + depth
         });
-        targets + self.voxels.gpu_bytes()
+        targets + self.voxels.gpu_bytes() + self.map.as_ref().map_or(0, |m| m.gpu_bytes())
     }
 
     /// The element showing the last rendered scene, covering the output.
@@ -509,6 +604,12 @@ impl SceneRenderer {
             self.panel.destroy(gl);
             self.voxel.destroy(gl);
             self.voxels.destroy(gl);
+            self.map_program.destroy(gl);
+            self.map_shadow.destroy(gl);
+            self.sky.destroy(gl);
+            if let Some(mut m) = self.map.take() {
+                m.destroy(gl);
+            }
             self.quad.destroy(gl);
         });
     }

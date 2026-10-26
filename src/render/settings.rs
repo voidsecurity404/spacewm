@@ -1,4 +1,5 @@
-//! The settings box (Mod+comma): the settings people change most, changed with a click,
+//! The settings box (Escape while walking, or Mod+comma): the world (map, time of day,
+//! shadows) and the settings people change most, changed with a click,
 //! saved to the config file (only that line changes, comments stay) and applied at
 //! once. Everything else is still in the file.
 //!
@@ -23,6 +24,9 @@ pub enum Setting {
     MouseSpeed,
     InvertY,
     Fov,
+    Map,
+    TimeOfDay,
+    Shadows,
     Fog,
     RenderDistance,
     Hud,
@@ -38,10 +42,13 @@ pub enum Setting {
     Building,
 }
 
-pub const SETTINGS: [Setting; 16] = [
+pub const SETTINGS: [Setting; 19] = [
     Setting::MouseSpeed,
     Setting::InvertY,
     Setting::Fov,
+    Setting::Map,
+    Setting::TimeOfDay,
+    Setting::Shadows,
     Setting::Fog,
     Setting::RenderDistance,
     Setting::Hud,
@@ -70,6 +77,7 @@ const SWITCHES: [(&str, &str); 5] = [
     ("grp:caps_toggle", "Caps Lock"),
     ("grp:ctrl_shift_toggle", "Ctrl+Shift"),
 ];
+const TIMES: [&str; 3] = ["day", "afternoon", "evening"];
 const TERMINALS: [&str; 7] =
     ["foot", "alacritty", "kitty", "ghostty", "wezterm", "konsole", "xterm"];
 
@@ -101,6 +109,9 @@ impl Setting {
             Setting::MouseSpeed => "Mouse speed",
             Setting::InvertY => "Invert mouse up/down",
             Setting::Fov => "Field of view",
+            Setting::Map => "World",
+            Setting::TimeOfDay => "Time of day",
+            Setting::Shadows => "Sun shadows",
             Setting::Fog => "Fog in the distance",
             Setting::RenderDistance => "View distance",
             Setting::Hud => "Clock line (HUD)",
@@ -129,6 +140,17 @@ impl Setting {
             }
             Setting::InvertY => yes(c.input.invert_y),
             Setting::Fov => format!("{:.0} deg", c.render.fov),
+            Setting::Map => match c.world.map {
+                crate::config::WorldMap::Dust => "Desert town".into(),
+                crate::config::WorldMap::Voxel => "Blocks".into(),
+            },
+            Setting::TimeOfDay => {
+                let t = c.world.time_of_day.name();
+                let mut s = t.to_string();
+                s[..1].make_ascii_uppercase();
+                s
+            }
+            Setting::Shadows => yes(c.world.shadows),
             Setting::Fog => yes(c.render.fog),
             Setting::RenderDistance => format!("{} chunks", c.render.render_distance_chunks),
             Setting::Hud => yes(c.render.hud),
@@ -168,6 +190,18 @@ impl Setting {
                 let i = nearest(&FOVS, c.render.fov as f64);
                 ("render", "fov", Value::from(step(&FOVS, i, dir, false)))
             }
+            Setting::Map => {
+                let next = match c.world.map {
+                    crate::config::WorldMap::Dust => "voxel",
+                    crate::config::WorldMap::Voxel => "dust",
+                };
+                ("world", "map", Value::from(next))
+            }
+            Setting::TimeOfDay => {
+                let i = TIMES.iter().position(|t| *t == c.world.time_of_day.name()).unwrap_or(0);
+                ("world", "time_of_day", Value::from(step(&TIMES, i, dir, true)))
+            }
+            Setting::Shadows => ("world", "shadows", flip(c.world.shadows)),
             Setting::Fog => ("render", "fog", flip(c.render.fog)),
             Setting::RenderDistance => {
                 let f: Vec<f64> = DISTANCES.iter().map(|&d| d as f64).collect();
