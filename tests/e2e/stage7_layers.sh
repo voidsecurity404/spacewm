@@ -9,7 +9,7 @@ fi
 source "$(dirname "$0")/lib.sh"
 PX="python3 $(dirname "$0")/pixel.py"
 T="$OUT/layers-$$"
-mkdir -p "$T/data/applications" "$T/waybar"
+mkdir -p "$T/data/applications" "$T/cache" "$T/waybar"
 # Apps started inside spacewm (mako, fuzzel, waybar) exit with it; only the test's own
 # Firefox (unique profile path) is stopped by name. Never pkill by plain program name:
 # that would hit the user's real mako/fuzzel too.
@@ -31,7 +31,9 @@ cat >"$T/waybar/config" <<'EOF'
 EOF
 printf 'window#waybar { background: #203040; color: white; }\n' >"$T/waybar/style.css"
 
-XDG_DATA_HOME="$T/data" space_start --render 3d --log-level debug
+# Its own cache too: fuzzel keeps the app list there, and a stale list from the real
+# home would not know the throwaway Firefox entry above.
+XDG_DATA_HOME="$T/data" XDG_CACHE_HOME="$T/cache" space_start --render 3d --log-level debug
 hud() { grep "spacewm::render::hud" "$OUT/spacewm.log" | tail -1 | sed 's/.*text="\([^"]*\)".*/\1/'; }
 
 # ---- HUD: clock + mode in the corner; Mod+F1 toggles it.
