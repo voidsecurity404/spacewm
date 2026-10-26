@@ -127,12 +127,23 @@ because two login managers would fight over the screen at boot. Disable it first
 
 ### Running it in a virtual machine
 
-spacewm draws straight to the screen (the DRM/KMS backend), so a virtual machine needs a
-GPU device that supports this. In VirtualBox or QEMU, enable **3D acceleration** and use
-the **virtio-gpu** (virgl) display adapter. Without it, spacewm cannot take over the screen
-and the session will not start. When you install CachyOS (or another Arch-based system) in
-the VM, choose the **"no desktop"** option, then run `install.sh`, reboot, and pick
-spacewm in SDDM.
+spacewm draws straight to the screen (the DRM/KMS backend), so the VM needs 3D graphics.
+Use the VirtualBox settings below (VM powered off), then run `install.sh` inside the VM:
+
+- **Settings > Display:** Graphics Controller **VMSVGA**, Video Memory **128 MB**,
+  **Enable 3D Acceleration** on.
+- **Super is taken by the host** (the Windows key goes to your real desktop). Inside the VM,
+  spacewm therefore uses **Alt** as the Mod key.
+
+When `install.sh` detects VirtualBox, it does three things more: installs the VirtualBox
+guest tools (mouse, resize, clipboard), writes a new config with `mod_key = "alt"`,
+`direct_panels = false` and `panel_mipmaps = false` (an existing config is never changed),
+and prints this checklist again. Set `direct_panels` and `panel_mipmaps` back to `true` once
+the picture is stable.
+
+If the picture is wrong: **Ctrl+Alt+F3** opens a terminal, and
+`tail -60 ~/.local/state/spacewm/spacewm.log` shows why. **Ctrl+Alt+Backspace** always leaves
+spacewm.
 
 ### Uninstall
 
@@ -493,7 +504,7 @@ tail -n 80 ~/.local/state/spacewm/spacewm.log
 
 Check that the GPU is visible to spacewm: `spacewm --drm-probe` lists GPUs, monitors and
 modes, and changes nothing. In a virtual machine, check the 3D acceleration and the
-virtio-gpu setting (see [Running it in a virtual machine](#running-it-in-a-virtual-machine)).
+VMSVGA and 3D settings (see [Running it in a virtual machine](#running-it-in-a-virtual-machine)).
 
 **I cannot get back to my session.** Press **Ctrl+Alt+Backspace** (always exits spacewm),
 or **Ctrl+Alt+F3** for another terminal, then `systemctl restart sddm` if needed.

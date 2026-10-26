@@ -10,17 +10,25 @@
 #   ./install.sh --dry-run          print what would run, change nothing
 #   ./install.sh --no-test-tools    only spacewm and what it needs (no foot, weston, waybar...)
 #
+# Inside a VirtualBox VM the installer also: installs the VirtualBox guest tools, makes
+# Alt the Mod key (VirtualBox passes Super to the host), and turns off direct panels and
+# mipmaps in a NEW config file (an existing one is never changed). See README, "Running it
+# in a virtual machine".
+#
 # Wayland/Smithay notes for later reading:
 # - "DRM" is how spacewm draws straight to the monitor without another compositor. It needs
-#   a GPU with KMS; in a VM that means virtio-gpu (3D acceleration) turned on.
+#   a GPU with KMS; in a VM that means 3D acceleration and the VMSVGA graphics controller.
 # - "libseat" lets a program that is not root open the GPU and input devices, through
 #   systemd-logind here. So seatd is installed only as a library: its service stays off.
 
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")" && pwd)"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/spacewm"
+CONFIG_FILE="$CONFIG_DIR/config.toml"
 DRY_RUN=0
 TEST_TOOLS=1
+VIRT=none
 
 # Packages spacewm needs at build time (pkg-config files) and at run time.
 #   rust, base-devel, git, pkgconf: compile spacewm (git fetches smithay from GitHub)
@@ -33,6 +41,7 @@ TEST_TOOLS=1
 #   swaylock: the lock screen (Mod+L, and after 10 min idle)
 #   wireplumber (wpctl), pipewire: volume and mic keys
 #   brightnessctl: brightness keys
+#   mesa-utils: glxinfo, to check which GPU driver is in use
 CORE_PACKAGES=(
     rust base-devel git pkgconf
     seatd systemd libinput mesa libxkbcommon wayland libdrm
@@ -41,12 +50,14 @@ CORE_PACKAGES=(
     sddm
     grim slurp swaylock
     wireplumber pipewire brightnessctl
+    mesa-utils
 )
 
 # Terminal, bar, notifications, launcher: used by spacewm's dock and the e2e tests.
 TEST_PACKAGES=(foot weston waybar mako fuzzel libnotify xterm)
 
 log() { printf '\n==> %s\n' "$*"; }
+warn() { printf 'warning: %s\n' "$*" >&2; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 # Print the command in dry-run mode, run it otherwise.
@@ -59,7 +70,7 @@ run() {
 }
 
 usage() {
-    sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 parse_args() {
@@ -93,13 +104,40 @@ check_other_login_managers() {
     done
 }
 
+detect_vm() {
+    # systemd-detect-virt prints "oracle" for VirtualBox, "none" on real hardware.
+    VIRT=$(systemd-detect-virt --vm 2>/dev/null || true)
+    VIRT=${VIRT:-none}
+    [ "$VIRT" = none ] || log "Running inside a virtual machine: $VIRT"
+}
+
+# The kernel headers that match the running kernel: DKMS builds the VirtualBox guest
+# modules against them.
+kernel_headers_package() {
+    case "$(uname -r)" in
+        *cachyos*) echo linux-cachyos-headers ;;
+        *omarchy*) echo linux-omarchy-headers ;;
+        *zen*) echo linux-zen-headers ;;
+        *lts*) echo linux-lts-headers ;;
+        *) echo linux-headers ;;
+    esac
+}
+
 install_packages() {
     local packages=("${CORE_PACKAGES[@]}")
     [ "$TEST_TOOLS" = 1 ] && packages+=("${TEST_PACKAGES[@]}")
+    if [ "$VIRT" = oracle ]; then
+        # Guest tools: mouse integration, screen resize and the clipboard. The DKMS module
+        # needs the headers of the running kernel.
+        packages+=(virtualbox-guest-utils virtualbox-guest-dkms "$(kernel_headers_package)")
+    fi
     log "Installing packages with pacman (full system upgrade first, as Arch requires)"
     # --needed skips what is already there. A partial upgrade (-Sy without -u) is not
     # supported on Arch, so the sync is always a full -Syu.
     run sudo pacman -Syu --needed --noconfirm "${packages[@]}"
+    if [ "$VIRT" = oracle ]; then
+        run sudo systemctl enable vboxservice.service
+    fi
 }
 
 build() {
@@ -115,6 +153,37 @@ install_files() {
     run sudo install -Dm755 "$REPO/resources/spacewm-session" /usr/local/bin/spacewm-session
     run sudo install -Dm644 "$REPO/resources/spacewm.desktop" /usr/share/wayland-sessions/spacewm.desktop
     run sudo install -Dm644 "$REPO/resources/spacewm-portals.conf" /usr/share/xdg-desktop-portal/spacewm-portals.conf
+}
+
+configure_vm() {
+    # Only for VirtualBox, and only when there is no config yet: a config you already have
+    # is never changed. The template keeps every option and its comment.
+    [ "$VIRT" = oracle ] || return 0
+    log "VirtualBox: writing a safe config for the VM"
+    if [ -e "$CONFIG_FILE" ]; then
+        warn "$CONFIG_FILE already exists and was left as it is. In a VM set there:"
+        warn "  mod_key = \"alt\", direct_panels = false, panel_mipmaps = false"
+        return 0
+    fi
+    if [ "$DRY_RUN" = 1 ]; then
+        printf '    would write %s from resources/config.toml with mod_key = "alt",\n' "$CONFIG_FILE"
+        printf '    direct_panels = false, panel_mipmaps = false\n'
+        return 0
+    fi
+    mkdir -p "$CONFIG_DIR"
+    {
+        printf '# VirtualBox VM: written by install.sh. Super belongs to the host here, so Alt is\n'
+        printf '# the Mod key; direct panels and mipmaps are off while the VM graphics are tested.\n'
+        printf '# Set them back to true when the picture is stable.\n'
+        sed -e 's/^mod_key = "super"/mod_key = "alt"/' \
+            -e 's/^direct_panels = true/direct_panels = false/' \
+            -e 's/^panel_mipmaps = true/panel_mipmaps = false/' \
+            "$REPO/resources/config.toml"
+    } >"$CONFIG_FILE"
+    grep -q '^mod_key = "alt"' "$CONFIG_FILE" || die "could not set mod_key in $CONFIG_FILE"
+    grep -q '^direct_panels = false' "$CONFIG_FILE" || die "could not set direct_panels in $CONFIG_FILE"
+    grep -q '^panel_mipmaps = false' "$CONFIG_FILE" || die "could not set panel_mipmaps in $CONFIG_FILE"
+    echo "    wrote $CONFIG_FILE"
 }
 
 enable_sddm() {
@@ -136,17 +205,34 @@ verify() {
     # Reads ~/.config/spacewm/config.toml and reports errors; it creates nothing.
     "$REPO/target/release/spacewm" --check-config
     echo "    spacewm is installed. Reboot, then pick \"spacewm\" in the SDDM menu."
+    if [ "$VIRT" = oracle ]; then
+        cat <<'EOF'
+    VirtualBox checklist (do these in the VM settings, with the VM powered off):
+      - Settings > Display: Graphics Controller = VMSVGA, Video Memory = 128 MB,
+        Enable 3D Acceleration = on.
+      - Settings > Input: the host key is Right Ctrl. Super is taken by the host, so
+        spacewm uses Alt as Mod in this VM.
+    After the reboot, if the picture is wrong: Ctrl+Alt+F3 for a terminal, then
+      tail -60 ~/.local/state/spacewm/spacewm.log
+    Ctrl+Alt+Backspace always leaves spacewm.
+EOF
+    fi
 }
 
 main() {
     parse_args "$@"
     check_system
     check_other_login_managers
+    detect_vm
     install_packages
     build
     install_files
+    configure_vm
     enable_sddm
     verify
 }
 
-main "$@"
+# Run main only when executed, not when this file is sourced for testing.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    main "$@"
+fi
