@@ -732,3 +732,35 @@ Pick up va Fall down.
 - Yurganda kadrlar baribir har safar chiziladi.
 
 Test: `tests/e2e/stage14_body.sh`.
+
+### Tashqarida ochiq dastur: endi OCHISHDAN OLDIN to'xtatiladi
+
+Avvalgi usulda spacewm dastur ishga tushgandan **keyin** uning so'rovni tashqaridagi
+nusxaga uzatganini payqardi. Natijada oyna bir marta Hyprland'da ochilib ulgurardi, masalan
+Firefox'da shunday bo'ldi. Endi tartib teskari:
+
+1. **Siz dasturni ochasiz** (launcher, dock yoki tugma orqali). spacewm uni ishga
+   tushirishdan **oldin** shu dastur spacewm'dan tashqarida ishlayaptimi, tekshiradi. Bunda
+   `/proc/<pid>/exe` orqali dasturning o'zi, shuningdek u avval so'rovni uzatgani
+   aniqlangan dasturlar qidiriladi.
+2. **Topilsa,** dastur **ishga tushirilmaydi** va savol chiqadi: "Close there, open here"
+   yoki "Cancel". Dastur ishga tushmagani uchun tashqarida hech narsa ochilmaydi.
+3. **Enter bosilsa,** tashqaridagi nusxa yopiladi (SIGTERM, ya'ni oynani yopish bilan bir
+   xil). spacewm uning **barcha** jarayonlari tugashini kutadi, chunki Firefox'ning content
+   jarayonlari bir lahza qolib ketishi mumkin. Faqat shundan keyin dastur spacewm ichida
+   ochiladi.
+4. **Terminallar** bundan istisno: ular ko'p nusxada ishlaydi va hech qachon
+   yopilmaydi. Terminal ekani dastur nomlari ro'yxatidan emas, `.desktop` faylidagi
+   standart `Categories=...TerminalEmulator` belgisidan aniqlanadi. Config'da tanlangan
+   terminal ham shunday hisoblanadi.
+5. **Boshqa nomli skript** (masalan, `omarchy-webapp-handler-zoom` → chromium) birinchi
+   marta baribir tashqariga ketishi mumkin. spacewm buni payqab, avvalgidek so'raydi va
+   `~/.local/state/spacewm/handoffs.json` ga "bu skript shu dasturga uzatadi" deb yozib
+   qo'yadi. Keyingi safardan boshlab u ham oldindan to'xtatiladi.
+6. **spacewm ochilganda** sessiyadagi dasturlar qayta tiklanadi. Ulardan tashqarida ochiq
+   turganlari o'tkazib yuboriladi: savol ham chiqmaydi, ochilmaydi ham.
+
+`[desktop] running_elsewhere`:
+- `"ask"` (standart): savol beradi;
+- `"move"`: so'ramasdan ko'chiradi;
+- `"leave"`: tekshirmaydi.

@@ -1,10 +1,20 @@
-//! An app you opened went to its copy running outside spacewm: offer to bring it here.
+//! An app you open from spacewm must never open its window outside spacewm.
 //!
-//! Noticed in launching.rs (the start exited fine without a window, see isolate.rs).
-//! Then, by `desktop.running_elsewhere`: ask ("Close it there and open it here?"), do it
-//! right away, or just say where it went. Moving asks the copy outside to quit (as
-//! closing its window would), waits for it to be gone, and starts the app again: now
-//! nothing is there to hand the request to, so it opens in spacewm.
+//! Single-instance apps hand a second start to the copy already running (isolate.rs);
+//! if that copy is outside spacewm, the window would open there. So before starting an
+//! app, spacewm looks for a copy of it running outside (by program, plus the programs a
+//! launcher script was seen handing off to). Found: it is NOT started. Instead, by
+//! `desktop.running_elsewhere`, spacewm asks ("Close it there and open it here?") or does
+//! that right away. Moving asks the copy outside to quit (as closing its window would),
+//! waits until every process of it is gone, and only then starts the app: with nothing
+//! to hand the request to, it opens in spacewm. Nothing ever opens outside first.
+//!
+//! Terminals (Categories=TerminalEmulator in their .desktop file, and your configured
+//! terminal) run many copies side by side: they are never stopped or closed.
+//!
+//! A start that still went outside (a script with another name than the program it
+//! runs, the first time) is noticed afterwards (launching.rs), offered the same move,
+//! and learned, so the next start is stopped before.
 
 use std::time::{Duration, Instant};
 
@@ -24,16 +34,76 @@ pub struct Moving {
     pub app: String,
     pub cmd: String,
     pub pids: Vec<u32>,
+    /// The programs it runs as: their helper processes must be gone too.
+    pub names: Vec<String>,
     pub since: Instant,
+    /// Clock ticks when it began: copies started before then are the ones outside.
+    pub before: u64,
 }
 
 impl SpaceState {
+    /// The programs a command runs as: its own, and those it was seen handing off to.
+    fn program_names(cmd: &str) -> Option<(String, Vec<String>)> {
+        let first = shell_words::split(cmd).ok()?.into_iter().next()?;
+        let program = crate::isolate::program_name(&first)?;
+        let mut names = vec![program.clone()];
+        names.extend(crate::isolate::learned(&program));
+        Some((program, names))
+    }
+
+    /// A terminal: many copies run side by side, none is ever closed for another.
+    fn is_terminal(&mut self, program: &str) -> bool {
+        let configured = shell_words::split(&self.config.general.terminal).ok();
+        let configured = configured.and_then(|w| w.into_iter().next());
+        if configured.and_then(|t| crate::isolate::program_name(&t)).as_deref() == Some(program) {
+            return true;
+        }
+        self.ensure_entries();
+        self.dock.entries.as_deref().unwrap_or(&[]).iter().any(|e| {
+            e.terminal_emulator
+                && shell_words::split(&e.exec)
+                    .ok()
+                    .and_then(|w| w.into_iter().next())
+                    .and_then(|p| crate::isolate::program_name(&p))
+                    .as_deref()
+                    == Some(program)
+        })
+    }
+
+    /// Copies of what `cmd` runs that are open outside spacewm (none for terminals).
+    pub fn outside_copies(&mut self, cmd: &str) -> Vec<u32> {
+        let Some((program, names)) = Self::program_names(cmd) else { return Vec::new() };
+        if self.is_terminal(&program) {
+            return Vec::new();
+        }
+        crate::isolate::running_elsewhere(&names, crate::isolate::now_ticks())
+    }
+
+    /// Before starting `cmd`: if it is open outside spacewm, don't start it (it would open
+    /// there); ask to move it instead. Returns true when the start was held back.
+    pub fn hold_back_launch(&mut self, cmd: &str, app: &str) -> bool {
+        if self.config.desktop.running_elsewhere == RunningElsewhere::Leave {
+            return false;
+        }
+        let pids = self.outside_copies(cmd);
+        if pids.is_empty() {
+            return false;
+        }
+        tracing::info!(app, ?pids, "already open outside spacewm: not started, it would open there");
+        if self.confirm.is_some() || self.desktop.moving.is_some() {
+            self.show_info(format!("{app} is open outside spacewm: answer the question first."));
+            return true;
+        }
+        self.offer_move(app.to_string(), cmd.to_string(), pids, true);
+        true
+    }
+
     /// `p` exited fine without a window: did it hand the request to a copy outside?
     pub fn check_handed_elsewhere(&mut self, p: &Pending) {
         // The programs it ran, and (if the start was too quick to see) the one it names.
         let mut names: Vec<String> = p.seen.iter().map(|(_, n)| n.clone()).collect();
         let first = shell_words::split(&p.cmd).ok().and_then(|w| w.into_iter().next());
-        names.extend(first.and_then(|f| crate::isolate::program_name(&f)));
+        names.extend(first.as_deref().and_then(crate::isolate::program_name));
         names.sort();
         names.dedup();
         let pids = crate::isolate::running_elsewhere(&names, p.start_ticks);
@@ -41,10 +111,28 @@ impl SpaceState {
             return;
         }
         tracing::info!(app = p.name, ?pids, ?names, "the app went to its copy outside spacewm");
-        self.offer_move(p.name.clone(), p.cmd.clone(), pids);
+        // Learn which programs this start went to, so next time it is held back before.
+        if let Some(program) = first.as_deref().and_then(crate::isolate::program_name) {
+            let outside: Vec<String> = names
+                .iter()
+                .filter(|n| {
+                    !crate::isolate::running_elsewhere(std::slice::from_ref(*n), p.start_ticks)
+                        .is_empty()
+                })
+                .cloned()
+                .collect();
+            crate::isolate::learn(&program, &outside);
+        }
+        self.offer_move(p.name.clone(), p.cmd.clone(), pids, false);
     }
 
-    fn offer_move(&mut self, app: String, cmd: String, pids: Vec<u32>) {
+    /// `before`: asked before starting it (nothing opened outside); else afterwards.
+    fn offer_move(&mut self, app: String, cmd: String, pids: Vec<u32>, before: bool) {
+        let first_line = if before {
+            "It runs only once: started here, its window would open there.".to_string()
+        } else {
+            "It opened its window there, not here.".to_string()
+        };
         match self.config.desktop.running_elsewhere {
             RunningElsewhere::Move => self.move_here(app, cmd, pids),
             RunningElsewhere::Leave => {
@@ -55,12 +143,12 @@ impl SpaceState {
             RunningElsewhere::Ask => self.open_confirm(
                 format!("{app} is already open outside spacewm"),
                 vec![
-                    "It opened its window there, not here.".into(),
+                    first_line,
                     format!("Close {app} there and open it here?"),
                     "(It closes as if you closed its window. Logins and tabs stay.)".into(),
                 ],
                 "Close there, open here".into(),
-                "Leave it".into(),
+                if before { "Cancel".into() } else { "Leave it".into() },
                 ConfirmAction::MoveHere { app, cmd, pids },
             ),
         }
@@ -71,6 +159,8 @@ impl SpaceState {
         if self.desktop.moving.is_some() {
             return; // one at a time
         }
+        let names = Self::program_names(&cmd).map(|(_, n)| n).unwrap_or_default();
+        let before = crate::isolate::now_ticks();
         for &pid in &pids {
             crate::isolate::ask_to_quit(pid);
         }
@@ -78,10 +168,13 @@ impl SpaceState {
             format!("Closing {app} outside spacewm, then opening it here ..."),
             WAIT_AT_MOST.as_secs(),
         );
-        self.desktop.moving = Some(Moving { app, cmd, pids, since: Instant::now() });
+        self.desktop.moving = Some(Moving { app, cmd, pids, names, since: Instant::now(), before });
         let _ = self.loop_handle.insert_source(Timer::from_duration(CHECK_EVERY), |_, _, state| {
             let Some(m) = state.desktop.moving.clone() else { return TimeoutAction::Drop };
-            if m.pids.iter().any(|&pid| crate::isolate::alive(pid)) {
+            // Gone means all of it: a browser's helper processes linger a moment.
+            let left = m.pids.iter().any(|&pid| crate::isolate::alive(pid))
+                || !crate::isolate::running_elsewhere(&m.names, m.before).is_empty();
+            if left {
                 if m.since.elapsed() < WAIT_AT_MOST {
                     return TimeoutAction::ToDuration(CHECK_EVERY);
                 }

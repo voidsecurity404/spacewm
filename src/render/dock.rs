@@ -45,7 +45,7 @@ type Drawn = (Vec<(String, bool)>, Option<usize>, i32);
 
 #[derive(Default)]
 pub struct Dock {
-    entries: Option<Vec<DesktopEntry>>,
+    pub entries: Option<Vec<DesktopEntry>>,
     entries_loaded: Option<Instant>,
     icons: HashMap<String, Option<Vec<u8>>>,
     pub items: Vec<DockItem>,
@@ -468,6 +468,7 @@ mod tests {
             terminal: false,
             icon: Some(id.into()),
             wm_class: wm.map(Into::into),
+            terminal_emulator: false,
         }
     }
 

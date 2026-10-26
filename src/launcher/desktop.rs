@@ -22,6 +22,8 @@ pub struct DesktopEntry {
     pub icon: Option<String>,
     /// The app_id / X11 class its windows have, when it differs from the file name.
     pub wm_class: Option<String>,
+    /// Categories has TerminalEmulator: an app you run many copies of (foot, kitty).
+    pub terminal_emulator: bool,
 }
 
 /// Parse one file's text. None for entries that should not be listed.
@@ -30,6 +32,7 @@ pub fn parse(id: &str, text: &str) -> Option<DesktopEntry> {
     let (mut name, mut exec, mut terminal) = (None, None, false);
     let (mut icon, mut wm_class) = (None, None);
     let (mut kind, mut hidden, mut try_exec) = (None, false, None);
+    let mut terminal_emulator = false;
     for line in text.lines() {
         let line = line.trim();
         if line.starts_with('[') {
@@ -52,6 +55,7 @@ pub fn parse(id: &str, text: &str) -> Option<DesktopEntry> {
             "TryExec" => try_exec = Some(value.to_string()),
             "Icon" => icon = Some(value.to_string()),
             "StartupWMClass" => wm_class = Some(value.to_string()),
+            "Categories" => terminal_emulator = value.split(';').any(|c| c == "TerminalEmulator"),
             _ => {}
         }
     }
@@ -67,7 +71,15 @@ pub fn parse(id: &str, text: &str) -> Option<DesktopEntry> {
     if exec.trim().is_empty() {
         return None;
     }
-    Some(DesktopEntry { id: id.to_string(), name: name?, exec, terminal, icon, wm_class })
+    Some(DesktopEntry {
+        id: id.to_string(),
+        name: name?,
+        exec,
+        terminal,
+        icon,
+        wm_class,
+        terminal_emulator,
+    })
 }
 
 /// Values may contain \s \n \t \r \\ escapes.

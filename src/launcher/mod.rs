@@ -221,6 +221,7 @@ mod tests {
             terminal: false,
             icon: None,
             wm_class: None,
+            terminal_emulator: false,
         }
     }
 

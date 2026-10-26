@@ -81,8 +81,14 @@ impl SpaceState {
                 tracing::info!(exe, "not reopened: no longer installed");
                 continue;
             }
+            // Open outside spacewm right now: leave it there (no questions at startup).
+            let cmd = shell_words::quote(&exe).into_owned();
+            if !self.outside_copies(&cmd).is_empty() {
+                tracing::info!(exe, "not reopened: open outside spacewm");
+                continue;
+            }
             // Quote it: an odd path is still one argument.
-            if let Err(e) = self.launch(&shell_words::quote(&exe)) {
+            if let Err(e) = self.launch(&cmd) {
                 tracing::warn!("reopening {exe}: {e}");
             }
         }

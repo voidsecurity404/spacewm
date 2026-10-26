@@ -183,6 +183,50 @@ pub fn ask_to_quit(pid: u32) {
     tracing::info!(pid, ok = r == 0, "asked an app outside spacewm to quit");
 }
 
+/// Launchers learned to hand off to another program (a script that runs chromium,
+/// "steam" that runs ".../ubuntu12_32/steam"...): program -> the programs found running
+/// outside when its start went there. Kept in $XDG_STATE_HOME/spacewm/handoffs.json, so
+/// the next start is stopped before it can open anything outside.
+fn handoffs_file() -> Option<PathBuf> {
+    crate::logging::state_dir().ok().map(|d| d.join("handoffs.json"))
+}
+
+fn read_handoffs(path: &std::path::Path) -> HashMap<String, Vec<String>> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default()
+}
+
+/// The programs `program` was seen handing its start to.
+pub fn learned(program: &str) -> Vec<String> {
+    handoffs_file()
+        .map(|p| read_handoffs(&p))
+        .and_then(|mut m| m.remove(program))
+        .unwrap_or_default()
+}
+
+/// Remember that `program` hands its start to `to`.
+pub fn learn(program: &str, to: &[String]) {
+    let Some(path) = handoffs_file() else { return };
+    let mut map = read_handoffs(&path);
+    let list = map.entry(program.to_string()).or_default();
+    for name in to {
+        if name != program && !list.contains(name) && !NEVER.contains(&name.as_str()) {
+            list.push(name.clone());
+        }
+    }
+    if let (Some(dir), Ok(text)) = (path.parent(), serde_json::to_string_pretty(&map)) {
+        let _ = std::fs::create_dir_all(dir);
+        // Write a temp file and rename it over: never a half-written file.
+        let tmp = path.with_extension("json.tmp");
+        if std::fs::write(&tmp, text).is_ok() {
+            let _ = std::fs::rename(&tmp, &path);
+        }
+    }
+    tracing::info!(program, ?to, "learned: this program hands its start to these");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

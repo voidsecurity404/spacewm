@@ -63,30 +63,50 @@ start_outside() {
     sleep 0.3
 }
 cfg() {
-    printf '[desktop]\nrunning_elsewhere = "%s"\n[[keybinds.spawn]]\nkey = "Mod+B"\ncommand = "%s"\n' \
-        "$1" "$F/spacefake-launcher" >"$OUT/iso-config-$$.toml"
+    printf '[desktop]\nrunning_elsewhere = "%s"\n[[keybinds.spawn]]\nkey = "Mod+B"\ncommand = "%s"\n[[keybinds.spawn]]\nkey = "Mod+N"\ncommand = "%s"\n' \
+        "$1" "$F/spacefake-launcher" "$F/app/spacefake" >"$OUT/iso-config-$$.toml"
 }
 
 cfg ask
 space_start --render 3d --log-level info --config "$OUT/iso-config-$$.toml"
 start_outside
 OUTSIDE=$(cat "$F/lock")
+
+# ---- Opening the very program that is open outside: it is never even started (it would
+# open its window there); the question comes first.
+kc input key Super+n
+logged "not started, it would open there" || fail "an app open outside was started anyway"
+logged "question shown" || fail "no question before starting it"
+grep -q "spawned.*app/spacefake\"" "$OUT/spacewm.log" && fail "it was started although open outside"
+[ "$(counta)" = 1 ] || fail "something opened on the other desktop"
+kc input key Escape
+logged "question answered yes=false" || fail "Escape did not cancel"
+sleep 0.3
+grep -q "spawned.*app/spacefake\"" "$OUT/spacewm.log" && fail "Cancel started it"
+pass "an app open outside is held back before it starts: nothing opens there; Esc cancels"
+
+# ---- A launcher script with another name: the first start goes outside (noticed,
+# asked, learned) ...
 kc input key Super+b
 logged "the app went to its copy outside spacewm" || fail "the hand-off to the copy outside was not noticed"
+logged "learned: this program hands its start to these" || fail "the hand-off was not learned"
 logged "question shown" || fail "no question shown"
 grep -q "pids=\[$OUTSIDE\]" "$OUT/spacewm.log" || fail "the wrong process was found: $(grep 'went to its copy' "$OUT/spacewm.log")"
 shot s8-iso-question >/dev/null
 kc input key Escape
-logged "question answered yes=false" || fail "Escape did not answer no"
+for _ in $(seq 30); do [ "$(grep -c 'question answered yes=false' "$OUT/spacewm.log")" -ge 2 ] && break; sleep 0.1; done
 sleep 0.5
 kill -0 "$OUTSIDE" 2>/dev/null || fail "'Leave it' closed the copy outside"
 [ "$(count)" = 0 ] || fail "'Leave it' opened a window here"
-pass "an app handing its start to a copy outside is noticed and asked about; Esc leaves it"
+pass "a launcher script handing its start outside is noticed, asked about and learned"
 
+# ... and the next start is held back before it runs.
+SPAWNS=$(grep -c "spawned.*spacefake-launcher" "$OUT/spacewm.log")
 kc input key Super+b
-logged "question shown.*" 60
-for _ in $(seq 60); do [ "$(grep -c 'question shown' "$OUT/spacewm.log")" -ge 2 ] && break; sleep 0.1; done
-[ "$(grep -c 'question shown' "$OUT/spacewm.log")" -ge 2 ] || fail "no second question"
+for _ in $(seq 60); do [ "$(grep -c 'question shown' "$OUT/spacewm.log")" -ge 3 ] && break; sleep 0.1; done
+[ "$(grep -c 'question shown' "$OUT/spacewm.log")" -ge 3 ] || fail "no third question"
+[ "$(grep -c "spawned.*spacefake-launcher" "$OUT/spacewm.log")" = "$SPAWNS" ] || fail "the learned launcher was started again"
+pass "the learned launcher is held back before it starts"
 kc input key Return
 logged "asked an app outside spacewm to quit pid=$OUTSIDE ok=true" || fail "the copy outside was not asked to quit"
 logged "closed outside spacewm; opening it here" 100 || fail "did not open it here after it closed"

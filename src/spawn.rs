@@ -162,7 +162,12 @@ impl SpaceState {
     }
 
     /// `launch` with the name the user knows the app by ("Visual Studio Code").
+    /// If the app is open outside spacewm it is not started (its window would open there):
+    /// a question offers to move it here instead, and Ok(0) is returned.
     pub fn launch_named(&mut self, cmd: &str, name: &str) -> Result<u32, String> {
+        if self.hold_back_launch(cmd, name) {
+            return Ok(0);
+        }
         match self.launch_untracked(cmd) {
             Ok(pid) => {
                 self.launch_started(pid, name.to_string(), cmd.to_string());
