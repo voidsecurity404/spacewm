@@ -5,10 +5,12 @@
 
 pub mod atlas;
 pub mod camera;
+pub mod character;
 pub mod confirm;
 pub mod crosshair;
 pub mod cursor;
 pub mod dock;
+pub mod emotes;
 pub mod frustum;
 pub mod gl;
 pub mod help;
@@ -136,6 +138,8 @@ pub struct OverlayInputs<'a> {
     pub switcher: Option<(&'a crate::inventory::Image, (i32, i32))>,
     /// A yes/no question (centered) and its top-left corner, with a cursor.
     pub confirm: Option<(&'a crate::inventory::Image, (i32, i32))>,
+    /// The emote menu (centered) and its top-left corner, with a cursor.
+    pub emotes: Option<(&'a crate::inventory::Image, (i32, i32))>,
     /// The settings box (centered), with its own cursor.
     pub settings: Option<&'a crate::inventory::Image>,
     /// The window menu and its top-left corner (output-relative).
@@ -195,6 +199,7 @@ where
         || inputs.help.is_some()
         || inputs.switcher.is_some()
         || inputs.confirm.is_some()
+        || inputs.emotes.is_some()
         || inputs.inventory.is_some();
     if let Some(((buffer, _), at)) = inputs.dock.filter(|_| !boxed_open) {
         elements.extend(boxed(renderer, buffer, at));
@@ -203,7 +208,7 @@ where
         let x = (geo.size.w - size.0) / 2;
         elements.extend(boxed(renderer, buffer, (x, geo.size.h / 2 + 16)));
     }
-    if let Some(((buffer, _), at)) = inputs.confirm.or(inputs.switcher) {
+    if let Some(((buffer, _), at)) = inputs.confirm.or(inputs.emotes).or(inputs.switcher) {
         elements.extend(pointer_elements(
             renderer,
             inputs.cursor_status,
@@ -329,6 +334,7 @@ where
         || inputs.settings.is_some()
         || inputs.switcher.is_some()
         || inputs.confirm.is_some()
+        || inputs.emotes.is_some()
         || inputs.dock_cursor;
     if !covered || !three_d {
         elements.extend(mode_overlay(renderer, inputs, Some(geo)));
@@ -436,6 +442,12 @@ macro_rules! overlay_inputs {
                     $crate::render::confirm::box_origin(c.lines.len(), (geo.size.w, geo.size.h));
                 c.image.as_ref().map(|i| (i, at))
             }),
+            emotes: $state.emotes.as_ref().and_then(|m| {
+                let geo =
+                    $state.space.outputs().next().and_then(|o| $state.space.output_geometry(o))?;
+                let at = $crate::render::emotes::box_origin((geo.size.w, geo.size.h));
+                m.image.as_ref().map(|i| (i, at))
+            }),
             dock: $state.dock.image.as_ref().map(|i| (i, $state.dock.origin)),
             dock_tooltip: $state.dock.tooltip.as_ref().map(|t| (t, $state.dock.tooltip_at)),
             dock_cursor: $state.dock.cursor && $state.dock.cursor_moved,
@@ -474,6 +486,8 @@ macro_rules! scene_inputs {
                     $state.config.world.shadows,
                 ),
             }),
+            body: $state.body.model().zip($state.body.draw.as_ref()),
+            view_from: $state.body.view,
         }
     };
 }

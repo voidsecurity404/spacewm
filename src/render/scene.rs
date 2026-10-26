@@ -35,6 +35,7 @@ use smithay::{
 
 use super::{
     camera::Camera,
+    character::{CharacterDraw, CharacterRenderer},
     gl::{build_program, gl_check, Attrib, Gl, Mesh, Program, Vertex},
     map::{MapLook, MapRenderer},
     voxels::{VoxelFrame, VoxelRenderer, UPLOADS_PER_FRAME},
@@ -81,6 +82,12 @@ const SKY: ShaderSource = ShaderSource {
     name: "sky",
     vert: include_str!("shaders/sky.vert"),
     frag: include_str!("shaders/sky.frag"),
+};
+
+const CHARACTER: ShaderSource = ShaderSource {
+    name: "character",
+    vert: include_str!("shaders/character.vert"),
+    frag: include_str!("shaders/character.frag"),
 };
 
 const PANEL: ShaderSource = ShaderSource {
@@ -138,6 +145,9 @@ pub struct SceneRenderer {
     map_program: Program,
     map_shadow: Program,
     sky: Program,
+    character_program: Program,
+    /// Your body on the GPU, once a third-person view showed it.
+    character: Option<CharacterRenderer>,
     /// The map on the GPU, while you are on one.
     map: Option<MapRenderer>,
     quad: Mesh,
@@ -183,15 +193,17 @@ impl SceneRenderer {
             let map_program = load_program(gl, &MAP, shader_dir.as_ref())?;
             let map_shadow = load_program(gl, &MAP_SHADOW, shader_dir.as_ref())?;
             let sky = load_program(gl, &SKY, shader_dir.as_ref())?;
+            let character = load_program(gl, &CHARACTER, shader_dir.as_ref())?;
             let voxels = VoxelRenderer::new(gl)?;
             let quad = quad_mesh(gl)?;
             // How many samples the driver supports for MSAA renderbuffers.
             let max_samples = unsafe { gl.get_parameter_i32(glow::MAX_SAMPLES) };
-            let maps = (map_program, map_shadow, sky);
+            let maps = (map_program, map_shadow, sky, character);
             Ok((basic, panel, voxel, voxels, quad, max_samples.min(4), maps))
         });
-        let (basic, panel, voxel, voxels, quad, samples, (map_program, map_shadow, sky)) =
+        let (basic, panel, voxel, voxels, quad, samples, maps) =
             gl_result.map_err(|e| SpaceError::Render(format!("GL context: {e}")))??;
+        let (map_program, map_shadow, sky, character_program) = maps;
         let samples = if samples >= 2 { samples } else { 0 };
         tracing::info!(msaa = samples, "3D scene renderer ready");
         Ok(Self {
@@ -202,6 +214,8 @@ impl SceneRenderer {
             map_program,
             map_shadow,
             sky,
+            character_program,
+            character: None,
             map: None,
             quad,
             targets: None,
@@ -223,6 +237,7 @@ impl SceneRenderer {
             (&MAP, &mut self.map_program),
             (&MAP_SHADOW, &mut self.map_shadow),
             (&SKY, &mut self.sky),
+            (&CHARACTER, &mut self.character_program),
         ];
         for (src, slot) in slots {
             match renderer.with_context(|gl| load_program(gl, src, Some(&dir))) {
@@ -379,6 +394,30 @@ impl SceneRenderer {
         true
     }
 
+    /// Have the GPU hold the character model once it is shown. Returns true when it
+    /// was just uploaded.
+    pub fn sync_character(
+        &mut self,
+        renderer: &mut GlowRenderer,
+        model: Option<&crate::world::character::CharacterModel>,
+    ) -> bool {
+        let Some(model) = model.filter(|_| self.character.is_none()) else { return false };
+        match renderer.with_context(|gl| CharacterRenderer::new(gl, model)) {
+            Ok(Ok(c)) => {
+                self.character = Some(c);
+                true
+            }
+            Ok(Err(e)) => {
+                tracing::error!("character upload failed: {e}");
+                false
+            }
+            Err(e) => {
+                tracing::error!("character upload: {e}");
+                false
+            }
+        }
+    }
+
     /// Draw the scene into the offscreen texture. `look`: on the map, its light.
     #[allow(clippy::too_many_arguments)]
     pub fn render(
@@ -390,6 +429,7 @@ impl SceneRenderer {
         voxel_frame: &VoxelFrame,
         (fog_start, fog_end): (f32, f32),
         look: Option<MapLook>,
+        body: Option<&CharacterDraw>,
     ) -> Result<(), SpaceError> {
         self.ensure_targets(renderer, size)?;
         let Some(targets) = self.targets.as_mut() else {
@@ -402,6 +442,10 @@ impl SceneRenderer {
         let map_program = &mut self.map_program;
         let map_shadow = &mut self.map_shadow;
         let sky_program = &mut self.sky;
+        let character_program = &mut self.character_program;
+        let character = self.character.as_ref().zip(body);
+        // The body is lit like the map (or like a plain day in the block world).
+        let body_look = look.unwrap_or_else(|| MapLook::for_time("day", false));
         // The map is drawn only once it is on the GPU, with its light.
         let map = self.map.as_mut().zip(look);
         let quad = &self.quad;
@@ -461,6 +505,10 @@ impl SceneRenderer {
                 // cursor — each blended layer over everything behind it.
                 if let Some((m, look)) = &map {
                     m.draw(gl, map_program, &view, &proj, camera.position, fog, look);
+                }
+                if let Some((c, draw)) = character {
+                    let pos = camera.position;
+                    c.draw(gl, character_program, draw, &view, &proj, pos, fog, &body_look);
                 }
                 voxels.draw_opaque(
                     gl,
@@ -607,6 +655,10 @@ impl SceneRenderer {
             self.map_program.destroy(gl);
             self.map_shadow.destroy(gl);
             self.sky.destroy(gl);
+            self.character_program.destroy(gl);
+            if let Some(mut c) = self.character.take() {
+                c.destroy(gl);
+            }
             if let Some(mut m) = self.map.take() {
                 m.destroy(gl);
             }

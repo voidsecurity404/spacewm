@@ -86,6 +86,10 @@ focus_zoom = true
 # high and it looks down at you, low and it looks up. Mod+PageUp / Mod+PageDown tilt
 # any window by hand; Mod+Shift+R makes it upright again.
 auto_tilt = true
+# A window you open comes in your hand, a little away from you (as if you pressed
+# Mod+G): look where it should go and click (or Mod+G) to put it down; the wheel moves
+# it nearer or farther. false: it opens at reading distance, ready to type in.
+carry_new_windows = true
 
 [dock]
 # Favorite apps and open apps along the bottom while walking. Hold Mod (Alt when

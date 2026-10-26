@@ -187,6 +187,8 @@ pub struct SpaceState {
     pub switcher: Option<crate::render::switcher::Switcher>,
     /// A yes/no question in the middle (an app open outside spacewm), while open.
     pub confirm: Option<crate::render::confirm::Confirm>,
+    /// The emote menu (F6), while open.
+    pub emotes: Option<crate::render::emotes::EmoteMenu>,
     /// Windows by last use, most recent first (for the switcher).
     pub mru: Vec<crate::world::panel::PanelId>,
     /// The settings box (Mod+comma), while open.
@@ -237,6 +239,8 @@ pub struct SpaceState {
 
     /// The block world and the mesher.
     pub voxels: crate::world::voxels::VoxelWorld,
+    /// Your body: the F5 views and the character with its animations.
+    pub body: crate::world::body::Body,
     /// The map you walk in instead of the block world (world.map = "dust").
     pub map: Option<std::rc::Rc<crate::world::map::Map>>,
     /// Counts map changes, so the renderer knows to upload the new one.
@@ -428,6 +432,7 @@ impl SpaceState {
             settings: None,
             switcher: None,
             confirm: None,
+            emotes: None,
             mru: Vec::new(),
             dock: Default::default(),
             seated: Default::default(),
@@ -465,6 +470,7 @@ impl SpaceState {
             voxels,
             map: None,
             map_generation: 0,
+            body: Default::default(),
             player,
             target_block: None,
             grab: None,
@@ -506,7 +512,8 @@ impl SpaceState {
                 || self.world.panels().iter().any(|p| p.attention_until.is_some_and(|t| t > now))
                 || self.focus_view.is_some_and(|f| f.moving())
                 || self.panels_gliding()
-                || self.resizing())
+                || self.resizing()
+                || self.body.busy())
     }
 
     /// Ask the backend for a new frame (something on screen changed).
@@ -678,7 +685,34 @@ impl SpaceState {
             panel.pixels_per_unit = saved.pixels_per_unit;
             panel.visible = !saved.hidden;
             self.view.dirty = true;
+        } else if requested
+            && self.config.panels.carry_new_windows
+            && !self.cli.no_carry_new_windows
+        {
+            self.carry_new_window(panel_id);
         }
+    }
+
+    /// A window you just opened comes in your hand (like Mod+G), a bit farther away
+    /// than reading distance so you see it whole and where it goes; click or Mod+G
+    /// puts it down, the wheel moves it nearer or farther.
+    fn carry_new_window(&mut self, panel_id: crate::world::panel::PanelId) {
+        if self.render_mode != crate::cli::RenderMode::Scene3D
+            || self.fullscreen.is_some()
+            || self.grab.is_some()
+        {
+            return;
+        }
+        let Some(size) = self.world.panels().iter().find(|p| p.id == panel_id).map(|p| p.size_px)
+        else {
+            return;
+        };
+        let distance = (self.spawn_distance(size) * CARRY_DISTANCE).clamp(1.2, 3.0);
+        crate::input::world_ops::grab_panel(self, panel_id);
+        if let Some(g) = self.grab.as_mut() {
+            g.distance = distance;
+        }
+        tracing::info!(panel = panel_id, distance, "new window in your hand");
     }
 
     pub fn window_by_id(&self, id: u64) -> Option<Window> {
@@ -819,6 +853,9 @@ pub fn window_names(window: &Window) -> (Option<String>, Option<String>) {
 
 /// What gets saved about a panel (nothing for windows without an app_id: we couldn't
 /// match them again anyway).
+/// A new window is carried this many times farther than reading distance.
+const CARRY_DISTANCE: f32 = 2.0;
+
 pub fn saved_panel(
     p: &crate::world::panel::Panel,
     world: &str,

@@ -71,6 +71,10 @@ pub enum Action {
     ResetPanelRotation,
     TiltDown,
     TiltUp,
+    /// F5 while walking: eyes / behind / in front.
+    CycleView,
+    /// F6 while walking: the emote menu.
+    Emotes,
     ScalePanelUp,
     ScalePanelDown,
     TogglePanelHidden,
@@ -167,6 +171,8 @@ pub fn route_key(
             let plain = !(mods.mod_ || mods.ctrl || mods.alt || mods.super_);
             match sym.map(|s| s.raw()) {
                 Some(keysyms::KEY_Escape) if plain => return KeyRoute::Bind(Action::Settings),
+                Some(keysyms::KEY_F5) if plain => return KeyRoute::Bind(Action::CycleView),
+                Some(keysyms::KEY_F6) if plain => return KeyRoute::Bind(Action::Emotes),
                 Some(keysyms::KEY_e | keysyms::KEY_E) if plain => {
                     return KeyRoute::Bind(Action::Inventory)
                 }
@@ -253,6 +259,8 @@ enum KeyOutcome {
     Switcher(Keysym),
     /// A key while a yes/no question is open.
     Confirm(Keysym),
+    /// A key while the emote menu is open.
+    Emotes(Keysym),
 }
 
 pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState, time: InputTime) {
@@ -320,6 +328,12 @@ pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState,
             state.input.suppressed_keys.insert(keycode);
             let sym = if mod_escape { Keysym::Escape } else { sym.unwrap_or(Keysym::NoSymbol) };
             return FilterResult::Intercept(Some(KeyOutcome::Confirm(sym)));
+        }
+        // The emote menu takes the keys while open.
+        if state.emotes.is_some() {
+            state.input.suppressed_keys.insert(keycode);
+            let sym = if mod_escape { Keysym::Escape } else { sym.unwrap_or(Keysym::NoSymbol) };
+            return FilterResult::Intercept(Some(KeyOutcome::Emotes(sym)));
         }
         // The window switcher takes the keys while open.
         if state.switcher.is_some() {
@@ -428,6 +442,7 @@ pub fn handle_key(state: &mut SpaceState, keycode: Keycode, key_state: KeyState,
         Some(Some(KeyOutcome::Settings(sym))) => state.settings_key(sym),
         Some(Some(KeyOutcome::Switcher(sym))) => state.switcher_key(sym),
         Some(Some(KeyOutcome::Confirm(sym))) => state.confirm_key(sym),
+        Some(Some(KeyOutcome::Emotes(sym))) => state.emotes_key(sym),
         _ => {}
     }
 }
@@ -456,6 +471,8 @@ pub fn run_action(state: &mut SpaceState, action: Action) {
         Action::Grab => world_ops::toggle_grab(state),
         Action::RotatePanel => world_ops::rotate_target(state, false),
         Action::ResetPanelRotation => world_ops::rotate_target(state, true),
+        Action::CycleView => state.cycle_view(),
+        Action::Emotes => state.toggle_emotes(),
         Action::TiltDown => world_ops::tilt_target(state, true),
         Action::TiltUp => world_ops::tilt_target(state, false),
         Action::ScalePanelUp => world_ops::scale_target(state, true),
@@ -555,6 +572,7 @@ pub fn before_frame(state: &mut SpaceState) {
     state.refresh_settings();
     state.refresh_switcher();
     state.refresh_confirm();
+    state.refresh_emotes();
     state.refresh_dock();
     if state.render_mode != RenderMode::Scene3D {
         return;
@@ -603,6 +621,7 @@ pub fn before_frame(state: &mut SpaceState) {
         state.view.dirty = true;
     }
     state.focus_view_apply();
+    state.update_body(dt);
     state.apply_panel_glides();
     world_ops::update_grab(state);
     state.update_drag_resize();
@@ -650,6 +669,10 @@ pub fn handle_pointer_motion_absolute(
     state.input_activity();
     if state.confirm.is_some() {
         state.confirm_pointer(pos);
+        return;
+    }
+    if state.emotes.is_some() {
+        state.emotes_pointer(pos);
         return;
     }
     if state.switcher.is_some() {
@@ -708,6 +731,10 @@ pub fn handle_pointer_motion(
     state.input_activity();
     if state.confirm.is_some() {
         state.confirm_pointer(state.pointer_location + delta);
+        return;
+    }
+    if state.emotes.is_some() {
+        state.emotes_pointer(state.pointer_location + delta);
         return;
     }
     if state.switcher.is_some() {
@@ -846,6 +873,14 @@ pub fn handle_pointer_button(
         if button_state == ButtonState::Pressed {
             state.input.suppressed_buttons.insert(button);
             state.confirm_click();
+        }
+        return;
+    }
+    // The emote menu: a click plays an emote (or closes the menu).
+    if state.emotes.is_some() {
+        if button_state == ButtonState::Pressed {
+            state.input.suppressed_buttons.insert(button);
+            state.emotes_click();
         }
         return;
     }

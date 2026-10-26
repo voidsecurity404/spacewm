@@ -67,6 +67,11 @@ pub struct Cli {
     #[arg(long)]
     pub world_seed: Option<u64>,
 
+    /// New windows open ready to type in, never carried in the hand (whatever
+    /// panels.carry_new_windows says). For scripted tests.
+    #[arg(long, hide = true)]
+    pub no_carry_new_windows: bool,
+
     /// The world to start in: dust (the desert town) or voxel (the block world).
     /// Overrides `world.map` from the config at startup.
     #[arg(long, value_enum)]

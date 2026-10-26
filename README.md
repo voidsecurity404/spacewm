@@ -44,6 +44,8 @@ Mod is Super on a real session and Alt when nested (`general.mod_key`).
 | Mod+Tab, Mod+\` (hold Mod) | window list, most recent first; let go of Mod to go there |
 | Mod+G / Mod+R / Mod+= / Mod+- | carry / rotate / grow / shrink a panel |
 | Mod+PageDown / Mod+PageUp | tilt a panel to look down / up (Mod+Shift+R: upright) |
+| F5 / F6 (walking) | view: eyes, behind, in front / emote menu (9 animations) |
+| Esc (walking) | settings: world, time of day, shadows ... |
 | Mod+Ctrl+= / Mod+Ctrl+- | resize the window itself |
 | Mod+Return, Mod+Space | terminal, launcher |
 | Mod+Shift+Q, Mod+Shift+E | close window, quit |

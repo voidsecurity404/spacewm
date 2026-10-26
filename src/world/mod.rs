@@ -5,6 +5,8 @@
 //! frame callbacks; the two simply describe the same windows in different ways.
 
 pub mod block;
+pub mod body;
+pub mod character;
 pub mod chunk;
 pub mod layout;
 pub mod map;

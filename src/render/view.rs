@@ -126,6 +126,11 @@ pub struct SceneInputs<'a> {
     pub outline: Option<IVec3>,
     /// The map, when you walk in one instead of the block world.
     pub map: Option<MapInput<'a>>,
+    /// Your body (third-person views): its model and this frame's pose.
+    pub body:
+        Option<(&'a crate::world::character::CharacterModel, &'a super::character::CharacterDraw)>,
+    /// Where the picture is taken from instead of your eyes: position, yaw, pitch.
+    pub view_from: Option<(glam::Vec3, f32, f32)>,
 }
 
 /// The map to draw and how it is lit.
@@ -232,7 +237,8 @@ impl View3D {
         size: Size<i32, Physical>,
         inputs: SceneInputs<'_>,
     ) -> Prepared {
-        let SceneInputs { world, highlight, cursor, chunk_meshes, outline, map } = inputs;
+        let SceneInputs { world, highlight, cursor, chunk_meshes, outline, map, body, view_from } =
+            inputs;
         if size != self.last_size {
             self.camera.set_aspect(size.w, size.h);
             self.last_size = size;
@@ -350,18 +356,29 @@ impl View3D {
         }
 
         let mut scene_rendered = false;
+        if scene.sync_character(renderer, body.map(|(m, _)| m)) {
+            self.dirty = true;
+        }
         if self.dirty {
+            // The picture's camera: your eyes, or behind / in front of you (F5).
+            let mut camera = self.camera;
+            if let Some((pos, yaw, pitch)) = view_from {
+                camera.position = pos;
+                camera.yaw = yaw;
+                camera.pitch = pitch;
+            }
             let mut draws =
-                panel_draws(world, textures, &self.camera, highlight, self.settings.dim_unfocused);
+                panel_draws(world, textures, &camera, highlight, self.settings.dim_unfocused);
             draws.extend(cursor_draw);
             let settings = self.settings;
             let voxel_frame = match look {
                 Some(_) => Default::default(),
-                None => scene.voxels.visible(&self.camera, settings.render_distance, outline),
+                None => scene.voxels.visible(&camera, settings.render_distance, outline),
             };
             let _span = tracing::trace_span!("scene_render").entered();
             let fog = if look.is_some() { settings.map_fog } else { settings.fog };
-            match scene.render(renderer, &self.camera, size, &draws, &voxel_frame, fog, look) {
+            let body = body.map(|(_, d)| d);
+            match scene.render(renderer, &camera, size, &draws, &voxel_frame, fog, look, body) {
                 Ok(()) => scene_rendered = true,
                 Err(err) => tracing::error!("scene render failed: {err}"),
             }

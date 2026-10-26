@@ -670,3 +670,65 @@ Test: `tests/e2e/stage13_dust.sh` quyidagilarni tekshiradi:
 - olamni jonli almashtirish.
 
 Boshqa testlar voksel olamga moslab yozilgani uchun `--map voxel` bilan ishga tushadi.
+
+### Yangi oyna qo'lingizda ochiladi
+
+Tugma, launcher yoki dock orqali ochilgan yangi oyna Alt+G bosilgandek darhol qo'lingizga
+beriladi. U o'qish masofasidan ikki baravar uzoqroqda, 1.2–3 m oralig'ida turadi.
+Qayerga qo'ymoqchi bo'lsangiz, o'sha joyga qarab chap klik qiling yoki Alt+G bosing.
+G'ildirak oynani yaqinlashtiradi yoki uzoqlashtiradi. Devorga qaratib qo'ysangiz, oyna
+devorga osiladi.
+
+Sozlash:
+- `[panels] carry_new_windows = false`, yoki Settings'dagi "New windows in my hand" bandi.
+  O'chirilsa, oyna avvalgidek o'qish masofasida, yozishga tayyor holda ochiladi.
+- Skript va IPC orqali ochilgan oynalar ham shunday ochiladi. Testlar buni
+  `--no-carry-new-windows` yashirin bayrog'i bilan o'chiradi.
+
+### Tana: F5 (ko'rinish) va F6 (animatsiyalar) (src/world/character.rs, body.rs)
+
+**Personaj:** KayKit Adventurers to'plamidagi Knight, CC0. U `resources/characters/`
+papkasida, o'z LICENSE fayli bilan. Bitta `.glb` faylda mesh, 41 suyakli skelet,
+tekstura va 76 ta animatsiya bor. `gltf` crate faqat parser sifatida ishlatiladi.
+Qurollar olib tashlangan, dubulg'a va plash qolgan. Ular bosh va ko'krak suyagiga 100%
+bog'langan "qattiq" qismlar sifatida chiziladi, shuning uchun butun tana bitta mesh,
+~4700 uchburchak va bitta draw call.
+
+**Skeletli animatsiya qanday ishlaydi:**
+1. Har bir vertex 4 tagacha suyakka og'irlik (weight) bilan bog'langan.
+2. Animatsiya har bir suyakning siljishi, aylanishi va masshtabi uchun keyframe'lardan
+   iborat. Hozirgi vaqt t uchun suyak holati qo'shni keyframe'lar orasida interpolyatsiya
+   qilinadi: siljish va masshtab uchun `lerp`, aylanish uchun `slerp`.
+3. Suyaklar daraxt bo'ylab ko'paytiriladi: `ota * bola`.
+4. Har bir suyak uchun `global * inverse_bind` matritsasi vertex shader'ga beriladi.
+   `inverse_bind` suyak mesh'ga ulangan paytdagi holatni bekor qiladi.
+5. GPU vertex'ni og'irliklari bo'yicha 4 ta matritsa aralashmasi bilan suradi.
+
+Animatsiyalar orasidagi o'tish 0.2 s davom etadi (crossfade).
+
+**F5** (Walk rejimida) ko'rinishni almashtiradi: ko'z → orqadan → oldidan → ko'z.
+- Faqat surat olinadigan kamera suriladi. Nishon olish, oynani bosish va ko'tarish
+  avvalgidek ko'zdan ishlaydi (o'yinlardagi kabi).
+- Kamera ko'zdan orqaga qarab nur otadi va devordan 0.25 m oldin to'xtaydi, shuning uchun
+  devor ichiga kirib ketmaydi.
+- Kamera ko'zdan 0.35 m yuqorida turadi va biroz pastga qaraydi, shunda butun gavda
+  ko'rinadi.
+
+Animatsiyalar o'zi tanlanadi: turish, yurish, yugurish, orqaga yurish va havoda.
+
+**F6** 9 ta animatsiyali menyuni ochadi: Cheer, Sit, Lie down, Punch, Kick, Magic, Roll,
+Pick up va Fall down.
+- Tanlash: 1–9 raqamlari, sichqoncha yoki strelkalar + Enter. Esc yoki F6 menyuni yopadi.
+- Sit va Lie down avval o'tirish yoki yotish harakatini qiladi, keyin shu holatda
+  tsiklda qoladi. Fall down oxirgi holatda qoladi.
+- Yurishni boshlasangiz, animatsiya to'xtaydi.
+- Animatsiyani ko'z rejimida tanlasangiz, ko'rinish o'zi oldinga o'tadi, aks holda uni
+  ko'rmagan bo'lardingiz.
+
+**Yuk:**
+- Ko'z rejimida tana chizilmaydi, turganda 0 fps.
+- Uchinchi shaxsda turganingizda Idle animatsiyasi sekundiga 15 kadr bilan ishlaydi,
+  uni taymer uyg'otadi.
+- Yurganda kadrlar baribir har safar chiziladi.
+
+Test: `tests/e2e/stage14_body.sh`.

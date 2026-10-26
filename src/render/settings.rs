@@ -33,6 +33,7 @@ pub enum Setting {
     DimUnfocused,
     FocusZoom,
     AutoTilt,
+    CarryNew,
     LockAfter,
     RestoreApps,
     Dock,
@@ -42,7 +43,7 @@ pub enum Setting {
     Building,
 }
 
-pub const SETTINGS: [Setting; 19] = [
+pub const SETTINGS: [Setting; 20] = [
     Setting::MouseSpeed,
     Setting::InvertY,
     Setting::Fov,
@@ -55,6 +56,7 @@ pub const SETTINGS: [Setting; 19] = [
     Setting::DimUnfocused,
     Setting::FocusZoom,
     Setting::AutoTilt,
+    Setting::CarryNew,
     Setting::LockAfter,
     Setting::RestoreApps,
     Setting::Dock,
@@ -118,6 +120,7 @@ impl Setting {
             Setting::DimUnfocused => "Dim other windows",
             Setting::FocusZoom => "Zoom into windows",
             Setting::AutoTilt => "Carried windows face me",
+            Setting::CarryNew => "New windows in my hand",
             Setting::LockAfter => "Lock screen after",
             Setting::RestoreApps => "Reopen apps at start",
             Setting::Dock => "Dock",
@@ -157,6 +160,7 @@ impl Setting {
             Setting::DimUnfocused => yes(c.panels.dim_unfocused),
             Setting::FocusZoom => yes(c.panels.focus_zoom),
             Setting::AutoTilt => yes(c.panels.auto_tilt),
+            Setting::CarryNew => yes(c.panels.carry_new_windows),
             Setting::LockAfter => match c.desktop.lock_after_minutes {
                 0 => "never".into(),
                 m => format!("{m} min"),
@@ -212,6 +216,7 @@ impl Setting {
             Setting::DimUnfocused => ("panels", "dim_unfocused", flip(c.panels.dim_unfocused)),
             Setting::FocusZoom => ("panels", "focus_zoom", flip(c.panels.focus_zoom)),
             Setting::AutoTilt => ("panels", "auto_tilt", flip(c.panels.auto_tilt)),
+            Setting::CarryNew => ("panels", "carry_new_windows", flip(c.panels.carry_new_windows)),
             Setting::LockAfter => {
                 let f: Vec<f64> = LOCK_MINUTES.iter().map(|&m| m as f64).collect();
                 let i = nearest(&f, c.desktop.lock_after_minutes as f64);

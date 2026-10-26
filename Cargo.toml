@@ -55,6 +55,10 @@ wayland-egl = "0.32"
 png = "0.18"
 # The map textures (resources/maps/*/textures) are JPEGs: a small, pure-Rust decoder.
 zune-jpeg = "0.4"
+# The character (resources/characters/*.glb): glTF with skeleton and animations. Only
+# the parser: the file is one .glb with everything inside, so no file loading or image
+# crates are needed (its PNG texture goes through `png`).
+gltf = { version = "1", default-features = false, features = ["utils", "names"] }
 # Safe casts of vertex structs to bytes for GL buffer uploads.
 bytemuck = { version = "1", features = ["derive"] }
 notify = { version = "8", default-features = false }

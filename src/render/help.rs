@@ -121,6 +121,10 @@ pub fn help_columns(
         ]);
     }
     right.extend([
+        header("You"),
+        row("F5", "view: eyes / behind / in front"),
+        row("F6", "emotes (9 animations)"),
+        Line::default(),
         header("Desktop"),
         row(&keys(&binds.lock), "lock the screen"),
         row(&keys(&binds.screenshot), "screenshot (+ clipboard)"),

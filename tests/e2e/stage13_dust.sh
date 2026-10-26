@@ -13,7 +13,7 @@ go() { kc teleport "$1" "$2" "$3" --yaw "$4" --pitch 0 >/dev/null; sleep 0.2; kc
 
 CFG="$OUT/dust-config-$$.toml"
 printf '[world]\nmap = "dust"\n' >"$CFG"
-space_start --render 3d --map dust --config "$CFG" --log-level debug
+space_start --render 3d --map dust --carry --config "$CFG" --log-level debug
 sleep 1.5
 grep -q "map built" "$OUT/spacewm.log" || fail "no map built"
 grep -q "map uploaded" "$OUT/spacewm.log" || fail "map not uploaded to the GPU"
@@ -47,16 +47,18 @@ python3 -c "exit(0 if $Z < -24 else 1)" || fail "stopped on the stairs: z $Z"
 shot s13-asite >/dev/null
 pass "stairs are walked up without jumping (eye y $Y on A site)"
 
-# ---- A window hangs on a wall: carry it to the west wall of T spawn (x = -22).
+# ---- A window you open comes in your hand, farther than reading distance; carry it
+# to the west wall of T spawn (x = -22), where it hangs flat.
 kc teleport -19 1.62 45 --yaw -90 --pitch 0 >/dev/null
 sleep 0.3
-kc spawn foot >/dev/null
+kc input key Super+Return
 wait_windows 1
 sleep 0.8
-kc mode walk
-sleep 0.3
-kc input key Super+g
-sleep 0.2
+grep -q "new window in your hand" "$OUT/spacewm.log" || fail "the new window was not put in your hand"
+[ "$(focused)" = "[]" ] || fail "a carried window should not take the keyboard yet: $(focused)"
+D=$(sed -n 's/.*new window in your hand panel=[0-9]* distance=\([0-9.]*\).*/\1/p' "$OUT/spacewm.log" | tail -1)
+python3 -c "exit(0 if 1.2 <= $D <= 3.0 else 1)" || fail "carried at $D m"
+pass "a new window comes in your hand, $D m away"
 kc teleport -21 1.62 45 --yaw -90 --pitch 0 >/dev/null
 sleep 0.4
 kc input key Super+g
@@ -72,8 +74,8 @@ kc input key Escape
 sleep 0.3
 grep -q "settings opened" "$OUT/spacewm.log" || fail "Escape did not open the settings"
 shot s13-settings >/dev/null
-# Rows from 50 px, 30 px each, in a box 470x682 centered: row 4 is the time of day.
-row() { kc input move-to 640 $(( (720 - 682) / 2 + 50 + $1 * 30 + 15 )); kc input click; sleep 1.2; }
+# Rows from 50 px, 30 px each, in a box 470x712 centered: row 4 is the time of day.
+row() { kc input move-to 640 $(( (720 - 712) / 2 + 50 + $1 * 30 + 15 )); kc input click; sleep 1.2; }
 SHADOWS0=$(grep -c "shadow map drawn" "$OUT/spacewm.log")
 row 4
 grep -q '^time_of_day = "afternoon"' "$CFG" || fail "time of day not saved: $(grep time_of_day "$CFG")"

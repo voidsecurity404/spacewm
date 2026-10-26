@@ -376,6 +376,8 @@ pub struct Panels {
     pub focus_zoom: bool,
     /// A carried window leans to face you: put it up high and it looks down at you.
     pub auto_tilt: bool,
+    /// A window you open comes in your hand (carried, like Mod+G): click to put it down.
+    pub carry_new_windows: bool,
 }
 
 impl Default for Panels {
@@ -386,6 +388,7 @@ impl Default for Panels {
             dim_unfocused: true,
             focus_zoom: true,
             auto_tilt: true,
+            carry_new_windows: true,
         }
     }
 }
