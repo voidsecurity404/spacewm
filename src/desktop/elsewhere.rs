@@ -99,7 +99,11 @@ impl SpaceState {
         if pids.is_empty() {
             return false;
         }
-        tracing::info!(app, ?pids, "already open outside spacewm: not started, it would open there");
+        tracing::info!(
+            app,
+            ?pids,
+            "already open outside spacewm: not started, it would open there"
+        );
         if self.confirm.is_some() || self.desktop.moving.is_some() {
             self.show_info(format!("{app} is open outside spacewm: answer the question first."));
             return true;

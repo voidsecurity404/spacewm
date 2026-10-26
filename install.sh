@@ -29,12 +29,18 @@ TEST_TOOLS=1
 #   xorg-xwayland: X11 apps (Steam, games...) inside spacewm
 #   xdg-desktop-portal-gtk / -wlr: file pickers and screenshots, see spacewm-portals.conf
 #   sddm: the login screen
+#   grim, slurp: screenshots (Print, Shift+Print)
+#   swaylock: the lock screen (Mod+L, and after 10 min idle)
+#   wireplumber (wpctl), pipewire: volume and mic keys
+#   brightnessctl: brightness keys
 CORE_PACKAGES=(
     rust base-devel git pkgconf
     seatd systemd libinput mesa libxkbcommon wayland libdrm
     xorg-xwayland
     xdg-desktop-portal xdg-desktop-portal-gtk xdg-desktop-portal-wlr
     sddm
+    grim slurp swaylock
+    wireplumber pipewire brightnessctl
 )
 
 # Terminal, bar, notifications, launcher: used by spacewm's dock and the e2e tests.
