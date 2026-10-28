@@ -31,7 +31,8 @@ TEST_TOOLS=1
 VIRT=none
 
 # Packages spacewm needs at build time (pkg-config files) and at run time.
-#   rust, base-devel, git, pkgconf: compile spacewm (git fetches smithay from GitHub)
+#   rust, base-devel, git, pkgconf: compile spacewm (git fetches smithay from GitHub).
+#     rust is added only when there is no rustup: the two packages conflict.
 #   seatd (libseat), systemd (libudev), libinput, mesa (gbm), libxkbcommon, wayland,
 #   libdrm: system libraries the Rust crates link against
 #   xorg-xwayland: X11 apps (Steam, games...) inside spacewm
@@ -42,8 +43,9 @@ VIRT=none
 #   wireplumber (wpctl), pipewire: volume and mic keys
 #   brightnessctl: brightness keys
 #   mesa-utils: glxinfo, to check which GPU driver is in use
+#   foot: the default terminal (Mod+Enter, the dock)
 CORE_PACKAGES=(
-    rust base-devel git pkgconf
+    base-devel git pkgconf
     seatd systemd libinput mesa libxkbcommon wayland libdrm
     xorg-xwayland
     xdg-desktop-portal xdg-desktop-portal-gtk xdg-desktop-portal-wlr
@@ -51,10 +53,11 @@ CORE_PACKAGES=(
     grim slurp swaylock
     wireplumber pipewire brightnessctl
     mesa-utils
+    foot
 )
 
-# Terminal, bar, notifications, launcher: used by spacewm's dock and the e2e tests.
-TEST_PACKAGES=(foot weston waybar mako fuzzel libnotify xterm)
+# Bar, notifications, launcher, extra terminals: used by the e2e tests.
+TEST_PACKAGES=(weston waybar mako fuzzel libnotify xterm)
 
 log() { printf '\n==> %s\n' "$*"; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
@@ -96,12 +99,44 @@ check_system() {
 
 check_other_login_managers() {
     # Two login managers would fight over the screen at boot. Stop before changing anything.
-    local dm
-    for dm in gdm lightdm greetd ly; do
-        if systemctl is-enabled --quiet "$dm.service" 2>/dev/null; then
-            die "$dm is enabled as the login manager. Disable it first: sudo systemctl disable $dm.service"
-        fi
-    done
+    # Every login manager enables itself as the display-manager.service alias, so that one
+    # link names whichever is active (gdm, lightdm, greetd, ly, plasmalogin, lxdm...).
+    local link dm
+    link=$(readlink /etc/systemd/system/display-manager.service 2>/dev/null || true)
+    [ -n "$link" ] || return 0
+    dm=$(basename "$link" .service)
+    if [ "$dm" != sddm ]; then
+        die "$dm is enabled as the login manager. Disable it first: sudo systemctl disable $dm.service"
+    fi
+}
+
+# SDDM autologin skips the session menu, so spacewm could never be picked. Only warn:
+# the installer does not edit another desktop's login settings.
+check_sddm_autologin() {
+    local session
+    session=$(grep -hs '^Session=' /etc/sddm.conf /etc/sddm.conf.d/*.conf | tail -1 | cut -d= -f2- || true)
+    if [ -n "$session" ] && [ "$session" != spacewm.desktop ]; then
+        warn "SDDM logs in automatically to \"$session\", so the session menu never shows."
+        warn "  To pick spacewm: log out of that session (SDDM then shows the menu), or set"
+        warn "  Session=spacewm.desktop in the [Autologin] section of /etc/sddm.conf.d/*.conf."
+    fi
+}
+
+# Cargo.toml asks for a minimum Rust version (rust-version). pacman's rust is current; a
+# rustup toolchain may be old or missing, so it is updated here (it lives in ~/.rustup,
+# no sudo needed).
+check_rust() {
+    command -v rustup >/dev/null || return 0
+    local need have
+    need=$(sed -n 's/^rust-version = "\(.*\)"/\1/p' "$REPO/Cargo.toml")
+    have=$(rustc --version 2>/dev/null | cut -d' ' -f2 || true)
+    if [ -z "$have" ]; then
+        log "rustup has no default toolchain: installing stable"
+        run rustup default stable
+    elif [ -n "$need" ] && [ "$(printf '%s\n%s\n' "$need" "$have" | sort -V | head -1)" != "$need" ]; then
+        log "Rust $have is older than the $need spacewm needs: updating the toolchain"
+        run rustup update
+    fi
 }
 
 detect_vm() {
@@ -111,25 +146,14 @@ detect_vm() {
     [ "$VIRT" = none ] || log "Running inside a virtual machine: $VIRT"
 }
 
-# The kernel headers that match the running kernel: DKMS builds the VirtualBox guest
-# modules against them.
-kernel_headers_package() {
-    case "$(uname -r)" in
-        *cachyos*) echo linux-cachyos-headers ;;
-        *omarchy*) echo linux-omarchy-headers ;;
-        *zen*) echo linux-zen-headers ;;
-        *lts*) echo linux-lts-headers ;;
-        *) echo linux-headers ;;
-    esac
-}
-
 install_packages() {
     local packages=("${CORE_PACKAGES[@]}")
+    command -v rustup >/dev/null || packages+=(rust)
     [ "$TEST_TOOLS" = 1 ] && packages+=("${TEST_PACKAGES[@]}")
     if [ "$VIRT" = oracle ]; then
-        # Guest tools: mouse integration, screen resize and the clipboard. The DKMS module
-        # needs the headers of the running kernel.
-        packages+=(virtualbox-guest-utils virtualbox-guest-dkms "$(kernel_headers_package)")
+        # Guest tools: mouse integration, screen resize and the clipboard. The guest kernel
+        # modules (vboxguest, vboxsf, vboxvideo) are part of the Arch kernel, so no DKMS.
+        packages+=(virtualbox-guest-utils)
     fi
     log "Installing packages with pacman (full system upgrade first, as Arch requires)"
     # --needed skips what is already there. A partial upgrade (-Sy without -u) is not
@@ -142,7 +166,9 @@ install_packages() {
 
 build() {
     log "Building spacewm (release). Cargo fetches smithay from GitHub on the first run."
-    run cargo build --release --bins --manifest-path "$REPO/Cargo.toml"
+    # --target-dir: a CARGO_TARGET_DIR set in the environment would put the binaries
+    # somewhere install_files does not look.
+    run cargo build --release --bins --manifest-path "$REPO/Cargo.toml" --target-dir "$REPO/target"
 }
 
 install_files() {
@@ -202,8 +228,14 @@ verify() {
     command -v spacewm >/dev/null || die "spacewm is not on PATH after install"
     command -v spacectl >/dev/null || die "spacectl is not on PATH after install"
     [ -f /usr/share/wayland-sessions/spacewm.desktop ] || die "session entry missing"
-    # Reads ~/.config/spacewm/config.toml and reports errors; it creates nothing.
-    "$REPO/target/release/spacewm" --check-config
+    command -v spacewm-session >/dev/null || die "spacewm-session is not on PATH after install"
+    [ -f /usr/share/xdg-desktop-portal/spacewm-portals.conf ] || die "portals config missing"
+    systemctl is-enabled --quiet sddm.service || die "sddm.service is not enabled"
+    # Reads ~/.config/spacewm/config.toml and reports errors; it creates nothing. With no
+    # config file spacewm uses its defaults, so there is nothing to check.
+    if [ -f "$CONFIG_FILE" ]; then
+        /usr/local/bin/spacewm --check-config
+    fi
     echo "    spacewm is installed. Reboot, then pick \"spacewm\" in the SDDM menu."
     if [ "$VIRT" = oracle ]; then
         cat <<'EOF'
@@ -225,11 +257,13 @@ main() {
     check_other_login_managers
     detect_vm
     install_packages
+    check_rust
     build
     install_files
     configure_vm
     enable_sddm
     verify
+    check_sddm_autologin
 }
 
 # Run main only when executed, not when this file is sourced for testing.
