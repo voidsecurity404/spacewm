@@ -1067,40 +1067,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "spacewm"
-version = "0.0.1"
-dependencies = [
- "anyhow",
- "bytemuck",
- "calloop",
- "clap",
- "directories",
- "fontdue",
- "glam 0.30.10",
- "gltf",
- "libc",
- "notify",
- "png",
- "rustix 1.1.5",
- "serde",
- "serde_json",
- "shell-words",
- "smithay",
- "smithay-drm-extras",
- "thiserror 2.0.21",
- "toml 0.9.12+spec-1.1.0",
- "toml_edit",
- "tracing",
- "tracing-subscriber",
- "tracing-tracy",
- "wayland-client",
- "wayland-egl",
- "wayland-protocols",
- "xcursor",
- "zune-jpeg",
-]
-
-[[package]]
 name = "lazy_static"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2031,6 +1997,40 @@ checksum = "eeb7109d23f319619d4cc0de5464613c8b7b1a09db2774a58101459cf6be2f10"
 dependencies = [
  "borsh",
  "serde_core",
+]
+
+[[package]]
+name = "spacewm"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "calloop",
+ "clap",
+ "directories",
+ "fontdue",
+ "glam 0.30.10",
+ "gltf",
+ "libc",
+ "notify",
+ "png",
+ "rustix 1.1.5",
+ "serde",
+ "serde_json",
+ "shell-words",
+ "smithay",
+ "smithay-drm-extras",
+ "thiserror 2.0.21",
+ "toml 0.9.12+spec-1.1.0",
+ "toml_edit",
+ "tracing",
+ "tracing-subscriber",
+ "tracing-tracy",
+ "wayland-client",
+ "wayland-egl",
+ "wayland-protocols",
+ "xcursor",
+ "zune-jpeg",
 ]
 
 [[package]]
