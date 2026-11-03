@@ -923,6 +923,8 @@ fn on_vblank(
         Err(e) => tracing::warn!("frame_submitted failed: {e:?}"),
     }
     let now = Instant::now();
+    let early_by =
+        surface.last_flip.and_then(|last| early_flip_delay(now - last, surface.frame_duration));
     surface.flips += 1;
     if let Some(last) = surface.last_flip {
         // More than 1.5 refreshes between flips while animating: a missed vblank.
@@ -933,12 +935,40 @@ fn on_vblank(
     surface.last_flip = Some(now);
     let again = animating
         || matches!(surface.redraw, RedrawState::WaitingForVBlank { redraw_needed: true, .. });
-    if again {
-        surface.redraw = RedrawState::Queued;
-        b.loop_handle.insert_idle(move |state| render(state, crtc));
-    } else {
+    if !again {
         surface.redraw = RedrawState::Idle;
+        return;
     }
+    // The flip came long before the next refresh: wait out the rest of it (see
+    // `early_flip_delay`). `redraw_needed: true` makes `estimated_vblank` render then.
+    let token = early_by.and_then(|delay| {
+        b.loop_handle
+            .insert_source(Timer::from_duration(delay), move |_, _, state| {
+                estimated_vblank(state, crtc);
+                TimeoutAction::Drop
+            })
+            .ok()
+    });
+    match token {
+        Some(token) => {
+            surface.redraw = RedrawState::WaitingForEstimatedVBlank { token, redraw_needed: true };
+        }
+        None => {
+            surface.redraw = RedrawState::Queued;
+            b.loop_handle.insert_idle(move |state| render(state, crtc));
+        }
+    }
+}
+
+/// How long to hold the next frame when a page flip finished too soon, if at all.
+///
+/// A page flip normally completes at a vblank, so waiting for it paces us to the monitor.
+/// Virtual GPUs (vmwgfx in VirtualBox) can report a flip as done at once. Rendering again
+/// right away then queues frames faster than the host draws them, and the picture falls
+/// seconds behind the input. Real flips are one refresh apart or more, so only a gap under
+/// half a refresh counts as early and real hardware keeps its timing.
+fn early_flip_delay(since_last_flip: Duration, frame_duration: Duration) -> Option<Duration> {
+    (since_last_flip < frame_duration / 2).then(|| frame_duration - since_last_flip)
 }
 
 fn estimated_vblank(state: &mut SpaceState, crtc: crtc::Handle) {
@@ -1001,6 +1031,22 @@ pub fn probe() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use super::early_flip_delay;
+    use std::time::Duration;
+
+    #[test]
+    fn only_a_flip_under_half_a_refresh_is_early() {
+        let frame = Duration::from_micros(16_667);
+        assert_eq!(early_flip_delay(frame, frame), None, "a normal flip");
+        assert_eq!(early_flip_delay(frame / 2, frame), None, "the limit");
+        assert_eq!(early_flip_delay(Duration::from_secs(5), frame), None, "after idle");
+        assert_eq!(
+            early_flip_delay(Duration::from_millis(1), frame),
+            Some(frame - Duration::from_millis(1)),
+            "the rest of the refresh",
+        );
+    }
+
     #[test]
     fn hidpi_threshold() {
         // A 14" 2560x1600 laptop panel (~301 mm wide) is HiDPI; a 24" 1080p monitor is not.
