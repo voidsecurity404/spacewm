@@ -117,7 +117,7 @@ because two login managers would fight over the screen at boot. Disable it first
 | Sound and brightness | `wireplumber`, `pipewire`, `brightnessctl` | volume, microphone and brightness keys |
 | Terminal | `foot` | the default terminal (Mod+Enter, the dock) |
 | GPU check | `mesa-utils` | `glxinfo`, to see which GPU driver is in use |
-| Test tools (optional) | `weston`, `waybar`, `mako`, `fuzzel`, `libnotify`, `xterm` | the programs the test suite uses |
+| Test tools (optional) | `weston`, `waybar`, `mako`, `fuzzel`, `libnotify`, `xterm`, `wayland-utils` | the programs the test suite uses |
 
 ### What it does not touch
 

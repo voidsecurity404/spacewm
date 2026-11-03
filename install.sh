@@ -58,7 +58,7 @@ CORE_PACKAGES=(
 )
 
 # Bar, notifications, launcher, extra terminals: used by the e2e tests.
-TEST_PACKAGES=(weston waybar mako fuzzel libnotify xterm)
+TEST_PACKAGES=(weston waybar mako fuzzel libnotify xterm wayland-utils)
 
 log() { printf '\n==> %s\n' "$*"; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
