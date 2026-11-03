@@ -8,7 +8,7 @@
 #
 #   ./install.sh                    install everything
 #   ./install.sh --dry-run          print what would run, change nothing
-#   ./install.sh --no-test-tools    only spacewm and what it needs (no foot, weston, waybar...)
+#   ./install.sh --no-test-tools    only spacewm and what it needs (no weston, waybar...)
 #
 # Inside a VirtualBox VM the installer also: installs the VirtualBox guest tools, makes
 # Alt the Mod key (VirtualBox passes Super to the host), and turns off direct panels and
@@ -34,7 +34,8 @@ VIRT=none
 #   rust, base-devel, git, pkgconf: compile spacewm (git fetches smithay from GitHub).
 #     rust is added only when there is no rustup: the two packages conflict.
 #   seatd (libseat), systemd (libudev), libinput, mesa (gbm), libxkbcommon, wayland,
-#   libdrm: system libraries the Rust crates link against
+#   libdrm, libdisplay-info (monitor names from EDID): system libraries the Rust crates
+#   link against
 #   xorg-xwayland: X11 apps (Steam, games...) inside spacewm
 #   xdg-desktop-portal-gtk / -wlr: file pickers and screenshots, see spacewm-portals.conf
 #   sddm: the login screen
@@ -46,7 +47,7 @@ VIRT=none
 #   foot: the default terminal (Mod+Enter, the dock)
 CORE_PACKAGES=(
     base-devel git pkgconf
-    seatd systemd libinput mesa libxkbcommon wayland libdrm
+    seatd systemd libinput mesa libxkbcommon wayland libdrm libdisplay-info
     xorg-xwayland
     xdg-desktop-portal xdg-desktop-portal-gtk xdg-desktop-portal-wlr
     sddm
@@ -73,7 +74,7 @@ run() {
 }
 
 usage() {
-    sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 parse_args() {

@@ -96,7 +96,7 @@ Useful options:
 
 ```sh
 ./install.sh --dry-run          # print every command it would run, change nothing
-./install.sh --no-test-tools    # only spacewm and what it needs (no foot, weston, waybar, ...)
+./install.sh --no-test-tools    # only spacewm and what it needs (no weston, waybar, ...)
 ```
 
 The script refuses to run if another login manager (GDM, LightDM, greetd, ly) is enabled,
@@ -108,14 +108,16 @@ because two login managers would fight over the screen at boot. Disable it first
 | Group | Packages | Why |
 |---|---|---|
 | Build | `rust`, `base-devel`, `git`, `pkgconf` | compile spacewm; `git` fetches smithay from GitHub |
-| System libraries | `seatd`, `systemd`, `libinput`, `mesa`, `libxkbcommon`, `wayland`, `libdrm` | the native libraries spacewm links to (input, GPU, keyboard, session) |
+| System libraries | `seatd`, `systemd`, `libinput`, `mesa`, `libxkbcommon`, `wayland`, `libdrm`, `libdisplay-info` | the native libraries spacewm links to (input, GPU, keyboard, session) |
 | X11 apps | `xorg-xwayland` | run X11 programs inside spacewm |
 | Portals | `xdg-desktop-portal`, `-gtk`, `-wlr` | file pickers, screenshots and screen sharing for apps |
 | Login screen | `sddm` | the screen where you choose the session |
 | Screenshots | `grim`, `slurp` | Print and Shift+Print |
 | Lock screen | `swaylock` | Super+L, and automatic lock after 10 minutes idle |
 | Sound and brightness | `wireplumber`, `pipewire`, `brightnessctl` | volume, microphone and brightness keys |
-| Test tools (optional) | `foot`, `weston`, `waybar`, `mako`, `fuzzel`, `libnotify`, `xterm` | the terminal used by the dock, and the programs the test suite uses |
+| Terminal | `foot` | the default terminal (Mod+Enter, the dock) |
+| GPU check | `mesa-utils` | `glxinfo`, to see which GPU driver is in use |
+| Test tools (optional) | `weston`, `waybar`, `mako`, `fuzzel`, `libnotify`, `xterm` | the programs the test suite uses |
 
 ### What it does not touch
 
