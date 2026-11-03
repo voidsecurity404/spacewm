@@ -734,6 +734,12 @@ fn draw_panels(
         }
         program.set_vec4(gl, "u_geo_rect", p.geo_rect);
         program.set_f32(gl, "u_border_px", p.border_px);
+        unsafe {
+            // The border is outside the window: the quad grows by it on each side.
+            let loc = program.uniform_location(gl, "u_grow");
+            let (w, h) = (p.tex_size.x.max(1.0), p.tex_size.y.max(1.0));
+            gl.uniform_2_f32(loc.as_ref(), p.border_px / w, p.border_px / h);
+        }
         program.set_vec4(gl, "u_border_color", p.border_color);
         quad.draw(gl);
     }

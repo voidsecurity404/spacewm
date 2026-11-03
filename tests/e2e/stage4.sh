@@ -35,10 +35,10 @@ D=$($PX diff "$A" "$B")
 python3 -c "exit(0 if $D == 0 else 1)" || fail "typing in Walk mode changed the panel ($D)"
 pass "Walk mode keeps keys from clients"
 
-# Looking at the panel highlights it (light blue border on the left edge at x≈350).
+# Looking at the panel highlights it (light blue border just outside the left edge).
 # At 1 m the panel shows 0.5865 screen px per window px: 994 px wide -> 583 px, so its
-# left edge is at 640 - 291.5.
-$PX near "$A" 350 360 115 191 255 70 >/dev/null || fail "no hover border: $($PX "$A" 350 360)"
+# left edge is at 640 - 291.5 = 348.5, and the 6 px border covers about 345..348.
+$PX near "$A" 347 360 115 191 255 70 >/dev/null || fail "no hover border: $($PX "$A" 347 360)"
 pass "hovered panel has a highlight border"
 
 # Left click enters it; the border turns orange and typing goes in.
@@ -46,7 +46,7 @@ kc input click
 sleep 0.3
 [ "$(focused)" = "[1]" ] || fail "click did not enter the panel: $(focused)"
 C=$(shot s4-entered)
-$PX near "$C" 350 360 255 158 46 70 >/dev/null || fail "no focus border: $($PX "$C" 350 360)"
+$PX near "$C" 347 360 255 158 46 70 >/dev/null || fail "no focus border: $($PX "$C" 347 360)"
 kc input type 'echo entered-by-click'; kc input key Return
 pass "left click enters the panel (orange border)"
 

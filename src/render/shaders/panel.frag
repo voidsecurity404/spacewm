@@ -25,17 +25,19 @@ void main() {
     // A client's own texture (shown directly, see panel_texture.rs) may be stored bottom
     // row first and may have no real alpha.
     vec2 uv = u_flip_y > 0.5 ? vec2(v_uv.x, 1.0 - v_uv.y) : v_uv;
-    vec4 c = texture(u_tex, uv);
-    if (u_opaque_rgb > 0.5) {
+    // The quad grows past the texture to make room for the border: nothing to sample there.
+    bool in_texture = v_uv.x >= 0.0 && v_uv.x <= 1.0 && v_uv.y >= 0.0 && v_uv.y <= 1.0;
+    vec4 c = in_texture ? texture(u_tex, uv) : vec4(0.0);
+    if (in_texture && u_opaque_rgb > 0.5) {
         c.a = 1.0;
     }
     vec2 px = v_uv * u_tex_size;
     vec4 g = u_geo_rect;
-    if (u_border_px > 0.0 && px.x >= g.x && px.y >= g.y && px.x < g.z && px.y < g.w) {
-        float d = min(min(px.x - g.x, g.z - px.x), min(px.y - g.y, g.w - px.y));
-        if (d < u_border_px) {
-            c = vec4(u_border_color.rgb * u_border_color.a, u_border_color.a);
-        }
+    // The border is drawn just outside the window geometry, so it never hides the app's
+    // own pixels (a terminal's first row, the buttons at a window's edge).
+    float outside = max(max(g.x - px.x, px.x - g.z), max(g.y - px.y, px.y - g.w));
+    if (u_border_px > 0.0 && outside > 0.0 && outside <= u_border_px) {
+        c = vec4(u_border_color.rgb * u_border_color.a, u_border_color.a);
     }
     if (!gl_FrontFacing) {
         // The back of a panel: a dark silhouette, so front and back are easy to tell
